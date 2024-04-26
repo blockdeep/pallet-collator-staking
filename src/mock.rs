@@ -1,5 +1,5 @@
 use super::*;
-use crate as collator_selection;
+use crate as collator_staking;
 use frame_support::{
     derive_impl, ord_parameter_types, parameter_types,
     traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
@@ -25,7 +25,7 @@ frame_support::construct_runtime!(
         Session: pallet_session,
         Aura: pallet_aura,
         Balances: pallet_balances,
-        CollatorSelection: collator_selection,
+        CollatorStaking: collator_staking,
         Authorship: pallet_authorship,
     }
 );
@@ -95,7 +95,7 @@ impl FindAuthor<u64> for Author4 {
 
 impl pallet_authorship::Config for Test {
     type FindAuthor = Author4;
-    type EventHandler = CollatorSelection;
+    type EventHandler = CollatorStaking;
 }
 
 impl pallet_timestamp::Config for Test {
@@ -159,7 +159,7 @@ impl pallet_session::Config for Test {
     type ValidatorIdOf = IdentityCollator;
     type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
     type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
-    type SessionManager = CollatorSelection;
+    type SessionManager = CollatorStaking;
     type SessionHandler = TestSessionHandler;
     type Keys = MockSessionKeys;
     type WeightInfo = ();
@@ -189,9 +189,13 @@ impl Config for Test {
     type MinEligibleCollators = ConstU32<1>;
     type MaxInvulnerables = ConstU32<20>;
     type KickThreshold = Period;
-    type ValidatorId = <Self as frame_system::Config>::AccountId;
-    type ValidatorIdOf = IdentityCollator;
-    type ValidatorRegistration = IsRegistered;
+    type CollatorId = <Self as frame_system::Config>::AccountId;
+    type CollatorIdOf = IdentityCollator;
+    type CollatorRegistration = IsRegistered;
+    type MinStake = ConstU64<1000>;
+    type MaxStakedCandidates = ConstU32<16>;
+    type CollatorUnstakingDelay = ConstU64<2>;
+    type UserUnstakingDelay = ConstU64<5>;
     type WeightInfo = ();
 }
 
@@ -215,17 +219,19 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
             )
         })
         .collect::<Vec<_>>();
-    let collator_selection = collator_selection::GenesisConfig::<Test> {
+    let collator_staking = collator_staking::GenesisConfig::<Test> {
         desired_candidates: 2,
+        extra_reward: 10,
         candidacy_bond: 10,
         invulnerables,
+        candidate_reward_percentage: Default::default(),
     };
     let session = pallet_session::GenesisConfig::<Test> { keys };
     pallet_balances::GenesisConfig::<Test> { balances }
         .assimilate_storage(&mut t)
         .unwrap();
     // collator selection must be initialized before session.
-    collator_selection.assimilate_storage(&mut t).unwrap();
+    collator_staking.assimilate_storage(&mut t).unwrap();
     session.assimilate_storage(&mut t).unwrap();
 
     t.into()

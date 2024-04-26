@@ -262,39 +262,6 @@ mod benchmarks {
         Ok(())
     }
 
-    #[benchmark]
-    fn update_bond(
-        c: Linear<{ min_candidates::<T>() + 1 }, { T::MaxCandidates::get() }>,
-    ) -> Result<(), BenchmarkError> {
-        <CandidacyBond<T>>::put(T::Currency::minimum_balance());
-        <DesiredCandidates<T>>::put(c);
-
-        register_validators::<T>(c);
-        register_candidates::<T>(c);
-
-        let caller = <CandidateList<T>>::get()[0].who.clone();
-        v2::whitelist!(caller);
-
-        let bond_amount: BalanceOf<T> =
-            T::Currency::minimum_balance() + T::Currency::minimum_balance();
-
-        #[extrinsic_call]
-        _(RawOrigin::Signed(caller.clone()), bond_amount);
-
-        assert_last_event::<T>(
-            Event::CandidateBondUpdated {
-                account_id: caller,
-                deposit: bond_amount,
-            }
-            .into(),
-        );
-        assert!(
-            <CandidateList<T>>::get().iter().last().unwrap().deposit
-                == T::Currency::minimum_balance() * 2u32.into()
-        );
-        Ok(())
-    }
-
     // worse case is when we have all the max-candidate slots filled except one, and we fill that
     // one.
     #[benchmark]
@@ -476,11 +443,14 @@ mod benchmarks {
                 .unwrap_or_default()
                 .try_into()
                 .unwrap_or_default();
-            assert!(min_candidates == current_length);
+            assert_eq!(min_candidates, current_length);
         } else {
             // removals >= candidates, non removals must == 0
             // can't remove more than exist
-            assert!(<CandidateList<T>>::decode_len().unwrap_or_default() == pre_length);
+            assert_eq!(
+                <CandidateList<T>>::decode_len().unwrap_or_default(),
+                pre_length
+            );
         }
     }
 
