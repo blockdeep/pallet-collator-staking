@@ -83,7 +83,6 @@ const LOG_TARGET: &str = "runtime::collator-staking";
 #[frame_support::pallet]
 pub mod pallet {
     pub use crate::weights::WeightInfo;
-    use core::ops::Div;
     use frame_support::{
         dispatch::{DispatchClass, DispatchResultWithPostInfo},
         pallet_prelude::*,
@@ -97,7 +96,7 @@ pub mod pallet {
     use pallet_session::SessionManager;
     use sp_runtime::Percent;
     use sp_runtime::{
-        traits::{AccountIdConversion, CheckedSub, Convert, Saturating, Zero},
+        traits::{AccountIdConversion, Convert, Saturating, Zero},
         RuntimeDebug,
     };
     use sp_staking::SessionIndex;
@@ -273,30 +272,42 @@ pub mod pallet {
 
     /// Percentage of rewards that would go for collators.
     #[pallet::storage]
-    pub type CandidateRewardPercentage<T: Config> = StorageValue<_, Percent, ValueQuery>;
-
-    /// Blocks produced by each collator in a given round.
-    #[pallet::storage]
-    pub type ProducedBlocks<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
+    pub type CollatorRewardPercentage<T: Config> = StorageValue<_, Percent, ValueQuery>;
 
     /// Per-block extra reward.
     #[pallet::storage]
-    pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+    pub type ExtraReward<T: Config> = StorageValue<_, (T::AccountId, BalanceOf<T>), OptionQuery>;
 
     /// Blocks produced in the current session.
     #[pallet::storage]
-    pub type TotalBlocks<T: Config> = StorageValue<_, u32, ValueQuery>;
+    pub type TotalBlocks<T: Config> =
+        StorageMap<_, Blake2_128Concat, SessionIndex, u32, ValueQuery>;
+
+    /// Rewards generated for a given session.
+    #[pallet::storage]
+    pub type Rewards<T: Config> =
+        StorageMap<_, Blake2_128Concat, SessionIndex, BalanceOf<T>, ValueQuery>;
+
+    /// Blocks produced by each collator in a given session.
+    #[pallet::storage]
+    pub type ProducedBlocks<T: Config> = StorageDoubleMap<
+        _,
+        Blake2_128Concat,
+        SessionIndex,
+        Blake2_128Concat,
+        T::AccountId,
+        u32,
+        ValueQuery,
+    >;
+
+    /// Current session index.
+    #[pallet::storage]
+    pub type CurrentSession<T: Config> = StorageValue<_, SessionIndex, ValueQuery>;
 
     /// Percentage of reward to be re-invested in collators.
     #[pallet::storage]
     pub type Autocompound<T: Config> =
         StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
-
-    /// Blocks produced in the current session.
-    #[pallet::storage]
-    pub type CurrentCollators<T: Config> =
-        StorageValue<_, BoundedVec<T::AccountId, MaxDesiredCandidates<T>>, ValueQuery>;
 
     #[pallet::genesis_config]
     #[derive(DefaultNoBound)]
@@ -304,7 +315,6 @@ pub mod pallet {
         pub invulnerables: Vec<T::AccountId>,
         pub candidacy_bond: BalanceOf<T>,
         pub desired_candidates: u32,
-        pub extra_reward: BalanceOf<T>,
         pub candidate_reward_percentage: Percent,
     }
 
@@ -334,8 +344,7 @@ pub mod pallet {
             <DesiredCandidates<T>>::put(self.desired_candidates);
             <CandidacyBond<T>>::put(self.candidacy_bond);
             <Invulnerables<T>>::put(bounded_invulnerables);
-            <ExtraReward<T>>::put(self.extra_reward);
-            <CandidateRewardPercentage<T>>::put(self.candidate_reward_percentage);
+            <CollatorRewardPercentage<T>>::put(self.candidate_reward_percentage);
         }
     }
 
@@ -386,6 +395,10 @@ pub mod pallet {
             staker: T::AccountId,
             amount: BalanceOf<T>,
             block: BlockNumberFor<T>,
+        },
+        StakingRewardReceived {
+            staker: T::AccountId,
+            amount: BalanceOf<T>,
         },
     }
 
@@ -783,16 +796,12 @@ pub mod pallet {
             );
 
             // only allow this operation if the candidate list is full
+            let length = CandidateList::<T>::decode_len().unwrap_or_default();
             ensure!(
-                CandidateList::<T>::decode_len().unwrap_or_default()
-                    >= T::MaxCandidates::get() as usize,
+                length >= T::MaxCandidates::get() as usize,
                 Error::<T>::CanRegister
             );
 
-            // And the caller is not already a collator
-            ensure!(Self::get_collator(&who).is_err(), Error::<T>::IsCollator);
-
-            let length = <CandidateList<T>>::decode_len().unwrap_or_default();
             let target_info = Self::try_remove_candidate_from_account(&target, true, false)?;
             ensure!(deposit > target_info.deposit, Error::<T>::InsufficientBond);
 
@@ -873,16 +882,6 @@ pub mod pallet {
             T::PotId::get().into_account_truncating()
         }
 
-        /// Checks whether a given account is a collator and returns its position if successful.
-        ///
-        /// Computes in **O(log n)** time.
-        fn get_collator(account: &T::AccountId) -> Result<usize, ()> {
-            match CurrentCollators::<T>::get().binary_search(account) {
-                Ok(pos) => Ok(pos),
-                Err(_) => Err(()),
-            }
-        }
-
         /// Checks whether a given account is a candidate and returns its position if successful.
         ///
         /// Computes in **O(n)** time.
@@ -941,7 +940,7 @@ pub mod pallet {
                     );
                     LastAuthoredBlock::<T>::insert(
                         who.clone(),
-                        frame_system::Pallet::<T>::block_number() + T::KickThreshold::get(),
+                        Self::current_block_number() + T::KickThreshold::get(),
                     );
                     let info = CandidateInfo {
                         who: who.clone(),
@@ -968,7 +967,7 @@ pub mod pallet {
         fn do_claim(who: &T::AccountId) -> DispatchResult {
             let mut claimed: BalanceOf<T> = 0u32.into();
             UnstakingRequests::<T>::try_mutate(who, |requests| {
-                let curr_block = frame_system::Pallet::<T>::block_number();
+                let curr_block = Self::current_block_number();
                 let mut pos = 0;
                 for request in requests.iter() {
                     if request.block > curr_block {
@@ -1096,7 +1095,7 @@ pub mod pallet {
                         T::UserUnstakingDelay::get()
                     };
                     UnstakingRequests::<T>::try_mutate(staker, |requests| -> DispatchResult {
-                        let block = frame_system::Pallet::<T>::block_number() + delay;
+                        let block = Self::current_block_number() + delay;
                         requests
                             .try_push(UnstakeRequest {
                                 block,
@@ -1153,6 +1152,64 @@ pub mod pallet {
             Self::try_remove_candidate_at_position(idx, remove_last_authored, has_penalty)
         }
 
+        fn do_reward_collator(collator: &T::AccountId, blocks: u32, session: SessionIndex) {
+            if let Ok(pos) = Self::get_candidate(collator) {
+                let collator_info = &CandidateList::<T>::get()[pos];
+                let total_rewards = Rewards::<T>::get(session);
+                let total_session_blocks = TotalBlocks::<T>::get(session);
+                let collator_percentage = CollatorRewardPercentage::<T>::get();
+
+                let rewards_all: BalanceOf<T> =
+                    total_rewards.saturating_mul(blocks.into()) / total_session_blocks.into();
+                let collator_only_reward = collator_percentage * rewards_all;
+
+                // Reward collator
+                if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
+                    log::warn!("Failure rewarding collator {}: {:?}", collator, error);
+                }
+
+                // Reward stakers
+                let stakers_only_rewards = total_rewards.saturating_sub(collator_only_reward);
+                Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
+                    let staker_reward: BalanceOf<T> =
+                        stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
+                    if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
+                        log::warn!("Failure rewarding staker {}: {:?}", staker, error);
+                    }
+                    // TODO autocompound
+                    let compound_percentage = Autocompound::<T>::get(staker.clone());
+                    let compound_amount = compound_percentage * stake;
+                    if !compound_amount.is_zero() {
+                        if let Err(error) =
+                            Self::do_stake_at_position(&staker, compound_amount, pos, false)
+                        {
+                            log::warn!(
+                                "Failure autocompounding for staker {} to candidate {}: {:?}",
+                                staker,
+                                collator,
+                                error
+                            );
+                        }
+                    }
+                });
+                let _ = Self::reassign_candidate_position(pos);
+            }
+        }
+
+        fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
+            T::Currency::transfer(&Self::account_id(), who, reward, KeepAlive)?;
+            Self::deposit_event(Event::StakingRewardReceived {
+                staker: who.clone(),
+                amount: reward,
+            });
+            Ok(())
+        }
+
+        /// Gets the current block number
+        pub fn current_block_number() -> BlockNumberFor<T> {
+            frame_system::Pallet::<T>::block_number()
+        }
+
         /// Assemble the current set of candidates and invulnerables into the next collator set.
         ///
         /// This is done on the fly, as frequent as we are told to do so, as the session manager.
@@ -1176,7 +1233,7 @@ pub mod pallet {
         ///
         /// Return value is the number of candidates left in the list.
         pub fn kick_stale_candidates(candidates: impl IntoIterator<Item = T::AccountId>) -> u32 {
-            let now = frame_system::Pallet::<T>::block_number();
+            let now = Self::current_block_number();
             let kick_threshold = T::KickThreshold::get();
             let min_collators = T::MinEligibleCollators::get();
             candidates
@@ -1241,22 +1298,30 @@ pub mod pallet {
         }
     }
 
-    /// Keep track of number of authored blocks per authority, uncles are counted as well since
+    /// Keep track of number of authored blocks per authority. Uncles are counted as well since
     /// they're a valid proof of being online.
     impl<T: Config + pallet_authorship::Config>
         pallet_authorship::EventHandler<T::AccountId, BlockNumberFor<T>> for Pallet<T>
     {
         fn note_author(author: T::AccountId) {
-            let pot = Self::account_id();
-            // assumes an ED will be sent to pot.
-            let reward = T::Currency::free_balance(&pot)
-                .checked_sub(&T::Currency::minimum_balance())
-                .unwrap_or_else(Zero::zero)
-                .div(2u32.into());
-            // `reward` is half of pot account minus ED, this should never fail.
-            let _success = T::Currency::transfer(&pot, &author, reward, KeepAlive);
-            debug_assert!(_success.is_ok());
-            LastAuthoredBlock::<T>::insert(author, frame_system::Pallet::<T>::block_number());
+            let current_session = CurrentSession::<T>::get();
+            LastAuthoredBlock::<T>::insert(author.clone(), Self::current_block_number());
+            TotalBlocks::<T>::mutate(current_session, |total| total.saturating_inc());
+
+            if !Self::is_invulnerable(&author) {
+                // Invulnerables do not get rewards
+                ProducedBlocks::<T>::mutate(current_session, author, |b| b.saturating_inc());
+            }
+
+            // Reward one collator
+            if current_session > 0 {
+                let session = current_session - 1;
+                ProducedBlocks::<T>::iter_prefix(session)
+                    .take(1)
+                    .for_each(|(collator, blocks)| {
+                        Self::do_reward_collator(&collator, blocks, session);
+                    });
+            }
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(
                 T::WeightInfo::note_author(),
@@ -1277,20 +1342,17 @@ pub mod pallet {
             // The `expect` below is safe because the list is a `BoundedVec` with a max size of
             // `T::MaxCandidates`, which is a `u32`. When `decode_len` returns `Some(len)`, `len`
             // must be valid and at most `u32::MAX`, which must always be able to convert to `u32`.
-            let candidates_len_before: u32 = <CandidateList<T>>::decode_len()
+            let candidates_len_before: u32 = CandidateList::<T>::decode_len()
                 .unwrap_or_default()
                 .try_into()
                 .expect("length is at most `T::MaxCandidates`, so it must fit in `u32`; qed");
             let active_candidates_count = Self::kick_stale_candidates(
-                <CandidateList<T>>::get()
+                CandidateList::<T>::get()
                     .iter()
                     .map(|candidate_info| candidate_info.who.clone()),
             );
             let removed = candidates_len_before.saturating_sub(active_candidates_count);
             let result = Self::assemble_collators();
-            <CurrentCollators<T>>::put(
-                BoundedVec::try_from(result.clone()).expect("Too many collators"),
-            );
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(
                 T::WeightInfo::new_session(candidates_len_before, removed),
@@ -1298,11 +1360,31 @@ pub mod pallet {
             );
             Some(result)
         }
-        fn start_session(_: SessionIndex) {
-            // we don't care.
+
+        fn start_session(session: SessionIndex) {
+            // Initialize counters
+            let _ = ProducedBlocks::<T>::clear(u32::MAX, None);
+            TotalBlocks::<T>::set(session, 0);
+            CurrentSession::<T>::set(session);
         }
-        fn end_session(_: SessionIndex) {
-            // we don't care.
+
+        fn end_session(session: SessionIndex) {
+            let pot_account = Self::account_id();
+            let produced_blocks = TotalBlocks::<T>::get(session);
+
+            // Transfer the extra reward, if any, to the pot
+            if let Some((account, per_block_extra_reward)) = ExtraReward::<T>::get() {
+                let extra_reward = per_block_extra_reward.saturating_mul(produced_blocks.into());
+                if let Err(error) =
+                    T::Currency::transfer(&account, &pot_account, extra_reward, KeepAlive)
+                {
+                    log::warn!("Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
+                }
+            }
+
+            // Rewards are the total amount in the pot
+            let total_rewards = T::Currency::free_balance(&pot_account);
+            Rewards::<T>::set(session, total_rewards);
         }
     }
 }
