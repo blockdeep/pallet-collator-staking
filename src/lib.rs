@@ -368,6 +368,25 @@ pub mod pallet {
         /// An account was unable to be added to the Invulnerables because they did not have keys
         /// registered. Other Invulnerables may have been set.
         InvalidInvulnerableSkipped { account_id: T::AccountId },
+        StakeAdded {
+            staker: T::AccountId,
+            candidate: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+        StakeRemoved {
+            staker: T::AccountId,
+            candidate: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+        StakeClaimed {
+            staker: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+        UnstakeRequestCreated {
+            staker: T::AccountId,
+            amount: BalanceOf<T>,
+            block: BlockNumberFor<T>,
+        },
     }
 
     #[pallet::error]
@@ -947,6 +966,7 @@ pub mod pallet {
 
         /// Claims all pending unstaking requests for a given user.
         fn do_claim(who: &T::AccountId) -> DispatchResult {
+            let mut claimed: BalanceOf<T> = 0u32.into();
             UnstakingRequests::<T>::try_mutate(who, |requests| {
                 let curr_block = frame_system::Pallet::<T>::block_number();
                 let mut pos = 0;
@@ -956,8 +976,13 @@ pub mod pallet {
                     }
                     pos += 1;
                     T::Currency::unreserve(who, request.amount);
+                    claimed.saturating_accrue(request.amount);
                 }
                 requests.drain(..pos);
+                Self::deposit_event(Event::StakeClaimed {
+                    staker: who.clone(),
+                    amount: claimed,
+                });
                 Ok(())
             })
         }
@@ -1006,24 +1031,35 @@ pub mod pallet {
 
         /// Adds stake into a given candidate by providing its mutable reference.
         ///
+        /// Returns a tuple containing the stake for the staker and the candidate after the operation
+        /// takes place.
+        ///
         /// Computes in **O(1)** time.
         fn add_stake_to_candidate(
             staker: &T::AccountId,
             amount: BalanceOf<T>,
             candidate: &mut CandidateInfo<T::AccountId, BalanceOf<T>>,
-        ) -> DispatchResult {
-            Stake::<T>::try_mutate(candidate.who.clone(), staker, |stake| -> DispatchResult {
-                let final_staker_stake = stake.saturating_add(amount);
-                ensure!(
-                    final_staker_stake >= T::MinStake::get(),
-                    Error::<T>::InsufficientStake
-                );
-                T::Currency::reserve(staker, amount)?;
-                *stake = final_staker_stake;
-                Ok(())
-            })?;
-            candidate.deposit.saturating_accrue(amount);
-            Ok(())
+        ) -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
+            Stake::<T>::try_mutate(
+                candidate.who.clone(),
+                staker,
+                |stake| -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
+                    let final_staker_stake = stake.saturating_add(amount);
+                    ensure!(
+                        final_staker_stake >= T::MinStake::get(),
+                        Error::<T>::InsufficientStake
+                    );
+                    T::Currency::reserve(staker, amount)?;
+                    *stake = final_staker_stake;
+                    candidate.deposit.saturating_accrue(amount);
+                    Self::deposit_event(Event::StakeAdded {
+                        staker: staker.clone(),
+                        candidate: candidate.who.clone(),
+                        amount,
+                    });
+                    Ok((final_staker_stake, candidate.deposit))
+                },
+            )
         }
 
         /// Return the total number of accounts that are eligible collators (candidates and
@@ -1059,13 +1095,21 @@ pub mod pallet {
                     } else {
                         T::UserUnstakingDelay::get()
                     };
-                    UnstakingRequests::<T>::try_mutate(staker, |requests| {
-                        requests.try_push(UnstakeRequest {
-                            block: frame_system::Pallet::<T>::block_number() + delay,
+                    UnstakingRequests::<T>::try_mutate(staker, |requests| -> DispatchResult {
+                        let block = frame_system::Pallet::<T>::block_number() + delay;
+                        requests
+                            .try_push(UnstakeRequest {
+                                block,
+                                amount: stake,
+                            })
+                            .map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
+                        Self::deposit_event(Event::UnstakeRequestCreated {
+                            staker: staker.clone(),
                             amount: stake,
-                        })
-                    })
-                    .map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
+                            block,
+                        });
+                        Ok(())
+                    })?;
                 }
             }
             Ok(stake)
