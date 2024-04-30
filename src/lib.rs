@@ -1152,6 +1152,10 @@ pub mod pallet {
             Self::try_remove_candidate_at_position(idx, remove_last_authored, has_penalty)
         }
 
+        /// Distributes the rewards associated for a given collator, obtained during the previous session.
+        /// This includes specific rewards for the collator plus rewards for the stakers.
+        ///
+        /// The collator must be a candidate in order to receive the rewards.
         fn do_reward_collator(collator: &T::AccountId, blocks: u32, session: SessionIndex) {
             if let Ok(pos) = Self::get_candidate(collator) {
                 let collator_info = &CandidateList::<T>::get()[pos];
@@ -1315,11 +1319,11 @@ pub mod pallet {
 
             // Reward one collator
             if current_session > 0 {
-                let session = current_session - 1;
-                ProducedBlocks::<T>::iter_prefix(session)
+                let previous_session = current_session - 1;
+                ProducedBlocks::<T>::iter_prefix(previous_session)
                     .take(1)
                     .for_each(|(collator, blocks)| {
-                        Self::do_reward_collator(&collator, blocks, session);
+                        Self::do_reward_collator(&collator, blocks, previous_session);
                     });
             }
 
@@ -1362,10 +1366,17 @@ pub mod pallet {
         }
 
         fn start_session(session: SessionIndex) {
-            // Initialize counters
-            let _ = ProducedBlocks::<T>::clear(u32::MAX, None);
+            // Initialize counters for this session
             TotalBlocks::<T>::set(session, 0);
             CurrentSession::<T>::set(session);
+
+            // cleanup last session's stuff
+            if session > 1 {
+                let last_session = session - 2;
+                TotalBlocks::<T>::remove(last_session);
+                Rewards::<T>::remove(last_session);
+                let _ = ProducedBlocks::<T>::clear_prefix(last_session, u32::MAX, None);
+            }
         }
 
         fn end_session(session: SessionIndex) {
