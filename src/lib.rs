@@ -102,6 +102,7 @@ pub mod pallet {
     };
     use sp_staking::SessionIndex;
     use sp_std::vec::Vec;
+    use std::collections::BTreeSet;
 
     /// The in-code storage version.
     const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -393,8 +394,6 @@ pub mod pallet {
         InsertToCandidateListFailed,
         /// Could not remove from the candidate list.
         RemoveFromCandidateListFailed,
-        /// The staked amount is too low.
-        StakeTooLow,
         /// Could not update the candidate list.
         UpdateCandidateListFailed,
         /// Deposit amount is too low to take the target's slot in the candidate list.
@@ -431,7 +430,7 @@ pub mod pallet {
             );
             assert!(
                 CandidacyBond::<T>::get() >= T::MinStake::get(),
-                "CandidacyBond must be higher than MinStake"
+                "CandidacyBond must be greater than or equal to MinStake"
             );
         }
 
@@ -580,7 +579,7 @@ pub mod pallet {
                             .unwrap_or(initial_len);
                         let kicked_candidates = candidates.drain(..first_safe_candidate);
                         for candidate in kicked_candidates {
-                            <LastAuthoredBlock<T>>::remove(candidate.who);
+                            LastAuthoredBlock::<T>::remove(candidate.who);
                         }
                         first_safe_candidate
                     })
@@ -589,7 +588,7 @@ pub mod pallet {
             Self::deposit_event(Event::NewCandidacyBond { bond_amount: bond });
             Ok(Some(T::WeightInfo::set_candidacy_bond(
                 bond_increased
-                    .then(|| initial_len as u32)
+                    .then_some(initial_len as u32)
                     .unwrap_or_default(),
                 kicked as u32,
             ))
@@ -634,7 +633,7 @@ pub mod pallet {
         }
 
         /// Deregister `origin` as a collator candidate. Note that the collator can only leave on
-        /// session change. The `CandidacyBond` will be unreserved immediately.
+        /// session change.
         ///
         /// This call will fail if the total number of candidates would drop below
         /// `MinEligibleCollators`.
@@ -648,7 +647,7 @@ pub mod pallet {
             );
             let length = <CandidateList<T>>::decode_len().unwrap_or_default();
             // Do remove their last authored block.
-            Self::try_remove_candidate(&who, true, true)?;
+            Self::try_remove_candidate_from_account(&who, true, true)?;
 
             Ok(Some(T::WeightInfo::leave_intent(length.saturating_sub(1) as u32)).into())
         }
@@ -688,7 +687,7 @@ pub mod pallet {
 
             // Error just means `who` wasn't a candidate, which is the state we want anyway. Don't
             // remove their last authored block, as they are still a collator.
-            let _ = Self::try_remove_candidate(&who, false, false);
+            let _ = Self::try_remove_candidate_from_account(&who, false, false);
 
             Self::deposit_event(Event::InvulnerableAdded { account_id: who });
 
@@ -732,23 +731,6 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Adds stake to a candidate.
-        #[pallet::call_index(7)]
-        #[pallet::weight(T::WeightInfo::stake(T::MaxCandidates::get()))]
-        pub fn stake(
-            origin: OriginFor<T>,
-            candidate: T::AccountId,
-            stake: BalanceOf<T>,
-        ) -> DispatchResultWithPostInfo {
-            let who = ensure_signed(origin)?;
-            ensure!(stake >= T::MinStake::get(), Error::<T>::StakeTooLow);
-            Self::do_stake_for_account(&who, stake, &candidate)?;
-            Ok(Some(T::WeightInfo::stake(
-                CandidateList::<T>::decode_len().unwrap_or_default() as u32,
-            ))
-            .into())
-        }
-
         /// The caller `origin` replaces a candidate `target` in the collator candidate list by
         /// reserving `deposit`. The amount `deposit` reserved by the caller must be greater than
         /// the existing bond of the target it is trying to replace.
@@ -756,7 +738,7 @@ pub mod pallet {
         /// This call will fail if the caller is already a collator candidate or invulnerable, the
         /// caller does not have registered session keys, the target is not a collator candidate,
         /// and/or the `deposit` amount cannot be reserved.
-        #[pallet::call_index(8)]
+        #[pallet::call_index(7)]
         #[pallet::weight(T::WeightInfo::take_candidate_slot(T::MaxCandidates::get()))]
         pub fn take_candidate_slot(
             origin: OriginFor<T>,
@@ -788,10 +770,11 @@ pub mod pallet {
                 Error::<T>::CanRegister
             );
 
-            ensure!(!Self::get_collator(&who).is_err(), Error::<T>::IsCollator);
+            // And the caller is not already a collator
+            ensure!(Self::get_collator(&who).is_err(), Error::<T>::IsCollator);
 
             let length = <CandidateList<T>>::decode_len().unwrap_or_default();
-            let target_info = Self::try_remove_candidate(&target, true, false)?;
+            let target_info = Self::try_remove_candidate_from_account(&target, true, false)?;
             ensure!(deposit > target_info.deposit, Error::<T>::InsufficientBond);
 
             Self::deposit_event(Event::CandidateReplaced {
@@ -800,6 +783,68 @@ pub mod pallet {
                 deposit,
             });
             Ok(Some(T::WeightInfo::take_candidate_slot(length as u32)).into())
+        }
+
+        /// Adds stake to a candidate.
+        ///
+        /// The call will fail if:
+        ///     - `origin` does not have the at least `MinStake` deposited in the candidate.
+        ///     - `candidate` is not in the [`CandidateList`].
+        #[pallet::call_index(8)]
+        #[pallet::weight(T::WeightInfo::stake(T::MaxCandidates::get()))]
+        pub fn stake(
+            origin: OriginFor<T>,
+            candidate: T::AccountId,
+            stake: BalanceOf<T>,
+        ) -> DispatchResultWithPostInfo {
+            let who = ensure_signed(origin)?;
+            Self::do_stake_for_account(&who, stake, &candidate, true)?;
+            Ok(Some(T::WeightInfo::stake(
+                CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+            ))
+            .into())
+        }
+
+        /// Removes stake from an account.
+        ///
+        /// If the account is a candidate the caller will get the funds after a delay. Otherwise,
+        /// funds will be returned immediately.
+        #[pallet::call_index(9)]
+        #[pallet::weight({0})]
+        pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let is_candidate = Self::get_candidate(&candidate).is_ok();
+            Self::do_unstake(&who, &candidate, is_candidate)?;
+            Ok(())
+        }
+
+        /// Removes all stake from all candidates.
+        ///
+        /// If the account was once a candidate, but it has not been unstaked, funds will be
+        /// retrieved immediately.
+        #[pallet::call_index(10)]
+        #[pallet::weight({0})]
+        pub fn unstake_all(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let candidate_set: BTreeSet<T::AccountId> = CandidateList::<T>::get()
+                .iter()
+                .map(|c| c.who.clone())
+                .collect();
+            for (candidate, staker, stake) in Stake::<T>::iter() {
+                if staker == who && !stake.is_zero() {
+                    let is_candidate = candidate_set.contains(&candidate);
+                    Self::do_unstake(&who, &candidate, is_candidate)?;
+                }
+            }
+            Ok(())
+        }
+
+        /// Claims all pending `UnstakeRequests` for a given account.
+        #[pallet::call_index(11)]
+        #[pallet::weight({0})]
+        pub fn claim(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            Self::do_claim(&who)
         }
     }
 
@@ -846,9 +891,10 @@ pub mod pallet {
             staker: &T::AccountId,
             amount: BalanceOf<T>,
             candidate: &T::AccountId,
+            sort: bool,
         ) -> Result<usize, DispatchError> {
             let position = Self::get_candidate(candidate).map_err(|_| Error::<T>::NotCandidate)?;
-            Self::do_stake_at_position(staker, amount, position, true)
+            Self::do_stake_at_position(staker, amount, position, sort)
         }
 
         /// Registers a given account as candidate.
@@ -874,7 +920,7 @@ pub mod pallet {
                             .any(|candidate_info| candidate_info.who == *who),
                         Error::<T>::AlreadyCandidate
                     );
-                    <LastAuthoredBlock<T>>::insert(
+                    LastAuthoredBlock::<T>::insert(
                         who.clone(),
                         frame_system::Pallet::<T>::block_number() + T::KickThreshold::get(),
                     );
@@ -888,7 +934,7 @@ pub mod pallet {
                     // We must add the stake AFTER inserting the candidate into the list.
                     // otherwise the function will check the account is not yet a candidate and fail.
                     let sort = !already_staked.is_zero();
-                    Self::do_stake_at_position(&who, deposit, 0, sort)?;
+                    Self::do_stake_at_position(who, deposit, 0, sort)?;
 
                     Self::deposit_event(Event::CandidateAdded {
                         account_id: who.clone(),
@@ -897,6 +943,23 @@ pub mod pallet {
                     Ok(info)
                 },
             )
+        }
+
+        /// Claims all pending unstaking requests for a given user.
+        fn do_claim(who: &T::AccountId) -> DispatchResult {
+            UnstakingRequests::<T>::try_mutate(who, |requests| {
+                let curr_block = frame_system::Pallet::<T>::block_number();
+                let mut pos = 0;
+                for request in requests.iter() {
+                    if request.block > curr_block {
+                        break;
+                    }
+                    pos += 1;
+                    T::Currency::unreserve(who, request.amount);
+                }
+                requests.drain(..pos);
+                Ok(())
+            })
         }
 
         /// Adds stake into a given candidate by providing its position in [`CandidatesList`].
@@ -980,16 +1043,15 @@ pub mod pallet {
         ///
         /// Returns the amount unstaked.
         ///
-        /// Computes in **O(c)**, being `c` the number of candidates.
+        /// Computes in **O(1)**.
         fn do_unstake(
             staker: &T::AccountId,
             candidate: &T::AccountId,
             has_penalty: bool,
         ) -> Result<BalanceOf<T>, DispatchError> {
-            let stake = Stake::<T>::get(candidate, staker);
+            let stake = Stake::<T>::take(candidate, staker);
             if !stake.is_zero() {
-                let is_candidate = Self::get_candidate(candidate).is_ok();
-                if !has_penalty || !is_candidate {
+                if !has_penalty {
                     T::Currency::unreserve(staker, stake);
                 } else {
                     let delay = if staker == candidate {
@@ -1005,36 +1067,46 @@ pub mod pallet {
                     })
                     .map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
                 }
-                Stake::<T>::remove(candidate, staker);
             }
             Ok(stake)
         }
 
-        /// Removes a candidate if it exists and refunds the stake.
+        /// Removes a candidate, identified by its index, if it exists and refunds the stake.
         ///
         /// Returns the candidate info before its removal.
-        fn try_remove_candidate(
-            who: &T::AccountId,
+        fn try_remove_candidate_at_position(
+            idx: usize,
             remove_last_authored: bool,
             has_penalty: bool,
         ) -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
             <CandidateList<T>>::try_mutate(
                 |candidates| -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
-                    let idx = candidates
-                        .iter()
-                        .position(|candidate_info| candidate_info.who == *who)
-                        .ok_or(Error::<T>::NotCandidate)?;
                     let candidate = candidates.remove(idx);
                     if remove_last_authored {
-                        <LastAuthoredBlock<T>>::remove(who.clone())
+                        LastAuthoredBlock::<T>::remove(candidate.who.clone())
                     };
-                    Self::do_unstake(who, who, has_penalty)?;
+                    Self::do_unstake(&candidate.who, &candidate.who, has_penalty)?;
                     Self::deposit_event(Event::CandidateRemoved {
-                        account_id: who.clone(),
+                        account_id: candidate.who.clone(),
                     });
                     Ok(candidate)
                 },
             )
+        }
+
+        /// Removes a candidate, identified by its account, if it exists and refunds the stake.
+        ///
+        /// Returns the candidate info before its removal.
+        fn try_remove_candidate_from_account(
+            who: &T::AccountId,
+            remove_last_authored: bool,
+            has_penalty: bool,
+        ) -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
+            let idx = <CandidateList<T>>::get()
+                .iter()
+                .position(|candidate_info| candidate_info.who == *who)
+                .ok_or(Error::<T>::NotCandidate)?;
+            Self::try_remove_candidate_at_position(idx, remove_last_authored, has_penalty)
         }
 
         /// Assemble the current set of candidates and invulnerables into the next collator set.
@@ -1048,8 +1120,8 @@ pub mod pallet {
                 <CandidateList<T>>::get()
                     .iter()
                     .rev()
-                    .cloned()
                     .take(desired_candidates)
+                    .cloned()
                     .map(|candidate_info| candidate_info.who),
             );
             collators
@@ -1065,8 +1137,9 @@ pub mod pallet {
             let min_collators = T::MinEligibleCollators::get();
             candidates
                 .into_iter()
-                .filter_map(|c| {
-                    let last_block = <LastAuthoredBlock<T>>::get(c.clone());
+                .enumerate()
+                .filter_map(|(pos, c)| {
+                    let last_block = LastAuthoredBlock::<T>::get(c.clone());
                     let since_last = now.saturating_sub(last_block);
 
                     let is_invulnerable = Self::is_invulnerable(&c);
@@ -1076,19 +1149,17 @@ pub mod pallet {
                         // They are invulnerable. No reason for them to be in `CandidateList` also.
                         // We don't even care about the min collators here, because an Account
                         // should not be a collator twice.
-                        let _ = Self::try_remove_candidate(&c, false, false);
+                        let _ = Self::try_remove_candidate_at_position(pos, false, false);
                         None
-                    } else {
-                        if Self::eligible_collators() <= min_collators || !is_lazy {
+                    } else if Self::eligible_collators() <= min_collators || !is_lazy {
                             // Either this is a good collator (not lazy) or we are at the minimum
                             // that the system needs. They get to stay.
                             Some(c)
-                        } else {
-                            // This collator has not produced a block recently enough. Bye bye.
-                            // TODO check if the collator should have a penalty in this case
-                            let _ = Self::try_remove_candidate(&c, true, true);
-                            None
-                        }
+                    } else {
+                        // This collator has not produced a block recently enough. Bye bye.
+                        // TODO check if the collator should have a penalty in this case
+                        let _ = Self::try_remove_candidate_at_position(pos, true, false);
+                        None
                     }
                 })
                 .count()
@@ -1141,7 +1212,7 @@ pub mod pallet {
             // `reward` is half of pot account minus ED, this should never fail.
             let _success = T::Currency::transfer(&pot, &author, reward, KeepAlive);
             debug_assert!(_success.is_ok());
-            <LastAuthoredBlock<T>>::insert(author, frame_system::Pallet::<T>::block_number());
+            LastAuthoredBlock::<T>::insert(author, frame_system::Pallet::<T>::block_number());
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(
                 T::WeightInfo::note_author(),
