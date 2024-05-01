@@ -435,6 +435,11 @@ pub mod pallet {
         },
         /// The extra reward was removed.
         ExtraRewardRemoved {},
+        /// The minimum amount to stake was changed.
+        MinStakeChanged {
+            from: BalanceOf<T>,
+            to: BalanceOf<T>,
+        },
     }
 
     #[pallet::error]
@@ -481,6 +486,10 @@ pub mod pallet {
         TooManyUnstakingRequests,
         /// Cannot take some candidate's slot while the candidate list is not full.
         CanRegister,
+        /// Invalid value for MinStake. It must be lower than or equal to CandidacyBond.
+        InvalidMinStake,
+        /// Invalid value for CandidacyBond. It must be higher than or equal to MinStake.
+        InvalidCandidacyBond,
     }
 
     #[pallet::hooks]
@@ -629,6 +638,10 @@ pub mod pallet {
             bond: BalanceOf<T>,
         ) -> DispatchResultWithPostInfo {
             T::UpdateOrigin::ensure_origin(origin)?;
+            ensure!(
+                bond >= MinStake::<T>::get(),
+                Error::<T>::InvalidCandidacyBond
+            );
             let bond_increased = CandidacyBond::<T>::mutate(|old_bond| -> bool {
                 let bond_increased = *old_bond < bond;
                 *old_bond = bond;
@@ -974,6 +987,32 @@ pub mod pallet {
                 ExtraReward::<T>::kill();
                 Self::deposit_event(Event::ExtraRewardRemoved {});
             }
+            Ok(())
+        }
+
+        /// Sets minimum amount that can be staked. The new amount must be lower than or equal to
+        /// the candidacy bond.
+        ///
+        /// The origin for this call must be the `UpdateOrigin`.
+        #[pallet::call_index(15)]
+        #[pallet::weight({0})]
+        pub fn set_minimum_stake(
+            origin: OriginFor<T>,
+            new_min_stake: BalanceOf<T>,
+        ) -> DispatchResult {
+            T::UpdateOrigin::ensure_origin(origin)?;
+            ensure!(
+                new_min_stake <= CandidacyBond::<T>::get(),
+                Error::<T>::InvalidMinStake
+            );
+            MinStake::<T>::mutate(|min_stake| {
+                let old_min_stake = min_stake.clone();
+                *min_stake = new_min_stake;
+                Self::deposit_event(Event::MinStakeChanged {
+                    from: old_min_stake,
+                    to: new_min_stake,
+                });
+            });
             Ok(())
         }
     }
