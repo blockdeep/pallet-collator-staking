@@ -387,7 +387,7 @@ pub mod pallet {
             amount: BalanceOf<T>,
         },
         /// Stake was removed from a candidate.
-        StakeRemoved {
+        Unstaked {
             staker: T::AccountId,
             candidate: T::AccountId,
             amount: BalanceOf<T>,
@@ -402,6 +402,12 @@ pub mod pallet {
             staker: T::AccountId,
             amount: BalanceOf<T>,
             block: BlockNumberFor<T>,
+        },
+        /// A staker removed stake from a candidate
+        StakeRemoved {
+            staker: T::AccountId,
+            candidate: T::AccountId,
+            amount: BalanceOf<T>,
         },
         /// A staking reward was delivered.
         StakingRewardReceived {
@@ -867,7 +873,12 @@ pub mod pallet {
                 Ok(pos) => (true, Some(pos)),
                 Err(_) => (false, None),
             };
-            Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
+            let unstaked = Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
+            Self::deposit_event(Event::Unstaked {
+                staker: who,
+                candidate,
+                amount: unstaked,
+            });
             Ok(())
         }
 
