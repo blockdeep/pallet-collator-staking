@@ -406,6 +406,20 @@ pub mod pallet {
             staker: T::AccountId,
             amount: BalanceOf<T>,
         },
+        /// Autocompound percentage was set.
+        AutocompoundPercentageSet {
+            staker: T::AccountId,
+            percentage: Percent,
+        },
+        /// Collator reward percentage was set.
+        CollatorRewardPercentageSet { percentage: Percent },
+        /// The extra reward was set.
+        ExtraRewardSet {
+            account: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+        /// The extra reward was removed.
+        ExtraRewardRemoved {},
     }
 
     #[pallet::error]
@@ -891,9 +905,16 @@ pub mod pallet {
         /// Sets the percentage of rewards that should be autocompounded in the same candidate.
         #[pallet::call_index(12)]
         #[pallet::weight({0})]
-        pub fn set_autocompound(origin: OriginFor<T>, percent: Percent) -> DispatchResult {
+        pub fn set_autocompound_percentage(
+            origin: OriginFor<T>,
+            percent: Percent,
+        ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             Autocompound::<T>::insert(&who, percent);
+            Self::deposit_event(Event::AutocompoundPercentageSet {
+                staker: who,
+                percentage: percent,
+            });
             Ok(())
         }
 
@@ -902,9 +923,15 @@ pub mod pallet {
         /// The origin for this call must be the `UpdateOrigin`.
         #[pallet::call_index(13)]
         #[pallet::weight({0})]
-        pub fn set_config(origin: OriginFor<T>, percent: Percent) -> DispatchResult {
+        pub fn set_collator_reward_percentage(
+            origin: OriginFor<T>,
+            percent: Percent,
+        ) -> DispatchResult {
             T::UpdateOrigin::ensure_origin(origin)?;
             CollatorRewardPercentage::<T>::put(percent);
+            Self::deposit_event(Event::CollatorRewardPercentageSet {
+                percentage: percent,
+            });
             Ok(())
         }
 
@@ -921,9 +948,11 @@ pub mod pallet {
         ) -> DispatchResult {
             T::UpdateOrigin::ensure_origin(origin)?;
             if let Some((account, amount)) = maybe_extra_reward {
-                ExtraReward::<T>::put((account, amount));
+                ExtraReward::<T>::put((account.clone(), amount));
+                Self::deposit_event(Event::ExtraRewardSet { account, amount });
             } else {
                 ExtraReward::<T>::kill();
+                Self::deposit_event(Event::ExtraRewardRemoved {});
             }
             Ok(())
         }
