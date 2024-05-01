@@ -907,6 +907,26 @@ pub mod pallet {
             CollatorRewardPercentage::<T>::put(percent);
             Ok(())
         }
+
+        /// Sets the extra rewards for producing blocks. Once the session finishes, the provided amount times
+        /// the total number of blocks produced during the session will be transferred from the given account
+        /// to the pallet's pot account to be distributed as rewards.
+        ///
+        /// The origin for this call must be the `UpdateOrigin`.
+        #[pallet::call_index(14)]
+        #[pallet::weight({0})]
+        pub fn set_extra_reward(
+            origin: OriginFor<T>,
+            maybe_extra_reward: Option<(T::AccountId, BalanceOf<T>)>,
+        ) -> DispatchResult {
+            T::UpdateOrigin::ensure_origin(origin)?;
+            if let Some((account, amount)) = maybe_extra_reward {
+                ExtraReward::<T>::put((account, amount));
+            } else {
+                ExtraReward::<T>::kill();
+            }
+            Ok(())
+        }
     }
 
     impl<T: Config> Pallet<T> {
