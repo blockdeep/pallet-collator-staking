@@ -1169,7 +1169,7 @@ pub mod pallet {
                     total_rewards.saturating_mul(blocks.into()) / total_session_blocks.into();
                 let collator_only_reward = collator_percentage * rewards_all;
 
-                // Reward collator
+                // Reward collator. Note these rewards are not autocompounded.
                 if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
                     log::warn!("Failure rewarding collator {}: {:?}", collator, error);
                 }
@@ -1181,20 +1181,21 @@ pub mod pallet {
                         stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
                     if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
                         log::warn!("Failure rewarding staker {}: {:?}", staker, error);
-                    }
-                    // TODO autocompound
-                    let compound_percentage = Autocompound::<T>::get(staker.clone());
-                    let compound_amount = compound_percentage * stake;
-                    if !compound_amount.is_zero() {
-                        if let Err(error) =
-                            Self::do_stake_at_position(&staker, compound_amount, pos, false)
-                        {
-                            log::warn!(
-                                "Failure autocompounding for staker {} to candidate {}: {:?}",
-                                staker,
-                                collator,
-                                error
-                            );
+                    } else {
+                        // Autocompound
+                        let compound_percentage = Autocompound::<T>::get(staker.clone());
+                        let compound_amount = compound_percentage * stake;
+                        if !compound_amount.is_zero() {
+                            if let Err(error) =
+                                Self::do_stake_at_position(&staker, compound_amount, pos, false)
+                            {
+                                log::warn!(
+                                    "Failure autocompounding for staker {} to candidate {}: {:?}",
+                                    staker,
+                                    collator,
+                                    error
+                                );
+                            }
                         }
                     }
                 });
@@ -1274,6 +1275,19 @@ pub mod pallet {
                 .expect("filter_map operation can't result in a bounded vec larger than its original; qed")
         }
 
+        /// Rewards a pending collator from the previous round, if any.
+        fn reward_one_collator(current_session: SessionIndex) {
+            if current_session > 0 {
+                let previous_session = current_session - 1;
+                ProducedBlocks::<T>::iter_prefix(previous_session)
+                    .drain()
+                    .take(1)
+                    .for_each(|(collator, blocks)| {
+                        Self::do_reward_collator(&collator, blocks, previous_session);
+                    });
+            }
+        }
+
         /// Ensure the correctness of the state of this pallet.
         ///
         /// This should be valid before or after each state transition of this pallet.
@@ -1320,14 +1334,7 @@ pub mod pallet {
             }
 
             // Reward one collator
-            if current_session > 0 {
-                let previous_session = current_session - 1;
-                ProducedBlocks::<T>::iter_prefix(previous_session)
-                    .take(1)
-                    .for_each(|(collator, blocks)| {
-                        Self::do_reward_collator(&collator, blocks, previous_session);
-                    });
-            }
+            Self::reward_one_collator(current_session);
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(
                 T::WeightInfo::note_author(),
