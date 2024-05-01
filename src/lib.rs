@@ -101,7 +101,7 @@ pub mod pallet {
     };
     use sp_staking::SessionIndex;
     use sp_std::vec::Vec;
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
 
     /// The in-code storage version.
     const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -843,8 +843,11 @@ pub mod pallet {
         #[pallet::weight({0})]
         pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            let is_candidate = Self::get_candidate(&candidate).is_ok();
-            Self::do_unstake(&who, &candidate, is_candidate)?;
+            let (has_penalty, maybe_position) = match Self::get_candidate(&candidate) {
+                Ok(pos) => (true, Some(pos)),
+                Err(_) => (false, None),
+            };
+            Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
             Ok(())
         }
 
@@ -856,14 +859,18 @@ pub mod pallet {
         #[pallet::weight({0})]
         pub fn unstake_all(origin: OriginFor<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            let candidate_set: BTreeSet<T::AccountId> = CandidateList::<T>::get()
+            let candidate_set: BTreeMap<T::AccountId, usize> = CandidateList::<T>::get()
                 .iter()
-                .map(|c| c.who.clone())
+                .enumerate()
+                .map(|(pos, c)| (c.who.clone(), pos))
                 .collect();
             for (candidate, staker, stake) in Stake::<T>::iter() {
                 if staker == who && !stake.is_zero() {
-                    let is_candidate = candidate_set.contains(&candidate);
-                    Self::do_unstake(&who, &candidate, is_candidate)?;
+                    let (is_candidate, maybe_position) = match candidate_set.get(&candidate) {
+                        None => (false, None),
+                        Some(pos) => (true, Some(*pos)),
+                    };
+                    Self::do_unstake(&who, &candidate, is_candidate, maybe_position)?;
                 }
             }
             Ok(())
@@ -1085,6 +1092,7 @@ pub mod pallet {
             staker: &T::AccountId,
             candidate: &T::AccountId,
             has_penalty: bool,
+            maybe_position: Option<usize>,
         ) -> Result<BalanceOf<T>, DispatchError> {
             let stake = Stake::<T>::take(candidate, staker);
             if !stake.is_zero() {
@@ -1112,6 +1120,9 @@ pub mod pallet {
                         Ok(())
                     })?;
                 }
+                if let Some(position) = maybe_position {
+                    Self::reassign_candidate_position(position)?;
+                }
             }
             Ok(stake)
         }
@@ -1130,7 +1141,7 @@ pub mod pallet {
                     if remove_last_authored {
                         LastAuthoredBlock::<T>::remove(candidate.who.clone())
                     };
-                    Self::do_unstake(&candidate.who, &candidate.who, has_penalty)?;
+                    Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None)?;
                     Self::deposit_event(Event::CandidateRemoved {
                         account_id: candidate.who.clone(),
                     });
