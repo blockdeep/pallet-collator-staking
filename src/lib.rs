@@ -384,20 +384,24 @@ pub mod pallet {
             candidate: T::AccountId,
             amount: BalanceOf<T>,
         },
+        /// Stake was removed from a candidate.
         StakeRemoved {
             staker: T::AccountId,
             candidate: T::AccountId,
             amount: BalanceOf<T>,
         },
+        /// Stake was claimed after a penalty period.
         StakeClaimed {
             staker: T::AccountId,
             amount: BalanceOf<T>,
         },
+        /// An unstake request was created.
         UnstakeRequestCreated {
             staker: T::AccountId,
             amount: BalanceOf<T>,
             block: BlockNumberFor<T>,
         },
+        /// A staking reward was delivered.
         StakingRewardReceived {
             staker: T::AccountId,
             amount: BalanceOf<T>,
@@ -890,6 +894,17 @@ pub mod pallet {
         pub fn set_autocompound(origin: OriginFor<T>, percent: Percent) -> DispatchResult {
             let who = ensure_signed(origin)?;
             Autocompound::<T>::insert(&who, percent);
+            Ok(())
+        }
+
+        /// Sets the percentage of rewards that collators will have for producing blocks.
+        ///
+        /// The origin for this call must be the `UpdateOrigin`.
+        #[pallet::call_index(13)]
+        #[pallet::weight({0})]
+        pub fn set_config(origin: OriginFor<T>, percent: Percent) -> DispatchResult {
+            T::UpdateOrigin::ensure_origin(origin)?;
+            CollatorRewardPercentage::<T>::put(percent);
             Ok(())
         }
     }
