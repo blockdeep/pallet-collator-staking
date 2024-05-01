@@ -5,7 +5,7 @@
 use super::*;
 
 #[allow(unused)]
-use crate::Pallet as CollatorSelection;
+use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
 use frame_support::traits::{Currency, EnsureOrigin, Get, ReservableCurrency};
@@ -80,7 +80,7 @@ fn register_candidates<T: Config>(count: u32) {
 
     for who in candidates {
         T::Currency::make_free_balance_be(&who, <CandidacyBond<T>>::get() * 3u32.into());
-        <CollatorSelection<T>>::register_as_candidate(RawOrigin::Signed(who).into()).unwrap();
+        <CollatorStaking<T>>::register_as_candidate(RawOrigin::Signed(who).into()).unwrap();
     }
 }
 
@@ -361,7 +361,7 @@ mod benchmarks {
     fn note_author() {
         <CandidacyBond<T>>::put(T::Currency::minimum_balance());
         T::Currency::make_free_balance_be(
-            &<CollatorSelection<T>>::account_id(),
+            &<CollatorStaking<T>>::account_id(),
             T::Currency::minimum_balance() * 4u32.into(),
         );
         let author = account("author", 0, SEED);
@@ -372,7 +372,7 @@ mod benchmarks {
 
         #[block]
         {
-            <CollatorSelection<T> as EventHandler<_, _>>::note_author(author.clone())
+            <CollatorStaking<T> as EventHandler<_, _>>::note_author(author.clone())
         }
 
         assert!(T::Currency::free_balance(&author) > 0u32.into());
@@ -427,7 +427,7 @@ mod benchmarks {
         assert!(c == current_length);
         #[block]
         {
-            <CollatorSelection<T> as SessionManager<_>>::new_session(0);
+            <CollatorStaking<T> as SessionManager<_>>::new_session(0);
         }
 
         if c > r && non_removals >= min_candidates {
@@ -455,7 +455,7 @@ mod benchmarks {
     }
 
     impl_benchmark_test_suite!(
-        CollatorSelection,
+        CollatorStaking,
         crate::mock::new_test_ext(),
         crate::mock::Test,
     );
