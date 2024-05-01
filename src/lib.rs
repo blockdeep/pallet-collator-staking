@@ -26,7 +26,7 @@
 //! The current implementation resolves congestion of [`CandidateList`] through a simple auction
 //! mechanism. Candidates bid for the collator slots and at the end of the session, the auction ends
 //! and the top candidates are selected to become collators. The number of selected candidates is
-//! determined by the value of `DesiredCandidates`.
+//! determined by the value of [`DesiredCandidates`].
 //!
 //! Before the list reaches full capacity, candidates can register by placing the minimum bond
 //! through `register_as_candidate`. Then, if an account wants to participate in the collator slot
@@ -436,10 +436,7 @@ pub mod pallet {
         /// The extra reward was removed.
         ExtraRewardRemoved {},
         /// The minimum amount to stake was changed.
-        MinStakeChanged {
-            from: BalanceOf<T>,
-            to: BalanceOf<T>,
-        },
+        NewMinStake { min_stake: BalanceOf<T> },
     }
 
     #[pallet::error]
@@ -624,55 +621,20 @@ pub mod pallet {
         /// Set the candidacy bond amount.
         ///
         /// If the candidacy bond is increased by this call, all current candidates which have a
-        /// deposit lower than the new bond will be kicked from the list and get their deposits
-        /// back.
+        /// deposit lower than the new bond will be kicked once the current session ends.
         ///
         /// The origin for this call must be the `UpdateOrigin`.
         #[pallet::call_index(2)]
-        #[pallet::weight(T::WeightInfo::set_candidacy_bond(
-            T::MaxCandidates::get(),
-            T::MaxCandidates::get()
-        ))]
-        pub fn set_candidacy_bond(
-            origin: OriginFor<T>,
-            bond: BalanceOf<T>,
-        ) -> DispatchResultWithPostInfo {
+        #[pallet::weight(T::WeightInfo::set_candidacy_bond())]
+        pub fn set_candidacy_bond(origin: OriginFor<T>, bond: BalanceOf<T>) -> DispatchResult {
             T::UpdateOrigin::ensure_origin(origin)?;
             ensure!(
                 bond >= MinStake::<T>::get(),
                 Error::<T>::InvalidCandidacyBond
             );
-            let bond_increased = CandidacyBond::<T>::mutate(|old_bond| -> bool {
-                let bond_increased = *old_bond < bond;
-                *old_bond = bond;
-                bond_increased
-            });
-            let initial_len = CandidateList::<T>::decode_len().unwrap_or_default();
-            let kicked = (bond_increased && initial_len > 0)
-                .then(|| {
-                    // Closure below returns the number of candidates which were kicked because
-                    // their deposits were lower than the new candidacy bond.
-                    CandidateList::<T>::mutate(|candidates| -> usize {
-                        let first_safe_candidate = candidates
-                            .iter()
-                            .position(|candidate| candidate.deposit >= bond)
-                            .unwrap_or(initial_len);
-                        let kicked_candidates = candidates.drain(..first_safe_candidate);
-                        for candidate in kicked_candidates {
-                            LastAuthoredBlock::<T>::remove(candidate.who);
-                        }
-                        first_safe_candidate
-                    })
-                })
-                .unwrap_or_default();
+            CandidacyBond::<T>::put(bond);
             Self::deposit_event(Event::NewCandidacyBond { bond_amount: bond });
-            Ok(Some(T::WeightInfo::set_candidacy_bond(
-                bond_increased
-                    .then_some(initial_len as u32)
-                    .unwrap_or_default(),
-                kicked as u32,
-            ))
-            .into())
+            Ok(())
         }
 
         /// Register this account as a collator candidate. The account must (a) already have
@@ -885,6 +847,9 @@ pub mod pallet {
         ///
         /// If the account is a candidate the caller will get the funds after a delay. Otherwise,
         /// funds will be returned immediately.
+        ///
+        /// The candidate will have its position in the [`CandidateList`] conveniently modified, and
+        /// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
         #[pallet::call_index(9)]
         #[pallet::weight({0})]
         pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
@@ -927,7 +892,7 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Claims all pending `UnstakeRequests` for a given account.
+        /// Claims all pending [`UnstakeRequest`] for a given account.
         #[pallet::call_index(11)]
         #[pallet::weight({0})]
         pub fn claim(origin: OriginFor<T>) -> DispatchResult {
@@ -1005,13 +970,9 @@ pub mod pallet {
                 new_min_stake <= CandidacyBond::<T>::get(),
                 Error::<T>::InvalidMinStake
             );
-            MinStake::<T>::mutate(|min_stake| {
-                let old_min_stake = min_stake.clone();
-                *min_stake = new_min_stake;
-                Self::deposit_event(Event::MinStakeChanged {
-                    from: old_min_stake,
-                    to: new_min_stake,
-                });
+            MinStake::<T>::put(new_min_stake);
+            Self::deposit_event(Event::NewMinStake {
+                min_stake: new_min_stake,
             });
             Ok(())
         }
@@ -1127,7 +1088,7 @@ pub mod pallet {
             })
         }
 
-        /// Adds stake into a given candidate by providing its position in [`CandidatesList`].
+        /// Adds stake into a given candidate by providing its position in [`CandidateList`].
         ///
         /// Returns the position of the candidate in the list after adding the stake.
         ///
@@ -1217,8 +1178,8 @@ pub mod pallet {
         /// If the target is not a candidate or if the operation does not carry a penalty the deposit
         /// is immediately returned. Otherwise, a delay is applied.
         ///
-        /// The candidate might be kicked from the [`CandidateList`] if its stake is below the minimum.
-        /// If not, its position in the [`CandidateList`] might be accordingly modified.
+        /// If the candidate reduces its stake below the [`CandidacyBond`] it will be kicked when
+        /// the session ends.
         ///
         /// Returns the amount unstaked.
         fn do_unstake(
@@ -1254,15 +1215,10 @@ pub mod pallet {
                     })?;
                 }
                 if let Some(position) = maybe_position {
-                    let final_deposit = CandidateList::<T>::mutate(|candidates| {
+                    CandidateList::<T>::mutate(|candidates| {
                         candidates[position].deposit.saturating_reduce(stake);
-                        candidates[position].deposit
                     });
-                    if final_deposit < CandidacyBond::<T>::get() {
-                        Self::try_remove_candidate_at_position(position, true, false)?;
-                    } else {
-                        Self::reassign_candidate_position(position)?;
-                    }
+                    Self::reassign_candidate_position(position)?;
                 }
             }
             Ok(stake)
@@ -1392,30 +1348,32 @@ pub mod pallet {
         /// all their stake.
         ///
         /// Return value is the number of candidates left in the list.
-        pub fn kick_stale_candidates(candidates: impl IntoIterator<Item = T::AccountId>) -> u32 {
+        pub fn kick_stale_candidates() -> u32 {
             let now = Self::current_block_number();
             let kick_threshold = T::KickThreshold::get();
             let min_collators = T::MinEligibleCollators::get();
+            let candidacy_bond = CandidacyBond::<T>::get();
+            let candidates = CandidateList::<T>::get();
             candidates
                 .into_iter()
                 .enumerate()
-                .filter_map(|(pos, c)| {
-                    let last_block = LastAuthoredBlock::<T>::get(c.clone());
+                .filter_map(|(pos, candidate)| {
+                    let last_block = LastAuthoredBlock::<T>::get(candidate.who.clone());
                     let since_last = now.saturating_sub(last_block);
 
-                    let is_invulnerable = Self::is_invulnerable(&c);
+                    let is_invulnerable = Self::is_invulnerable(&candidate.who);
                     let is_lazy = since_last >= kick_threshold;
 
                     if is_invulnerable {
-                        // They are invulnerable. No reason for them to be in `CandidateList` also.
+                        // If they are invulnerable there is no reason for them to be in `CandidateList` also.
                         // We don't even care about the min collators here, because an Account
                         // should not be a collator twice.
                         let _ = Self::try_remove_candidate_at_position(pos, false, false);
                         None
-                    } else if Self::eligible_collators() <= min_collators || !is_lazy {
-                            // Either this is a good collator (not lazy) or we are at the minimum
-                            // that the system needs. They get to stay.
-                            Some(c)
+                    } else if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit >= candidacy_bond) {
+                        // Either this is a good collator (not lazy) or we are at the minimum
+                        // that the system needs. They get to stay, as long as they have sufficient deposit.
+                        Some(candidate)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
                         // TODO check if the collator should have a penalty in this case
@@ -1447,7 +1405,7 @@ pub mod pallet {
         ///
         /// # Invariants
         ///
-        /// ## `DesiredCandidates`
+        /// ## [`DesiredCandidates`]
         ///
         /// * The current desired candidate count should not exceed the candidate list capacity.
         /// * The number of selected candidates together with the invulnerables must be greater than
@@ -1520,11 +1478,7 @@ pub mod pallet {
                 .unwrap_or_default()
                 .try_into()
                 .expect("length is at most `T::MaxCandidates`, so it must fit in `u32`; qed");
-            let active_candidates_count = Self::kick_stale_candidates(
-                CandidateList::<T>::get()
-                    .iter()
-                    .map(|candidate_info| candidate_info.who.clone()),
-            );
+            let active_candidates_count = Self::kick_stale_candidates();
             let removed = candidates_len_before.saturating_sub(active_candidates_count);
             let result = Self::assemble_collators();
 

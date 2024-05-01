@@ -13,7 +13,7 @@ pub trait WeightInfo {
     fn add_invulnerable(_b: u32, _c: u32) -> Weight;
     fn remove_invulnerable(_b: u32) -> Weight;
     fn set_desired_candidates() -> Weight;
-    fn set_candidacy_bond(_c: u32, _k: u32) -> Weight;
+    fn set_candidacy_bond() -> Weight;
     fn register_as_candidate(_c: u32) -> Weight;
     fn leave_intent(_c: u32) -> Weight;
     fn take_candidate_slot(_c: u32) -> Weight;
@@ -39,7 +39,7 @@ impl WeightInfo for () {
         Weight::from_parts(0, 0)
     }
 
-    fn set_candidacy_bond(_c: u32, _k: u32) -> Weight {
+    fn set_candidacy_bond() -> Weight {
         Weight::from_parts(0, 0)
     }
 
