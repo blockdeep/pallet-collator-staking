@@ -1,22 +1,26 @@
 use crate as collator_staking;
 use crate::{
-    mock::*, CandidacyBond, CandidateInfo, CandidateList, DesiredCandidates, Error, Event,
-    Invulnerables, LastAuthoredBlock,
+    mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
+    DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MinStake,
 };
 use frame_support::{
     assert_noop, assert_ok,
     traits::{Currency, OnInitialize},
 };
 use pallet_balances::Error as BalancesError;
-use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage};
+use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage, Percent};
 
 #[test]
 fn basic_setup_works() {
     new_test_ext().execute_with(|| {
         assert_eq!(DesiredCandidates::<Test>::get(), 2);
         assert_eq!(CandidacyBond::<Test>::get(), 10);
-
+        assert_eq!(MinStake::<Test>::get(), 1);
         assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
+        assert_eq!(
+            CollatorRewardPercentage::<Test>::get(),
+            Percent::from_parts(20)
+        );
         // genesis should sort input
         assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
     });
@@ -1808,7 +1812,7 @@ fn cannot_set_genesis_value_twice() {
         candidacy_bond: 10,
         min_stake: 1,
         invulnerables,
-        candidate_reward_percentage: Percent::from_parts(20),
+        collator_reward_percentage: Percent::from_parts(20),
     };
     // collator selection must be initialized before session.
     collator_staking.assimilate_storage(&mut t).unwrap();

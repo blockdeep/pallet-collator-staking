@@ -321,7 +321,7 @@ pub mod pallet {
         pub candidacy_bond: BalanceOf<T>,
         pub min_stake: BalanceOf<T>,
         pub desired_candidates: u32,
-        pub candidate_reward_percentage: Percent,
+        pub collator_reward_percentage: Percent,
     }
 
     #[pallet::genesis_build]
@@ -355,7 +355,7 @@ pub mod pallet {
             CandidacyBond::<T>::put(self.candidacy_bond);
             MinStake::<T>::put(self.min_stake);
             Invulnerables::<T>::put(bounded_invulnerables);
-            CollatorRewardPercentage::<T>::put(self.candidate_reward_percentage);
+            CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
         }
     }
 

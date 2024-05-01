@@ -11,7 +11,7 @@ use sp_core::H256;
 use sp_runtime::{
     testing::UintAuthorityId,
     traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
-    BuildStorage, RuntimeAppPublic,
+    BuildStorage, Percent, RuntimeAppPublic,
 };
 
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -223,7 +223,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         candidacy_bond: 10,
         min_stake: 1,
         invulnerables,
-        candidate_reward_percentage: Percent::from_parts(20),
+        collator_reward_percentage: Percent::from_parts(20),
     };
     let session = pallet_session::GenesisConfig::<Test> { keys };
     pallet_balances::GenesisConfig::<Test> { balances }
