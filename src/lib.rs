@@ -169,9 +169,6 @@ pub mod pallet {
         /// Validate a user is registered.
         type CollatorRegistration: ValidatorRegistration<Self::CollatorId>;
 
-        /// Minimum amount of stake an account can add to a candidate.
-        type MinStake: Get<BalanceOf<Self>>;
-
         /// Maximum per-account number of candidates to deposit stake on.
         type MaxStakedCandidates: Get<u32>;
 
@@ -247,6 +244,10 @@ pub mod pallet {
     #[pallet::storage]
     pub type CandidacyBond<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
+    /// Minimum amount of stake an account can add to a candidate.
+    #[pallet::storage]
+    pub type MinStake<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+
     /// Stores the amount staked by a given user into a candidate.
     ///
     /// First key is the candidate, and second one is the staker.
@@ -318,6 +319,7 @@ pub mod pallet {
     pub struct GenesisConfig<T: Config> {
         pub invulnerables: Vec<T::AccountId>,
         pub candidacy_bond: BalanceOf<T>,
+        pub min_stake: BalanceOf<T>,
         pub desired_candidates: u32,
         pub candidate_reward_percentage: Percent,
     }
@@ -325,6 +327,10 @@ pub mod pallet {
     #[pallet::genesis_build]
     impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
         fn build(&self) {
+            assert!(
+                self.min_stake <= self.candidacy_bond,
+                "min_stake is higher than candidacy_bond",
+            );
             let duplicate_invulnerables = self
                 .invulnerables
                 .iter()
@@ -347,6 +353,7 @@ pub mod pallet {
 
             DesiredCandidates::<T>::put(self.desired_candidates);
             CandidacyBond::<T>::put(self.candidacy_bond);
+            MinStake::<T>::put(self.min_stake);
             Invulnerables::<T>::put(bounded_invulnerables);
             CollatorRewardPercentage::<T>::put(self.candidate_reward_percentage);
         }
@@ -489,7 +496,7 @@ pub mod pallet {
                 "invulnerables and candidates must be able to satisfy collator demand"
             );
             assert!(
-                CandidacyBond::<T>::get() >= T::MinStake::get(),
+                CandidacyBond::<T>::get() >= MinStake::<T>::get(),
                 "CandidacyBond must be greater than or equal to MinStake"
             );
         }
@@ -890,14 +897,14 @@ pub mod pallet {
         #[pallet::weight({0})]
         pub fn unstake_all(origin: OriginFor<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            let candidate_set: BTreeMap<T::AccountId, usize> = CandidateList::<T>::get()
+            let candidate_map: BTreeMap<T::AccountId, usize> = CandidateList::<T>::get()
                 .iter()
                 .enumerate()
                 .map(|(pos, c)| (c.who.clone(), pos))
                 .collect();
             for (candidate, staker, stake) in Stake::<T>::iter() {
                 if staker == who && !stake.is_zero() {
-                    let (is_candidate, maybe_position) = match candidate_set.get(&candidate) {
+                    let (is_candidate, maybe_position) = match candidate_map.get(&candidate) {
                         None => (false, None),
                         Some(pos) => (true, Some(*pos)),
                     };
@@ -1140,7 +1147,7 @@ pub mod pallet {
                 |stake| -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
                     let final_staker_stake = stake.saturating_add(amount);
                     ensure!(
-                        final_staker_stake >= T::MinStake::get(),
+                        final_staker_stake >= MinStake::<T>::get(),
                         Error::<T>::InsufficientStake
                     );
                     T::Currency::reserve(staker, amount)?;

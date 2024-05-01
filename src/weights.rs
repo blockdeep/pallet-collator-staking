@@ -21,3 +21,49 @@ pub trait WeightInfo {
     fn new_session(_c: u32, _r: u32) -> Weight;
     fn stake(_c: u32) -> Weight;
 }
+
+impl WeightInfo for () {
+    fn set_invulnerables(_b: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn add_invulnerable(_b: u32, _c: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn remove_invulnerable(_b: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn set_desired_candidates() -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn set_candidacy_bond(_c: u32, _k: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn register_as_candidate(_c: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn leave_intent(_c: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn take_candidate_slot(_c: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn note_author() -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn new_session(_c: u32, _r: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+
+    fn stake(_c: u32) -> Weight {
+        Weight::from_parts(0, 0)
+    }
+}

@@ -68,18 +68,18 @@ parameter_types! {
 }
 
 impl pallet_balances::Config for Test {
-    type Balance = u64;
     type RuntimeEvent = RuntimeEvent;
+    type RuntimeHoldReason = RuntimeHoldReason;
+    type RuntimeFreezeReason = RuntimeFreezeReason;
+    type WeightInfo = ();
+    type Balance = u64;
     type DustRemoval = ();
     type ExistentialDeposit = ExistentialDeposit;
     type AccountStore = System;
-    type WeightInfo = ();
+    type ReserveIdentifier = [u8; 8];
+    type FreezeIdentifier = ();
     type MaxLocks = ();
     type MaxReserves = MaxReserves;
-    type ReserveIdentifier = [u8; 8];
-    type RuntimeHoldReason = RuntimeHoldReason;
-    type RuntimeFreezeReason = RuntimeFreezeReason;
-    type FreezeIdentifier = ();
     type MaxFreezes = ConstU32<0>;
 }
 
@@ -192,7 +192,6 @@ impl Config for Test {
     type CollatorId = <Self as frame_system::Config>::AccountId;
     type CollatorIdOf = IdentityCollator;
     type CollatorRegistration = IsRegistered;
-    type MinStake = ConstU64<1000>;
     type MaxStakedCandidates = ConstU32<16>;
     type CollatorUnstakingDelay = ConstU64<2>;
     type UserUnstakingDelay = ConstU64<5>;
@@ -221,8 +220,8 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         .collect::<Vec<_>>();
     let collator_staking = collator_staking::GenesisConfig::<Test> {
         desired_candidates: 2,
-        extra_reward: 10,
         candidacy_bond: 10,
+        min_stake: 1,
         invulnerables,
         candidate_reward_percentage: Default::default(),
     };
