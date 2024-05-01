@@ -1160,9 +1160,10 @@ pub mod pallet {
         /// If the target is not a candidate or if the operation does not carry a penalty the deposit
         /// is immediately returned. Otherwise, a delay is applied.
         ///
-        /// Returns the amount unstaked.
+        /// The candidate might be kicked from the [`CandidateList`] if its stake is below the minimum.
+        /// If not, its position in the [`CandidateList`] might be accordingly modified.
         ///
-        /// Computes in **O(1)**.
+        /// Returns the amount unstaked.
         fn do_unstake(
             staker: &T::AccountId,
             candidate: &T::AccountId,
@@ -1196,7 +1197,15 @@ pub mod pallet {
                     })?;
                 }
                 if let Some(position) = maybe_position {
-                    Self::reassign_candidate_position(position)?;
+                    let final_deposit = CandidateList::<T>::mutate(|candidates| {
+                        candidates[position].deposit.saturating_reduce(stake);
+                        candidates[position].deposit
+                    });
+                    if final_deposit < CandidacyBond::<T>::get() {
+                        Self::try_remove_candidate_at_position(position, true, false)?;
+                    } else {
+                        Self::reassign_candidate_position(position)?;
+                    }
                 }
             }
             Ok(stake)
