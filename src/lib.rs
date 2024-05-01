@@ -280,10 +280,11 @@ pub mod pallet {
     #[pallet::storage]
     pub type ExtraReward<T: Config> = StorageValue<_, (T::AccountId, BalanceOf<T>), OptionQuery>;
 
-    /// Blocks produced in the current session.
+    /// Blocks produced in the current session. First value is actual total, and second is those
+    /// that have not been produced by invulnerables.
     #[pallet::storage]
     pub type TotalBlocks<T: Config> =
-        StorageMap<_, Blake2_128Concat, SessionIndex, u32, ValueQuery>;
+        StorageMap<_, Blake2_128Concat, SessionIndex, (u32, u32), ValueQuery>;
 
     /// Rewards generated for a given session.
     #[pallet::storage]
@@ -1246,11 +1247,11 @@ pub mod pallet {
             if let Ok(pos) = Self::get_candidate(collator) {
                 let collator_info = &CandidateList::<T>::get()[pos];
                 let total_rewards = Rewards::<T>::get(session);
-                let total_session_blocks = TotalBlocks::<T>::get(session);
+                let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
                 let collator_percentage = CollatorRewardPercentage::<T>::get();
 
                 let rewards_all: BalanceOf<T> =
-                    total_rewards.saturating_mul(blocks.into()) / total_session_blocks.into();
+                    total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
                 let collator_only_reward = collator_percentage * rewards_all;
 
                 // Reward collator. Note these rewards are not autocompounded.
@@ -1410,11 +1411,18 @@ pub mod pallet {
         fn note_author(author: T::AccountId) {
             let current_session = CurrentSession::<T>::get();
             LastAuthoredBlock::<T>::insert(author.clone(), Self::current_block_number());
-            TotalBlocks::<T>::mutate(current_session, |total| total.saturating_inc());
 
+            // Invulnerables do not get rewards
             if !Self::is_invulnerable(&author) {
-                // Invulnerables do not get rewards
                 ProducedBlocks::<T>::mutate(current_session, author, |b| b.saturating_inc());
+                TotalBlocks::<T>::mutate(current_session, |(total, _)| {
+                    total.saturating_inc();
+                });
+            } else {
+                TotalBlocks::<T>::mutate(current_session, |(total, rewardable)| {
+                    total.saturating_inc();
+                    rewardable.saturating_inc();
+                });
             }
 
             // Reward one collator
@@ -1460,7 +1468,7 @@ pub mod pallet {
 
         fn start_session(session: SessionIndex) {
             // Initialize counters for this session
-            TotalBlocks::<T>::insert(session, 0);
+            TotalBlocks::<T>::insert(session, (0, 0));
             CurrentSession::<T>::put(session);
 
             // cleanup last session's stuff
@@ -1474,7 +1482,7 @@ pub mod pallet {
 
         fn end_session(session: SessionIndex) {
             let pot_account = Self::account_id();
-            let produced_blocks = TotalBlocks::<T>::get(session);
+            let (produced_blocks, _) = TotalBlocks::<T>::get(session);
 
             // Transfer the extra reward, if any, to the pot
             if let Some((account, per_block_extra_reward)) = ExtraReward::<T>::get() {
