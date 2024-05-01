@@ -883,6 +883,15 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::do_claim(&who)
         }
+
+        /// Sets the percentage of rewards that should be autocompounded in the same candidate.
+        #[pallet::call_index(12)]
+        #[pallet::weight({0})]
+        pub fn set_autocompound(origin: OriginFor<T>, percent: Percent) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            Autocompound::<T>::insert(&who, percent);
+            Ok(())
+        }
     }
 
     impl<T: Config> Pallet<T> {
@@ -1387,8 +1396,8 @@ pub mod pallet {
 
         fn start_session(session: SessionIndex) {
             // Initialize counters for this session
-            TotalBlocks::<T>::set(session, 0);
-            CurrentSession::<T>::set(session);
+            TotalBlocks::<T>::insert(session, 0);
+            CurrentSession::<T>::put(session);
 
             // cleanup last session's stuff
             if session > 1 {
@@ -1415,7 +1424,7 @@ pub mod pallet {
 
             // Rewards are the total amount in the pot
             let total_rewards = T::Currency::free_balance(&pot_account);
-            Rewards::<T>::set(session, total_rewards);
+            Rewards::<T>::insert(session, total_rewards);
         }
     }
 }
