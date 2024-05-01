@@ -223,7 +223,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         candidacy_bond: 10,
         min_stake: 1,
         invulnerables,
-        candidate_reward_percentage: Default::default(),
+        candidate_reward_percentage: Percent::from_parts(20),
     };
     let session = pallet_session::GenesisConfig::<Test> { keys };
     pallet_balances::GenesisConfig::<Test> { balances }

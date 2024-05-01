@@ -1808,7 +1808,7 @@ fn cannot_set_genesis_value_twice() {
         candidacy_bond: 10,
         min_stake: 1,
         invulnerables,
-        candidate_reward_percentage: Default::default(),
+        candidate_reward_percentage: Percent::from_parts(20),
     };
     // collator selection must be initialized before session.
     collator_staking.assimilate_storage(&mut t).unwrap();
