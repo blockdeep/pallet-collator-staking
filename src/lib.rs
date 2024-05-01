@@ -82,6 +82,7 @@ const LOG_TARGET: &str = "runtime::collator-staking";
 
 #[frame_support::pallet]
 pub mod pallet {
+    use super::LOG_TARGET;
     pub use crate::weights::WeightInfo;
     use frame_support::{
         dispatch::{DispatchClass, DispatchResultWithPostInfo},
@@ -1256,7 +1257,7 @@ pub mod pallet {
 
                 // Reward collator. Note these rewards are not autocompounded.
                 if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
-                    log::warn!("Failure rewarding collator {}: {:?}", collator, error);
+                    log::warn!(target: LOG_TARGET, "Failure rewarding collator {}: {:?}", collator, error);
                 }
 
                 // Reward stakers
@@ -1265,7 +1266,7 @@ pub mod pallet {
                     let staker_reward: BalanceOf<T> =
                         stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
                     if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
-                        log::warn!("Failure rewarding staker {}: {:?}", staker, error);
+                        log::warn!(target: LOG_TARGET, "Failure rewarding staker {}: {:?}", staker, error);
                     } else {
                         // Autocompound
                         let compound_percentage = Autocompound::<T>::get(staker.clone());
@@ -1275,6 +1276,7 @@ pub mod pallet {
                                 Self::do_stake_at_position(&staker, compound_amount, pos, false)
                             {
                                 log::warn!(
+                                    target: LOG_TARGET,
                                     "Failure autocompounding for staker {} to candidate {}: {:?}",
                                     staker,
                                     collator,
@@ -1439,6 +1441,7 @@ pub mod pallet {
     impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
         fn new_session(index: SessionIndex) -> Option<Vec<T::AccountId>> {
             log::info!(
+                target: LOG_TARGET,
                 "assembling new collators for new session {} at #{:?}",
                 index,
                 <frame_system::Pallet<T>>::block_number(),
@@ -1490,7 +1493,7 @@ pub mod pallet {
                 if let Err(error) =
                     T::Currency::transfer(&account, &pot_account, extra_reward, KeepAlive)
                 {
-                    log::warn!("Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
+                    log::warn!(target: LOG_TARGET, "Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
                 }
             }
 
