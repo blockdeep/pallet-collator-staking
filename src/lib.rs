@@ -358,14 +358,10 @@ pub mod pallet {
             CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
 
             let pot_account = Pallet::<T>::account_id();
-            let has_balance =
+            let pot_exists =
                 T::Currency::free_balance(&pot_account) >= T::Currency::minimum_balance();
-            if !has_balance {
-                if let Err(error) =
-                    T::Currency::deposit_into_existing(&pot_account, T::Currency::minimum_balance())
-                {
-                    log::warn!(target: LOG_TARGET, "Failure to mint the existential deposit to the pot account: {:?}", error);
-                }
+            if !pot_exists {
+                let _ = T::Currency::deposit_creating(&pot_account, T::Currency::minimum_balance());
             }
         }
     }
@@ -1032,9 +1028,7 @@ pub mod pallet {
         ///
         /// The account has to reserve the candidacy bond. If the account was previously a candidate
         /// the retained stake will be reincluded.
-        fn do_register_as_candidate(
-            who: &T::AccountId,
-        ) -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
+        fn do_register_as_candidate(who: &T::AccountId) -> DispatchResult {
             let deposit = CandidacyBond::<T>::get();
 
             // In case the staker already had non-claimed stake we calculate it now.
@@ -1062,18 +1056,19 @@ pub mod pallet {
                     candidates
                         .try_insert(0, info.clone())
                         .map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
-                    // We must add the stake AFTER inserting the candidate into the list.
-                    // otherwise the function will check the account is not yet a candidate and fail.
-                    let sort = !already_staked.is_zero();
-                    Self::do_stake_at_position(who, deposit, 0, sort)?;
-
-                    Self::deposit_event(Event::CandidateAdded {
-                        account_id: who.clone(),
-                        deposit,
-                    });
                     Ok(info)
                 },
-            )
+            )?;
+            // We must add the stake AFTER inserting the candidate into the list.
+            // otherwise the function will check the account is not yet a candidate and fail.
+            let sort = !already_staked.is_zero();
+            Self::do_stake_at_position(who, deposit, 0, sort)?;
+
+            Self::deposit_event(Event::CandidateAdded {
+                account_id: who.clone(),
+                deposit,
+            });
+            Ok(())
         }
 
         /// Claims all pending unstaking requests for a given user.
@@ -1114,8 +1109,26 @@ pub mod pallet {
                 position < CandidateList::<T>::decode_len().unwrap_or_default(),
                 Error::<T>::NotCandidate
             );
-            let candidate = &mut CandidateList::<T>::get()[position];
-            Self::add_stake_to_candidate(staker, amount, candidate)?;
+            CandidateList::<T>::try_mutate(|candidates| -> DispatchResult {
+                let candidate = &mut candidates[position];
+                Stake::<T>::try_mutate(candidate.who.clone(), staker, |stake| -> DispatchResult {
+                    let final_staker_stake = stake.saturating_add(amount);
+                    ensure!(
+                        final_staker_stake >= MinStake::<T>::get(),
+                        Error::<T>::InsufficientStake
+                    );
+                    T::Currency::reserve(staker, amount)?;
+                    *stake = final_staker_stake;
+                    candidate.deposit.saturating_accrue(amount);
+                    Self::deposit_event(Event::StakeAdded {
+                        staker: staker.clone(),
+                        candidate: candidate.who.clone(),
+                        amount,
+                    });
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
             let final_position = if sort {
                 Self::reassign_candidate_position(position)?
             } else {
@@ -1139,39 +1152,6 @@ pub mod pallet {
                     .map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
                 Ok(new_pos)
             })
-        }
-
-        /// Adds stake into a given candidate by providing its mutable reference.
-        ///
-        /// Returns a tuple containing the stake for the staker and the candidate after the operation
-        /// takes place.
-        ///
-        /// Computes in **O(1)** time.
-        fn add_stake_to_candidate(
-            staker: &T::AccountId,
-            amount: BalanceOf<T>,
-            candidate: &mut CandidateInfo<T::AccountId, BalanceOf<T>>,
-        ) -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
-            Stake::<T>::try_mutate(
-                candidate.who.clone(),
-                staker,
-                |stake| -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
-                    let final_staker_stake = stake.saturating_add(amount);
-                    ensure!(
-                        final_staker_stake >= MinStake::<T>::get(),
-                        Error::<T>::InsufficientStake
-                    );
-                    T::Currency::reserve(staker, amount)?;
-                    *stake = final_staker_stake;
-                    candidate.deposit.saturating_accrue(amount);
-                    Self::deposit_event(Event::StakeAdded {
-                        staker: staker.clone(),
-                        candidate: candidate.who.clone(),
-                        amount,
-                    });
-                    Ok((final_staker_stake, candidate.deposit))
-                },
-            )
         }
 
         /// Return the total number of accounts that are eligible collators (candidates and
@@ -1231,6 +1211,11 @@ pub mod pallet {
                     });
                     Self::reassign_candidate_position(position)?;
                 }
+                Self::deposit_event(Event::StakeRemoved {
+                    staker: staker.clone(),
+                    candidate: candidate.clone(),
+                    amount: stake,
+                });
             }
             Ok(stake)
         }
