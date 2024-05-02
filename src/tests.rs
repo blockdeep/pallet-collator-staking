@@ -12,18 +12,20 @@ use pallet_balances::Error as BalancesError;
 use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage, Percent};
 use std::ops::RangeInclusive;
 
-fn fund_account(acc: <Test as frame_system::Config>::AccountId) {
+type AccountId = <Test as frame_system::Config>::AccountId;
+
+fn fund_account(acc: AccountId) {
     Balances::make_free_balance_be(&acc, 100);
 }
 
-fn register_keys(acc: <Test as frame_system::Config>::AccountId) {
+fn register_keys(acc: AccountId) {
     let key = MockSessionKeys {
         aura: UintAuthorityId(acc),
     };
     Session::set_keys(RuntimeOrigin::signed(acc).into(), key, Vec::new()).unwrap();
 }
 
-fn register_candidates(range: RangeInclusive<<Test as frame_system::Config>::AccountId>) {
+fn register_candidates(range: RangeInclusive<AccountId>) {
     for ii in range {
         if ii > 5 {
             // only keys were registered in mock for 1 to 5
