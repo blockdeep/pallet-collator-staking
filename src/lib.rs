@@ -474,8 +474,6 @@ pub mod pallet {
         UpdateCandidateListFailed,
         /// Deposit amount is too low to take the target's slot in the candidate list.
         InsufficientBond,
-        /// The target account to be replaced in the candidate list is not a candidate.
-        TargetIsNotCandidate,
         /// The updated deposit amount is equal to the amount already reserved.
         IdenticalDeposit,
         /// Cannot lower candidacy bond while occupying a future collator slot in the list.
@@ -801,9 +799,12 @@ pub mod pallet {
                 Error::<T>::AlreadyInvulnerable
             );
             ensure!(
-                deposit >= CandidacyBond::<T>::get(),
-                Error::<T>::InsufficientBond
+                Self::get_candidate(&who).is_err(),
+                Error::<T>::AlreadyCandidate
             );
+
+            let candidacy_bond = CandidacyBond::<T>::get();
+            ensure!(deposit >= candidacy_bond, Error::<T>::InsufficientBond);
 
             let collator_key =
                 T::CollatorIdOf::convert(who.clone()).ok_or(Error::<T>::NoAssociatedCollatorId)?;
@@ -819,8 +820,16 @@ pub mod pallet {
                 Error::<T>::CanRegister
             );
 
+            // Remove old candidate
             let target_info = Self::try_remove_candidate_from_account(&target, true, false)?;
             ensure!(deposit > target_info.deposit, Error::<T>::InsufficientBond);
+
+            // Register the new candidate
+            Self::do_register_as_candidate(&who)?;
+            let stake_left = deposit.saturating_sub(candidacy_bond);
+            if !stake_left.is_zero() {
+                Self::do_stake_at_position(&who, stake_left, 0, true)?;
+            }
 
             Self::deposit_event(Event::CandidateReplaced {
                 old: target,

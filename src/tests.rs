@@ -10,6 +10,40 @@ use frame_support::{
 };
 use pallet_balances::Error as BalancesError;
 use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage, Percent};
+use std::ops::RangeInclusive;
+
+fn fund_account(acc: <Test as frame_system::Config>::AccountId) {
+    Balances::make_free_balance_be(&acc, 100);
+}
+
+fn register_keys(acc: <Test as frame_system::Config>::AccountId) {
+    let key = MockSessionKeys {
+        aura: UintAuthorityId(acc),
+    };
+    Session::set_keys(RuntimeOrigin::signed(acc).into(), key, Vec::new()).unwrap();
+}
+
+fn register_candidates(range: RangeInclusive<<Test as frame_system::Config>::AccountId>) {
+    for ii in range {
+        if ii > 5 {
+            // only keys were registered in mock for 1 to 5
+            fund_account(ii);
+            register_keys(ii);
+        }
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(ii),
+        ));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+            staker: ii,
+            candidate: ii,
+            amount: 10,
+        }));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
+            account_id: ii,
+            deposit: 10,
+        }));
+    }
+}
 
 #[test]
 fn basic_setup_works() {
@@ -231,20 +265,7 @@ fn candidate_to_invulnerable_works() {
         assert_eq!(Balances::free_balance(3), 100);
         assert_eq!(Balances::free_balance(4), 100);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 4,
-            deposit: 10,
-        }));
+        register_candidates(3..=4);
 
         assert_eq!(Stake::<Test>::get(3, 3), 10);
         assert_eq!(Balances::free_balance(3), 90);
@@ -370,18 +391,7 @@ fn set_candidacy_bond_with_one_candidate() {
             deposit: 10,
         };
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 3,
-            candidate: 3,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
+        register_candidates(3..=3);
         assert_eq!(CandidateList::<Test>::get(), vec![candidate_3.clone()]);
         assert_eq!(Stake::<Test>::get(3, 3), 10);
 
@@ -441,44 +451,7 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
             deposit: 10,
         };
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 3,
-            candidate: 3,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 4,
-            candidate: 4,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 4,
-            deposit: 10,
-        }));
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 5,
-            candidate: 5,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 5,
-            deposit: 10,
-        }));
+        register_candidates(3..=5);
 
         assert_eq!(
             CandidateList::<Test>::get(),
@@ -554,28 +527,11 @@ fn cannot_register_candidate_if_too_many() {
         // MaxCandidates: u32 = 20
         // Aside from 3, 4, and 5, create enough accounts to have 21 potential
         // candidates.
-        for i in 6..=23 {
-            Balances::make_free_balance_be(&i, 100);
-            let key = MockSessionKeys {
-                aura: UintAuthorityId(i),
-            };
-            Session::set_keys(RuntimeOrigin::signed(i).into(), key, Vec::new()).unwrap();
+        for acc in 6..=23 {
+            fund_account(acc);
+            register_keys(acc);
         }
-
-        for c in 3..=22 {
-            assert_ok!(CollatorStaking::register_as_candidate(
-                RuntimeOrigin::signed(c)
-            ));
-            System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-                staker: c,
-                candidate: c,
-                amount: 10,
-            }));
-            System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-                account_id: c,
-                deposit: 10,
-            }));
-        }
+        register_candidates(3..=22);
 
         assert_noop!(
             CollatorStaking::register_as_candidate(RuntimeOrigin::signed(23)),
@@ -604,18 +560,7 @@ fn cannot_unregister_candidate_if_too_few() {
 
         // reset desired candidates:
         DesiredCandidates::<Test>::put(1);
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 4,
-            candidate: 4,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 4,
-            deposit: 10,
-        }));
+        register_candidates(4..=4);
 
         // now we can remove `2`
         assert_ok!(CollatorStaking::remove_invulnerable(
@@ -664,18 +609,7 @@ fn cannot_register_dupe_candidate() {
         initialize_to_block(1);
 
         // can add 3 as candidate
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 3,
-            candidate: 3,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
+        register_candidates(3..=3);
         let addition = CandidateInfo {
             who: 3,
             deposit: 10,
@@ -707,18 +641,7 @@ fn cannot_register_as_candidate_if_poor() {
         assert_eq!(Balances::free_balance(33), 0);
 
         // works
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 3,
-            candidate: 3,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
+        register_candidates(3..=3);
 
         // poor
         assert_noop!(
@@ -746,31 +669,7 @@ fn register_as_candidate_works() {
         assert_eq!(Balances::free_balance(4), 100);
         assert_eq!(Stake::<Test>::get(4, 4), 0);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 3,
-            candidate: 3,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 3,
-            deposit: 10,
-        }));
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
-            staker: 4,
-            candidate: 4,
-            amount: 10,
-        }));
-        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
-            account_id: 4,
-            deposit: 10,
-        }));
+        register_candidates(3..=4);
 
         assert_eq!(Balances::free_balance(3), 90);
         assert_eq!(Stake::<Test>::get(3, 3), 10);
@@ -810,29 +709,18 @@ fn cannot_take_candidate_slot_if_keys_not_registered() {
 #[test]
 fn cannot_take_candidate_slot_if_duplicate() {
     new_test_ext().execute_with(|| {
-        // can add 3 as candidate
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        // tuple of (id, deposit).
-        let candidate_3 = CandidateInfo {
-            who: 3,
-            deposit: 10,
-        };
-        let candidate_4 = CandidateInfo {
-            who: 4,
-            deposit: 10,
-        };
+        initialize_to_block(1);
+
+        // we cannot take a candidate slot if the list is not already full
+        register_candidates(3..=22);
+
         let actual_candidates = CandidateList::<Test>::get()
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(actual_candidates, vec![candidate_4, candidate_3]);
-        assert_eq!(LastAuthoredBlock::<Test>::get(3), 10);
-        assert_eq!(LastAuthoredBlock::<Test>::get(4), 10);
+        assert_eq!(actual_candidates.len(), 20);
+        assert_eq!(LastAuthoredBlock::<Test>::get(3), 11);
+        assert_eq!(LastAuthoredBlock::<Test>::get(4), 11);
         assert_eq!(Balances::free_balance(3), 90);
 
         // but no more
@@ -846,29 +734,14 @@ fn cannot_take_candidate_slot_if_duplicate() {
 #[test]
 fn cannot_take_candidate_slot_if_target_invalid() {
     new_test_ext().execute_with(|| {
-        // can add 3 as candidate
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        // tuple of (id, deposit).
-        let candidate_3 = CandidateInfo {
-            who: 3,
-            deposit: 10,
-        };
-        assert_eq!(
-            CandidateList::<Test>::get()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![candidate_3]
-        );
-        assert_eq!(LastAuthoredBlock::<Test>::get(3), 10);
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 100);
+        initialize_to_block(1);
+
+        register_candidates(4..=23);
+        assert_eq!(CandidateList::<Test>::get().len(), 20);
 
         assert_noop!(
-            CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(4), 50u64.into(), 5),
-            Error::<Test>::TargetIsNotCandidate,
+            CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(3), 11u64.into(), 24),
+            Error::<Test>::NotCandidate,
         );
     })
 }
@@ -876,9 +749,9 @@ fn cannot_take_candidate_slot_if_target_invalid() {
 #[test]
 fn cannot_take_candidate_slot_if_poor() {
     new_test_ext().execute_with(|| {
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
+        initialize_to_block(1);
+
+        register_candidates(4..=23);
         assert_eq!(Balances::free_balance(3), 100);
         assert_eq!(Balances::free_balance(33), 0);
 
@@ -888,6 +761,11 @@ fn cannot_take_candidate_slot_if_poor() {
             20u64.into(),
             4
         ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateReplaced {
+            old: 4,
+            new: 3,
+            deposit: 20,
+        }));
 
         // poor
         assert_noop!(
@@ -900,6 +778,8 @@ fn cannot_take_candidate_slot_if_poor() {
 #[test]
 fn cannot_take_candidate_slot_if_insufficient_deposit() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         assert_ok!(CollatorStaking::register_as_candidate(
             RuntimeOrigin::signed(3)
         ));
@@ -908,42 +788,60 @@ fn cannot_take_candidate_slot_if_insufficient_deposit() {
             3,
             60u64.into()
         ));
-        assert_eq!(Balances::free_balance(3), 40);
+        assert_eq!(Balances::free_balance(3), 30);
+        assert_eq!(Stake::<Test>::get(3, 3), 70);
         assert_eq!(Balances::free_balance(4), 100);
+        assert_eq!(Stake::<Test>::get(4, 4), 0);
+
         assert_noop!(
             CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(4), 5u64.into(), 3),
             Error::<Test>::InsufficientBond,
         );
-        assert_eq!(Balances::free_balance(3), 40);
+
+        assert_eq!(Balances::free_balance(3), 30);
+        assert_eq!(Stake::<Test>::get(3, 3), 70);
         assert_eq!(Balances::free_balance(4), 100);
+        assert_eq!(Stake::<Test>::get(4, 4), 0);
     });
 }
 
 #[test]
 fn cannot_take_candidate_slot_if_deposit_less_than_target() {
     new_test_ext().execute_with(|| {
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
+        initialize_to_block(1);
+
+        fund_account(23);
+        register_keys(23);
+
+        register_candidates(3..=22);
         assert_ok!(CollatorStaking::stake(
             RuntimeOrigin::signed(3),
             3,
             60u64.into()
         ));
-        assert_eq!(Balances::free_balance(3), 40);
-        assert_eq!(Balances::free_balance(4), 100);
+
+        assert_eq!(Balances::free_balance(3), 30);
+        assert_eq!(Stake::<Test>::get(3, 3), 70);
+        assert_eq!(Balances::free_balance(23), 100);
+        assert_eq!(Stake::<Test>::get(23, 23), 0);
+
         assert_noop!(
-            CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(4), 20u64.into(), 3),
+            CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(23), 20u64.into(), 3),
             Error::<Test>::InsufficientBond,
         );
-        assert_eq!(Balances::free_balance(3), 40);
-        assert_eq!(Balances::free_balance(4), 100);
+
+        assert_eq!(Balances::free_balance(3), 30);
+        assert_eq!(Stake::<Test>::get(3, 3), 70);
+        assert_eq!(Balances::free_balance(23), 100);
+        assert_eq!(Stake::<Test>::get(23, 23), 0);
     });
 }
 
 #[test]
 fn take_candidate_slot_works() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         // given
         assert_eq!(DesiredCandidates::<Test>::get(), 2);
         assert_eq!(CandidacyBond::<Test>::get(), 10);
@@ -951,137 +849,35 @@ fn take_candidate_slot_works() {
         assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
         assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
-        // take two endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
+        register_candidates(3..=22);
+        assert_eq!(CandidateList::<Test>::get().iter().count(), 20);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 90);
-        assert_eq!(Balances::free_balance(5), 90);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-
-        Balances::make_free_balance_be(&6, 100);
-        let key = MockSessionKeys {
-            aura: UintAuthorityId(6),
-        };
-        Session::set_keys(RuntimeOrigin::signed(6).into(), key, Vec::new()).unwrap();
+        fund_account(23);
+        register_keys(23);
 
         assert_ok!(CollatorStaking::take_candidate_slot(
-            RuntimeOrigin::signed(6),
+            RuntimeOrigin::signed(23),
             50u64.into(),
             4
         ));
-
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 90);
-        assert_eq!(Balances::free_balance(6), 50);
-
-        // tuple of (id, deposit).
-        let candidate_3 = CandidateInfo {
-            who: 3,
-            deposit: 10,
-        };
-        let candidate_6 = CandidateInfo {
-            who: 6,
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateReplaced {
+            old: 4,
+            new: 23,
             deposit: 50,
-        };
-        let candidate_5 = CandidateInfo {
-            who: 5,
-            deposit: 10,
-        };
-        let mut actual_candidates = CandidateList::<Test>::get()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        actual_candidates.sort_by(|info_1, info_2| info_1.deposit.cmp(&info_2.deposit));
-        assert_eq!(
-            CandidateList::<Test>::get()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![candidate_5, candidate_3, candidate_6]
-        );
-    });
-}
+        }));
 
-#[test]
-fn increase_candidacy_bond_non_candidate_account() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20),
-            Error::<Test>::NotCandidate
-        );
-    });
-}
-
-#[test]
-fn increase_candidacy_bond_insufficient_balance() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        // take two endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
         assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 90);
-        assert_eq!(Balances::free_balance(5), 90);
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 110),
-            BalancesError::<Test>::InsufficientBalance
-        );
-
-        assert_eq!(Balances::free_balance(3), 90);
+        assert_eq!(Stake::<Test>::get(4, 4), 0);
+        assert_eq!(Balances::free_balance(23), 50);
+        assert_eq!(Stake::<Test>::get(23, 23), 50);
     });
 }
 
 #[test]
-fn increase_candidacy_bond_works() {
+fn candidate_list_works() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         // given
         assert_eq!(DesiredCandidates::<Test>::get(), 2);
         assert_eq!(CandidacyBond::<Test>::get(), 10);
@@ -1093,199 +889,16 @@ fn increase_candidacy_bond_works() {
         assert_eq!(Balances::free_balance(3), 100);
         assert_eq!(Balances::free_balance(4), 100);
         assert_eq!(Balances::free_balance(5), 100);
+        register_candidates(3..=5);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 30));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 25));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 30));
 
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 90);
-        assert_eq!(Balances::free_balance(5), 90);
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 30));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 40));
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-        assert_eq!(Balances::free_balance(3), 80);
-        assert_eq!(Balances::free_balance(4), 70);
-        assert_eq!(Balances::free_balance(5), 60);
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 40));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 60));
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-        assert_eq!(Balances::free_balance(3), 60);
-        assert_eq!(Balances::free_balance(4), 40);
-        assert_eq!(Balances::free_balance(5), 60);
-    });
-}
-
-#[test]
-fn decrease_candidacy_bond_non_candidate_account() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-
-        assert_eq!(Balances::free_balance(5), 100);
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 10),
-            Error::<Test>::NotCandidate
-        );
-        assert_eq!(Balances::free_balance(5), 100);
-    });
-}
-
-#[test]
-fn decrease_candidacy_bond_insufficient_funds() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        // take two endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 60));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 60));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
-
-        assert_eq!(Balances::free_balance(3), 40);
-        assert_eq!(Balances::free_balance(4), 40);
-        assert_eq!(Balances::free_balance(5), 40);
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 0),
-            Error::<Test>::InsufficientStake
-        );
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 5),
-            Error::<Test>::InsufficientStake
-        );
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 9),
-            Error::<Test>::InsufficientStake
-        );
-
-        assert_eq!(Balances::free_balance(3), 40);
-        assert_eq!(Balances::free_balance(4), 40);
-        assert_eq!(Balances::free_balance(5), 40);
-    });
-}
-
-#[test]
-fn decrease_candidacy_bond_occupying_top_slot() {
-    new_test_ext().execute_with(|| {
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        // Register 3 candidates.
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-        // And update their bids.
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(3),
-            3,
-            30u64.into()
-        ));
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(4),
-            4,
-            30u64.into()
-        ));
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(5),
-            5,
-            60u64.into()
-        ));
-
-        // tuple of (id, deposit).
         let candidate_3 = CandidateInfo {
             who: 3,
-            deposit: 30,
-        };
-        let candidate_4 = CandidateInfo {
-            who: 4,
-            deposit: 30,
-        };
-        let candidate_5 = CandidateInfo {
-            who: 5,
-            deposit: 60,
-        };
-        assert_eq!(
-            CandidateList::<Test>::get()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![candidate_4, candidate_3, candidate_5]
-        );
-
-        // Candidates 5 and 3 can't decrease their deposits because they are the 2 top candidates.
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 29),
-            Error::<Test>::InvalidUnreserve,
-        );
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 29),
-            Error::<Test>::InvalidUnreserve,
-        );
-        // But candidate 4 should have to be able to decrease the deposit up to the minimum.
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(4),
-            4,
-            29u64.into()
-        ));
-
-        // Make candidate 4 outbid candidate 3, taking their spot as the second-highest bid.
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(4),
-            4,
-            35u64.into()
-        ));
-
-        // tuple of (id, deposit).
-        let candidate_3 = CandidateInfo {
-            who: 3,
-            deposit: 30,
+            deposit: 40,
         };
         let candidate_4 = CandidateInfo {
             who: 4,
@@ -1300,172 +913,7 @@ fn decrease_candidacy_bond_occupying_top_slot() {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>(),
-            vec![candidate_3, candidate_4, candidate_5]
-        );
-
-        // Now candidates 5 and 4 are the 2 top candidates, so they can't decrease their deposits.
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 34),
-            Error::<Test>::InvalidUnreserve,
-        );
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 34),
-            Error::<Test>::InvalidUnreserve,
-        );
-        // Candidate 3 should have to be able to decrease the deposit up to the minimum now that
-        // they've fallen out of the top spots.
-        assert_ok!(CollatorStaking::stake(
-            RuntimeOrigin::signed(3),
-            3,
-            10u64.into()
-        ));
-    });
-}
-
-#[test]
-fn decrease_candidacy_bond_works() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        // take three endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 90);
-        assert_eq!(Balances::free_balance(5), 90);
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 30));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 40));
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-        assert_eq!(Balances::free_balance(3), 80);
-        assert_eq!(Balances::free_balance(4), 70);
-        assert_eq!(Balances::free_balance(5), 60);
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 10));
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 70);
-        assert_eq!(Balances::free_balance(5), 60);
-    });
-}
-
-#[test]
-fn update_candidacy_bond_with_identical_amount() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        // take three endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_eq!(Balances::free_balance(3), 90);
-        assert_eq!(Balances::free_balance(4), 90);
-        assert_eq!(Balances::free_balance(5), 90);
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 30));
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 40));
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 3);
-        assert_eq!(Balances::free_balance(3), 80);
-        assert_eq!(Balances::free_balance(4), 70);
-        assert_eq!(Balances::free_balance(5), 60);
-
-        assert_noop!(
-            CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20),
-            Error::<Test>::IdenticalDeposit
-        );
-        assert_eq!(Balances::free_balance(3), 80);
-    });
-}
-
-#[test]
-fn candidate_list_works() {
-    new_test_ext().execute_with(|| {
-        // given
-        assert_eq!(DesiredCandidates::<Test>::get(), 2);
-        assert_eq!(CandidacyBond::<Test>::get(), 10);
-
-        assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-
-        // take three endowed, non-invulnerables accounts.
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_eq!(Balances::free_balance(5), 100);
-
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 30));
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 25));
-
-        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 10));
-
-        let candidate_3 = CandidateInfo {
-            who: 3,
-            deposit: 30,
-        };
-        let candidate_4 = CandidateInfo {
-            who: 4,
-            deposit: 25,
-        };
-        let candidate_5 = CandidateInfo {
-            who: 5,
-            deposit: 10,
-        };
-        assert_eq!(
-            CandidateList::<Test>::get()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![candidate_5, candidate_4, candidate_3]
+            vec![candidate_4, candidate_3, candidate_5]
         );
     });
 }
