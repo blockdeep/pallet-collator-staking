@@ -1276,6 +1276,10 @@ pub mod pallet {
                 let collator_info = &CandidateList::<T>::get()[pos];
                 let total_rewards = Rewards::<T>::get(session);
                 let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
+                if rewardable_blocks.is_zero() {
+                    // we cannot divide by zero
+                    return;
+                }
                 let collator_percentage = CollatorRewardPercentage::<T>::get();
 
                 let rewards_all: BalanceOf<T> =
