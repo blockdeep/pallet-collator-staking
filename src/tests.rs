@@ -21,6 +21,11 @@ fn basic_setup_works() {
             CollatorRewardPercentage::<Test>::get(),
             Percent::from_parts(20)
         );
+        // The minimum balance should have been minted
+        assert_eq!(
+            Balances::free_balance(CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
         // genesis should sort input
         assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
     });

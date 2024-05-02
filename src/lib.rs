@@ -356,6 +356,17 @@ pub mod pallet {
             MinStake::<T>::put(self.min_stake);
             Invulnerables::<T>::put(bounded_invulnerables);
             CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
+
+            let pot_account = Pallet::<T>::account_id();
+            let has_balance =
+                T::Currency::free_balance(&pot_account) >= T::Currency::minimum_balance();
+            if !has_balance {
+                if let Err(error) =
+                    T::Currency::deposit_into_existing(&pot_account, T::Currency::minimum_balance())
+                {
+                    log::warn!(target: LOG_TARGET, "Failure to mint the existential deposit to the pot account: {:?}", error);
+                }
+            }
         }
     }
 
@@ -1517,8 +1528,9 @@ pub mod pallet {
                 }
             }
 
-            // Rewards are the total amount in the pot
-            let total_rewards = T::Currency::free_balance(&pot_account);
+            // Rewards are the total amount in the pot minus the existential deposit.
+            let total_rewards = T::Currency::free_balance(&pot_account)
+                .saturating_sub(T::Currency::minimum_balance());
             Rewards::<T>::insert(session, total_rewards);
         }
     }
