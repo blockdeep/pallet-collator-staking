@@ -193,8 +193,8 @@ impl Config for Test {
     type CollatorIdOf = IdentityCollator;
     type CollatorRegistration = IsRegistered;
     type MaxStakedCandidates = ConstU32<16>;
-    type CollatorUnstakingDelay = ConstU64<2>;
-    type UserUnstakingDelay = ConstU64<5>;
+    type CollatorUnstakingDelay = ConstU64<5>;
+    type UserUnstakingDelay = ConstU64<2>;
     type WeightInfo = ();
 }
 

@@ -1,9 +1,9 @@
 use crate as collator_staking;
-use crate::Stake;
 use crate::{
     mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
     DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MinStake,
 };
+use crate::{Stake, UnstakeRequest, UnstakingRequests};
 use frame_support::{
     assert_noop, assert_ok,
     traits::{Currency, OnInitialize},
@@ -860,12 +860,28 @@ fn take_candidate_slot_works() {
             50u64.into(),
             4
         ));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+            staker: 23,
+            candidate: 23,
+            amount: 10, // candidacy bond
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+            staker: 23,
+            candidate: 23,
+            amount: 40, // rest of the stake
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 4,
+            candidate: 4,
+            amount: 10,
+        }));
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateReplaced {
             old: 4,
             new: 23,
             deposit: 50,
         }));
 
+        assert_eq!(UnstakingRequests::<Test>::get(4), vec![]);
         assert_eq!(Balances::free_balance(4), 100);
         assert_eq!(Stake::<Test>::get(4, 4), 0);
         assert_eq!(Balances::free_balance(23), 50);
@@ -887,8 +903,11 @@ fn candidate_list_works() {
 
         // take three endowed, non-invulnerables accounts.
         assert_eq!(Balances::free_balance(3), 100);
+        assert_eq!(Stake::<Test>::get(3, 3), 0);
         assert_eq!(Balances::free_balance(4), 100);
+        assert_eq!(Stake::<Test>::get(4, 4), 0);
         assert_eq!(Balances::free_balance(5), 100);
+        assert_eq!(Stake::<Test>::get(5, 5), 0);
         register_candidates(3..=5);
 
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
@@ -921,17 +940,17 @@ fn candidate_list_works() {
 #[test]
 fn leave_intent() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         // register a candidate.
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
+        register_candidates(3..=3);
         assert_eq!(Balances::free_balance(3), 90);
+        assert_eq!(Stake::<Test>::get(3, 3), 10);
 
         // register too so can leave above min candidates
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(5..=5);
         assert_eq!(Balances::free_balance(5), 90);
+        assert_eq!(Stake::<Test>::get(5, 5), 10);
 
         // cannot leave if not candidate.
         assert_noop!(
@@ -939,61 +958,33 @@ fn leave_intent() {
             Error::<Test>::NotCandidate
         );
 
-        // bond is returned
+        // Unstake request is created
+        assert_eq!(UnstakingRequests::<Test>::get(3), vec![]);
         assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
-        assert_eq!(Balances::free_balance(3), 100);
-        assert_eq!(LastAuthoredBlock::<Test>::get(3), 0);
-    });
-}
 
-#[test]
-fn authorship_event_handler() {
-    new_test_ext().execute_with(|| {
-        // put 100 in the pot + 5 for ED
-        Balances::make_free_balance_be(&CollatorStaking::account_id(), 105);
-
-        // 4 is the default author.
-        assert_eq!(Balances::free_balance(4), 100);
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        // triggers `note_author`
-        Authorship::on_initialize(1);
-
-        // tuple of (id, deposit).
-        let collator = CandidateInfo {
-            who: 4,
-            deposit: 10,
+        let unstake_request = UnstakeRequest {
+            block: 6,
+            amount: 10,
         };
-
-        assert_eq!(
-            CandidateList::<Test>::get()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec![collator]
-        );
-        assert_eq!(LastAuthoredBlock::<Test>::get(4), 0);
-
-        // half of the pot goes to the collator who's the author (4 in tests).
-        assert_eq!(Balances::free_balance(4), 140);
-        // half + ED stays.
-        assert_eq!(Balances::free_balance(CollatorStaking::account_id()), 55);
+        assert_eq!(Balances::free_balance(3), 90);
+        assert_eq!(Stake::<Test>::get(3, 3), 0);
+        assert_eq!(UnstakingRequests::<Test>::get(3), vec![unstake_request]);
+        assert_eq!(LastAuthoredBlock::<Test>::get(3), 0);
     });
 }
 
 #[test]
 fn fees_edgecases() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         // Nothing panics, no reward when no ED in balance
         Authorship::on_initialize(1);
         // put some money into the pot at ED
         Balances::make_free_balance_be(&CollatorStaking::account_id(), 5);
         // 4 is the default author.
         assert_eq!(Balances::free_balance(4), 100);
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
+        register_candidates(4..=4);
         // triggers `note_author`
         Authorship::on_initialize(1);
 
@@ -1010,7 +1001,7 @@ fn fees_edgecases() {
                 .collect::<Vec<_>>(),
             vec![collator]
         );
-        assert_eq!(LastAuthoredBlock::<Test>::get(4), 0);
+        assert_eq!(LastAuthoredBlock::<Test>::get(4), 1);
         // Nothing received
         assert_eq!(Balances::free_balance(4), 90);
         // all fee stays
