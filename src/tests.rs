@@ -26,6 +26,7 @@ fn register_keys(acc: AccountId) {
 }
 
 fn register_candidates(range: RangeInclusive<AccountId>) {
+    let candidacy_bond = CandidacyBond::<Test>::get();
     for ii in range {
         if ii > 5 {
             // only keys were registered in mock for 1 to 5
@@ -44,6 +45,7 @@ fn register_candidates(range: RangeInclusive<AccountId>) {
             account_id: ii,
             deposit: 10,
         }));
+        assert_eq!(Stake::<Test>::get(ii, ii), candidacy_bond);
     }
 }
 
@@ -384,6 +386,7 @@ fn set_candidacy_bond_empty_candidate_list() {
 fn set_candidacy_bond_with_one_candidate() {
     new_test_ext().execute_with(|| {
         initialize_to_block(1);
+
         // given
         assert_eq!(CandidacyBond::<Test>::get(), 10);
         assert!(CandidateList::<Test>::get().is_empty());
@@ -406,6 +409,7 @@ fn set_candidacy_bond_with_one_candidate() {
             bond_amount: 7,
         }));
         assert_eq!(CandidacyBond::<Test>::get(), 7);
+        initialize_to_block(10);
         assert_eq!(CandidateList::<Test>::get(), vec![candidate_3.clone()]);
 
         // can increase up to initial deposit
@@ -417,9 +421,10 @@ fn set_candidacy_bond_with_one_candidate() {
             bond_amount: 10,
         }));
         assert_eq!(CandidacyBond::<Test>::get(), 10);
+        initialize_to_block(20);
         assert_eq!(CandidateList::<Test>::get(), vec![candidate_3.clone()]);
 
-        // can increase past initial deposit, but candidates should remain until the current session ends
+        // can increase past initial deposit, kicking candidates under the new value
         assert_ok!(CollatorStaking::set_candidacy_bond(
             RuntimeOrigin::signed(RootAccount::get()),
             20
@@ -428,7 +433,8 @@ fn set_candidacy_bond_with_one_candidate() {
             bond_amount: 20,
         }));
         assert_eq!(CandidacyBond::<Test>::get(), 20);
-        assert_eq!(CandidateList::<Test>::get(), vec![candidate_3.clone()]);
+        initialize_to_block(30);
+        assert_eq!(CandidateList::<Test>::get(), vec![]);
     });
 }
 
@@ -467,12 +473,13 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
         // can decrease with multiple candidates
         assert_ok!(CollatorStaking::set_candidacy_bond(
             RuntimeOrigin::signed(RootAccount::get()),
-            7
+            1
         ));
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewCandidacyBond {
-            bond_amount: 7,
+            bond_amount: 1,
         }));
-        assert_eq!(CandidacyBond::<Test>::get(), 7);
+        assert_eq!(CandidacyBond::<Test>::get(), 1);
+        CollatorStaking::kick_stale_candidates();
         assert_eq!(
             CandidateList::<Test>::get(),
             vec![
@@ -491,6 +498,7 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
             bond_amount: 10,
         }));
         assert_eq!(CandidacyBond::<Test>::get(), 10);
+        CollatorStaking::kick_stale_candidates();
         assert_eq!(
             CandidateList::<Test>::get(),
             vec![
@@ -500,8 +508,7 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
             ]
         );
 
-        // can increase past initial deposit, candidates should remain in the list until
-        // the current session ends
+        // can increase past initial deposit
         assert_ok!(CollatorStaking::set_candidacy_bond(
             RuntimeOrigin::signed(RootAccount::get()),
             20
@@ -509,13 +516,37 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewCandidacyBond {
             bond_amount: 20,
         }));
+        assert_eq!(CandidacyBond::<Test>::get(), 20);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
+        let new_candidate_5 = CandidateInfo {
+            who: 5,
+            deposit: 30,
+        };
         assert_eq!(
             CandidateList::<Test>::get(),
             vec![
-                candidate_5.clone(),
                 candidate_4.clone(),
-                candidate_3.clone()
+                candidate_3.clone(),
+                new_candidate_5.clone()
             ]
+        );
+        CollatorStaking::kick_stale_candidates();
+        assert_eq!(CandidateList::<Test>::get(), vec![new_candidate_5]);
+    });
+}
+
+#[test]
+fn cannot_set_candidacy_bond_lower_than_min_stake() {
+    new_test_ext().execute_with(|| {
+        // given
+        assert_eq!(CandidacyBond::<Test>::get(), 10);
+        assert_eq!(MinStake::<Test>::get(), 1);
+
+        // then
+        MinStake::<Test>::put(5);
+        assert_noop!(
+            CollatorStaking::set_candidacy_bond(RuntimeOrigin::signed(RootAccount::get()), 3),
+            Error::<Test>::InvalidCandidacyBond
         );
     });
 }

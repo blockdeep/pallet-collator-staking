@@ -1365,8 +1365,7 @@ pub mod pallet {
             let candidates = CandidateList::<T>::get();
             candidates
                 .into_iter()
-                .enumerate()
-                .filter_map(|(pos, candidate)| {
+                .filter_map(|candidate| {
                     let last_block = LastAuthoredBlock::<T>::get(candidate.who.clone());
                     let since_last = now.saturating_sub(last_block);
 
@@ -1377,7 +1376,7 @@ pub mod pallet {
                         // If they are invulnerable there is no reason for them to be in `CandidateList` also.
                         // We don't even care about the min collators here, because an Account
                         // should not be a collator twice.
-                        let _ = Self::try_remove_candidate_at_position(pos, false, false);
+                        let _ = Self::try_remove_candidate_from_account(&candidate.who, false, false);
                         None
                     } else if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit >= candidacy_bond) {
                         // Either this is a good collator (not lazy) or we are at the minimum
@@ -1386,7 +1385,7 @@ pub mod pallet {
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
                         // TODO check if the collator should have a penalty in this case
-                        let _ = Self::try_remove_candidate_at_position(pos, true, false);
+                        let _ = Self::try_remove_candidate_from_account(&candidate.who, true, false);
                         None
                     }
                 })
