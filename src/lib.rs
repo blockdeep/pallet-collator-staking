@@ -850,13 +850,10 @@ pub mod pallet {
             origin: OriginFor<T>,
             candidate: T::AccountId,
             stake: BalanceOf<T>,
-        ) -> DispatchResultWithPostInfo {
+        ) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            Self::do_stake_for_account(&who, stake, &candidate, true)?;
-            Ok(Some(T::WeightInfo::stake(
-                CandidateList::<T>::decode_len().unwrap_or_default() as u32,
-            ))
-            .into())
+            Self::do_stake_for_account(&who, &candidate, stake, true)?;
+            Ok(())
         }
 
         /// Removes stake from an account.
@@ -1003,7 +1000,7 @@ pub mod pallet {
         /// Checks whether a given account is a candidate and returns its position if successful.
         ///
         /// Computes in **O(n)** time.
-        fn get_candidate(account: &T::AccountId) -> Result<usize, ()> {
+        pub fn get_candidate(account: &T::AccountId) -> Result<usize, ()> {
             match CandidateList::<T>::get()
                 .iter()
                 .position(|c| c.who == *account)
@@ -1016,17 +1013,17 @@ pub mod pallet {
         /// Checks whether a given account is an invulnerable.
         ///
         /// Computes in **O(log n)** time.
-        fn is_invulnerable(account: &T::AccountId) -> bool {
+        pub fn is_invulnerable(account: &T::AccountId) -> bool {
             Invulnerables::<T>::get().binary_search(account).is_ok()
         }
 
         /// Adds stake into a given candidate by providing its address.
         ///
         /// Computes in **O(n)** time.
-        fn do_stake_for_account(
+        pub fn do_stake_for_account(
             staker: &T::AccountId,
-            amount: BalanceOf<T>,
             candidate: &T::AccountId,
+            amount: BalanceOf<T>,
             sort: bool,
         ) -> Result<usize, DispatchError> {
             let position = Self::get_candidate(candidate).map_err(|_| Error::<T>::NotCandidate)?;
@@ -1037,7 +1034,7 @@ pub mod pallet {
         ///
         /// The account has to reserve the candidacy bond. If the account was previously a candidate
         /// the retained stake will be reincluded.
-        fn do_register_as_candidate(who: &T::AccountId) -> DispatchResult {
+        pub fn do_register_as_candidate(who: &T::AccountId) -> DispatchResult {
             let deposit = CandidacyBond::<T>::get();
 
             // In case the staker already had non-claimed stake we calculate it now.
@@ -1081,7 +1078,7 @@ pub mod pallet {
         }
 
         /// Claims all pending unstaking requests for a given user.
-        fn do_claim(who: &T::AccountId) -> DispatchResult {
+        pub fn do_claim(who: &T::AccountId) -> DispatchResult {
             let mut claimed: BalanceOf<T> = 0u32.into();
             UnstakingRequests::<T>::try_mutate(who, |requests| {
                 let curr_block = Self::current_block_number();
@@ -1108,7 +1105,7 @@ pub mod pallet {
         /// Returns the position of the candidate in the list after adding the stake.
         ///
         /// Computes in **O(1)** time.
-        fn do_stake_at_position(
+        pub fn do_stake_at_position(
             staker: &T::AccountId,
             amount: BalanceOf<T>,
             position: usize,
@@ -1149,7 +1146,7 @@ pub mod pallet {
         /// Relocate a candidate after modifying its stake.
         ///
         /// Returns the final position of the candidate.
-        fn reassign_candidate_position(position: usize) -> Result<usize, DispatchError> {
+        pub fn reassign_candidate_position(position: usize) -> Result<usize, DispatchError> {
             CandidateList::<T>::try_mutate(|candidates| -> Result<usize, DispatchError> {
                 let info = candidates.remove(position);
                 let new_pos = candidates
@@ -1165,7 +1162,7 @@ pub mod pallet {
 
         /// Return the total number of accounts that are eligible collators (candidates and
         /// invulnerables).
-        fn eligible_collators() -> u32 {
+        pub fn eligible_collators() -> u32 {
             CandidateList::<T>::decode_len()
                 .unwrap_or_default()
                 .saturating_add(Invulnerables::<T>::decode_len().unwrap_or_default())
@@ -1182,7 +1179,7 @@ pub mod pallet {
         /// the session ends.
         ///
         /// Returns the amount unstaked.
-        fn do_unstake(
+        pub fn do_unstake(
             staker: &T::AccountId,
             candidate: &T::AccountId,
             has_penalty: bool,
@@ -1232,7 +1229,7 @@ pub mod pallet {
         /// Removes a candidate, identified by its index, if it exists and refunds the stake.
         ///
         /// Returns the candidate info before its removal.
-        fn try_remove_candidate_at_position(
+        pub fn try_remove_candidate_at_position(
             idx: usize,
             remove_last_authored: bool,
             has_penalty: bool,
@@ -1255,7 +1252,7 @@ pub mod pallet {
         /// Removes a candidate, identified by its account, if it exists and refunds the stake.
         ///
         /// Returns the candidate info before its removal.
-        fn try_remove_candidate_from_account(
+        pub fn try_remove_candidate_from_account(
             who: &T::AccountId,
             remove_last_authored: bool,
             has_penalty: bool,
@@ -1395,16 +1392,13 @@ pub mod pallet {
         }
 
         /// Rewards a pending collator from the previous round, if any.
-        fn reward_one_collator(current_session: SessionIndex) {
-            if current_session > 0 {
-                let previous_session = current_session - 1;
-                ProducedBlocks::<T>::iter_prefix(previous_session)
-                    .drain()
-                    .take(1)
-                    .for_each(|(collator, blocks)| {
-                        Self::do_reward_collator(&collator, blocks, previous_session);
-                    });
-            }
+        fn reward_one_collator(session: SessionIndex) {
+            ProducedBlocks::<T>::iter_prefix(session)
+                .drain()
+                .take(1)
+                .for_each(|(collator, blocks)| {
+                    Self::do_reward_collator(&collator, blocks, session);
+                });
         }
 
         /// Ensure the correctness of the state of this pallet.
@@ -1459,8 +1453,10 @@ pub mod pallet {
                 });
             }
 
-            // Reward one collator
-            Self::reward_one_collator(current_session);
+            // Reward one collator for the previous session
+            if current_session > 0 {
+                Self::reward_one_collator(current_session - 1);
+            }
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(
                 T::WeightInfo::note_author(),
