@@ -121,8 +121,9 @@ pub mod pallet {
     }
 
     pub struct MaxDesiredCandidates<T>(PhantomData<T>);
-    impl<T: Config> Get<u32> for MaxDesiredCandidates<T> {
-        fn get() -> u32 {
+    impl<T: Config> TypedGet for MaxDesiredCandidates<T> {
+        type Type = u32;
+        fn get() -> Self::Type {
             T::MaxCandidates::get().saturating_add(T::MaxInvulnerables::get())
         }
     }
@@ -400,12 +401,6 @@ pub mod pallet {
             candidate: T::AccountId,
             amount: BalanceOf<T>,
         },
-        /// Stake was removed from a candidate.
-        Unstaked {
-            staker: T::AccountId,
-            candidate: T::AccountId,
-            amount: BalanceOf<T>,
-        },
         /// Stake was claimed after a penalty period.
         StakeClaimed {
             staker: T::AccountId,
@@ -502,8 +497,7 @@ pub mod pallet {
                 "chain must require at least one collator"
             );
             assert!(
-                T::MaxInvulnerables::get().saturating_add(T::MaxCandidates::get())
-                    >= T::MinEligibleCollators::get(),
+                MaxDesiredCandidates::<T>::get() >= T::MinEligibleCollators::get(),
                 "invulnerables and candidates must be able to satisfy collator demand"
             );
             assert!(
@@ -600,7 +594,7 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Set the ideal number of non-invulnerable collators. If lowering this number, then the
+        /// Set the ideal number of collators. If lowering this number, then the
         /// number of running collators could be higher than this figure. Aside from that edge case,
         /// there should be no other way to have more candidates than the desired number.
         ///
@@ -613,7 +607,7 @@ pub mod pallet {
         ) -> DispatchResultWithPostInfo {
             T::UpdateOrigin::ensure_origin(origin)?;
             ensure!(
-                max <= T::MaxCandidates::get() + T::MaxInvulnerables::get(),
+                max <= MaxDesiredCandidates::<T>::get(),
                 Error::<T>::TooManyDesiredCandidates
             );
             DesiredCandidates::<T>::put(max);
@@ -871,12 +865,7 @@ pub mod pallet {
                 Ok(pos) => (true, Some(pos)),
                 Err(_) => (false, None),
             };
-            let unstaked = Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
-            Self::deposit_event(Event::Unstaked {
-                staker: who,
-                candidate,
-                amount: unstaked,
-            });
+            Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
             Ok(())
         }
 

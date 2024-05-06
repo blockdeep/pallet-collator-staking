@@ -13,8 +13,10 @@ use sp_runtime::{
     traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
     BuildStorage, Percent, RuntimeAppPublic,
 };
+use std::marker::PhantomData;
 
 type Block = frame_system::mocking::MockBlock<Test>;
+type AccountId = <Test as frame_system::Config>::AccountId;
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -156,7 +158,7 @@ impl pallet_session::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type ValidatorId = <Self as frame_system::Config>::AccountId;
     // we don't have stash and controller, thus we don't need the convert as well.
-    type ValidatorIdOf = IdentityCollator;
+    type ValidatorIdOf = IdentityCollatorMock<Test>;
     type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
     type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
     type SessionManager = CollatorStaking;
@@ -180,6 +182,16 @@ impl ValidatorRegistration<u64> for IsRegistered {
     }
 }
 
+pub struct IdentityCollatorMock<T>(PhantomData<T>);
+impl<T> sp_runtime::traits::Convert<AccountId, Option<AccountId>> for IdentityCollatorMock<T> {
+    fn convert(acc: AccountId) -> Option<AccountId> {
+        match acc {
+            1000 => None,
+            _ => Some(acc),
+        }
+    }
+}
+
 impl Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
@@ -190,7 +202,7 @@ impl Config for Test {
     type MaxInvulnerables = ConstU32<20>;
     type KickThreshold = Period;
     type CollatorId = <Self as frame_system::Config>::AccountId;
-    type CollatorIdOf = IdentityCollator;
+    type CollatorIdOf = IdentityCollatorMock<Test>;
     type CollatorRegistration = IsRegistered;
     type MaxStakedCandidates = ConstU32<16>;
     type CollatorUnstakingDelay = ConstU64<5>;

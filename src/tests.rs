@@ -1,9 +1,11 @@
 use crate as collator_staking;
 use crate::{
-    mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
-    DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MinStake,
+    mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage, Config,
+    DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MaxDesiredCandidates,
+    MinStake,
 };
 use crate::{Stake, UnstakeRequest, UnstakingRequests};
+use frame_support::pallet_prelude::TypedGet;
 use frame_support::{
     assert_noop, assert_ok,
     traits::{Currency, OnInitialize},
@@ -52,6 +54,16 @@ fn register_candidates(range: RangeInclusive<AccountId>) {
 #[test]
 fn basic_setup_works() {
     new_test_ext().execute_with(|| {
+        assert_eq!(<Test as Config>::MaxInvulnerables::get(), 20);
+        assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
+        assert_eq!(<Test as Config>::MinEligibleCollators::get(), 1);
+        assert_eq!(<Test as Config>::KickThreshold::get(), 10);
+        assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
+        assert_eq!(<Test as Config>::CollatorUnstakingDelay::get(), 5);
+        assert_eq!(<Test as Config>::UserUnstakingDelay::get(), 2);
+        // should always be MaxInvulnerables + MaxCandidates
+        assert_eq!(MaxDesiredCandidates::<Test>::get(), 40);
+
         assert_eq!(DesiredCandidates::<Test>::get(), 2);
         assert_eq!(CandidacyBond::<Test>::get(), 10);
         assert_eq!(MinStake::<Test>::get(), 2);
@@ -93,11 +105,21 @@ fn it_should_set_invulnerables() {
 }
 
 #[test]
+fn cannot_empty_invulnerables_if_not_enough_candidates() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(
+            CollatorStaking::set_invulnerables(RuntimeOrigin::signed(RootAccount::get()), vec![]),
+            Error::<Test>::TooFewEligibleCollators
+        );
+    });
+}
+
+#[test]
 fn it_should_set_invulnerables_even_with_some_invalid() {
     new_test_ext().execute_with(|| {
         initialize_to_block(1);
         assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
-        let new_with_invalid = vec![1, 4, 3, 42, 2];
+        let new_with_invalid = vec![1, 4, 3, 42, 2, 1000];
 
         assert_ok!(CollatorStaking::set_invulnerables(
             RuntimeOrigin::signed(RootAccount::get()),
@@ -329,17 +351,22 @@ fn set_desired_candidates_works() {
         // can set
         assert_ok!(CollatorStaking::set_desired_candidates(
             RuntimeOrigin::signed(RootAccount::get()),
-            7
+            40
         ));
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewDesiredCandidates {
-            desired_candidates: 7,
+            desired_candidates: 40,
         }));
-        assert_eq!(DesiredCandidates::<Test>::get(), 7);
+        assert_eq!(DesiredCandidates::<Test>::get(), 40);
 
         // rejects bad origin
         assert_noop!(
             CollatorStaking::set_desired_candidates(RuntimeOrigin::signed(1), 8),
             BadOrigin
+        );
+        // rejects bad origin
+        assert_noop!(
+            CollatorStaking::set_desired_candidates(RuntimeOrigin::signed(RootAccount::get()), 50),
+            Error::<Test>::TooManyDesiredCandidates
         );
     });
 }
@@ -721,6 +748,24 @@ fn cannot_take_candidate_slot_if_invulnerable() {
         assert_noop!(
             CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(1), 50u64.into(), 2),
             Error::<Test>::AlreadyInvulnerable,
+        );
+    })
+}
+
+#[test]
+fn cannot_take_candidate_slot_if_list_not_full() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        register_candidates(3..=21);
+        assert_eq!(CandidateList::<Test>::decode_len().unwrap_or_default(), 19);
+        assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
+
+        fund_account(22);
+        register_keys(22);
+        assert_noop!(
+            CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(22), 50u64.into(), 3),
+            Error::<Test>::CanRegister,
         );
     })
 }
@@ -1489,8 +1534,52 @@ fn cannot_set_genesis_value_twice() {
 }
 
 #[test]
+#[should_panic = "min_stake is higher than candidacy_bond"]
+fn cannot_set_invalid_min_stake_in_genesis() {
+    sp_tracing::try_init_simple();
+    let mut t = frame_system::GenesisConfig::<Test>::default()
+        .build_storage()
+        .unwrap();
+
+    let collator_staking = collator_staking::GenesisConfig::<Test> {
+        desired_candidates: 2,
+        candidacy_bond: 10,
+        min_stake: 15,
+        invulnerables: vec![1, 2],
+        collator_reward_percentage: Percent::from_parts(20),
+    };
+    // collator selection must be initialized before session.
+    collator_staking.assimilate_storage(&mut t).unwrap();
+}
+
+#[test]
+#[should_panic = "genesis desired_candidates are more than T::MaxCandidates"]
+fn cannot_set_invalid_max_candidates_in_genesis() {
+    sp_tracing::try_init_simple();
+    let mut t = frame_system::GenesisConfig::<Test>::default()
+        .build_storage()
+        .unwrap();
+
+    let collator_staking = collator_staking::GenesisConfig::<Test> {
+        desired_candidates: 50,
+        candidacy_bond: 10,
+        min_stake: 2,
+        invulnerables: vec![1, 2],
+        collator_reward_percentage: Percent::from_parts(20),
+    };
+    // collator selection must be initialized before session.
+    collator_staking.assimilate_storage(&mut t).unwrap();
+}
+
+#[test]
 fn cannot_stake_if_not_candidate() {
     new_test_ext().execute_with(|| {
+        // invulnerable
+        assert_noop!(
+            CollatorStaking::stake(RuntimeOrigin::signed(4), 1, 1),
+            Error::<Test>::NotCandidate
+        );
+        // not registered as candidate
         assert_noop!(
             CollatorStaking::stake(RuntimeOrigin::signed(4), 5, 15),
             Error::<Test>::NotCandidate
@@ -1645,5 +1734,113 @@ fn stake_and_reassign_position() {
                 },
             ]
         );
+    });
+}
+
+#[test]
+fn unstake_from_candidate() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        register_candidates(3..=4);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 4,
+                    deposit: 20
+                },
+                CandidateInfo {
+                    who: 3,
+                    deposit: 30
+                },
+            ]
+        );
+
+        // unstake from actual candidate
+        assert_eq!(Balances::free_balance(5), 70);
+        assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 5,
+            candidate: 3,
+            amount: 20,
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::UnstakeRequestCreated {
+                staker: 5,
+                amount: 20,
+                block: 3,
+            },
+        ));
+        // candidate list gets reordered
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 3,
+                    deposit: 10
+                },
+                CandidateInfo {
+                    who: 4,
+                    deposit: 20
+                },
+            ]
+        );
+        assert_eq!(Stake::<Test>::get(3, 5), 0);
+        assert_eq!(Balances::free_balance(5), 70);
+        assert_eq!(
+            UnstakingRequests::<Test>::get(5),
+            vec![UnstakeRequest {
+                block: 3,
+                amount: 20
+            }]
+        )
+    });
+}
+
+#[test]
+fn unstake_from_ex_candidate() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        register_candidates(3..=4);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 4,
+                    deposit: 20
+                },
+                CandidateInfo {
+                    who: 3,
+                    deposit: 30
+                },
+            ]
+        );
+
+        // unstake from ex-candidate
+        assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 4,
+                deposit: 20
+            },]
+        );
+
+        assert_eq!(Balances::free_balance(5), 70);
+        assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 5,
+            candidate: 3,
+            amount: 20,
+        }));
+        assert_eq!(UnstakingRequests::<Test>::get(5), vec![]);
+        assert_eq!(Stake::<Test>::get(3, 5), 0);
+        assert_eq!(Balances::free_balance(5), 90);
     });
 }
