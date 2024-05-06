@@ -1,8 +1,8 @@
 use crate as collator_staking;
 use crate::{
-    mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage, Config,
-    DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MaxDesiredCandidates,
-    MinStake, StakeCount,
+    mock::*, Autocompound, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
+    Config, DesiredCandidates, Error, Event, ExtraReward, Invulnerables, LastAuthoredBlock,
+    MaxDesiredCandidates, MinStake, StakeCount,
 };
 use crate::{Stake, UnstakeRequest, UnstakingRequests};
 use frame_support::pallet_prelude::TypedGet;
@@ -1808,6 +1808,56 @@ fn unstake_from_candidate() {
 }
 
 #[test]
+fn unstake_self() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(StakeCount::<Test>::get(3), 0);
+        register_candidates(3..=3);
+        assert_eq!(StakeCount::<Test>::get(3), 1);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 3,
+                deposit: 30
+            },]
+        );
+
+        // unstake from actual candidate
+        assert_eq!(Balances::free_balance(3), 70);
+        assert_eq!(StakeCount::<Test>::get(3), 1);
+        assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(3), 3));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 3,
+            candidate: 3,
+            amount: 30,
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::UnstakeRequestCreated {
+                staker: 3,
+                amount: 30,
+                block: 6, // higher delay
+            },
+        ));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo { who: 3, deposit: 0 }]
+        );
+        assert_eq!(StakeCount::<Test>::get(3), 0);
+        assert_eq!(Stake::<Test>::get(3, 3), 0);
+        assert_eq!(Balances::free_balance(3), 70);
+        assert_eq!(
+            UnstakingRequests::<Test>::get(3),
+            vec![UnstakeRequest {
+                block: 6,
+                amount: 30
+            }]
+        );
+    });
+}
+
+#[test]
 fn unstake_from_ex_candidate() {
     new_test_ext().execute_with(|| {
         initialize_to_block(1);
@@ -1856,6 +1906,34 @@ fn unstake_from_ex_candidate() {
         assert_eq!(Stake::<Test>::get(4, 5), 10);
         assert_eq!(StakeCount::<Test>::get(5), 1);
         assert_eq!(Balances::free_balance(5), 90);
+    });
+}
+
+#[test]
+fn unstake_fails_if_over_limit() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
+        register_candidates(3..=18);
+
+        for pos in 3..=18 {
+            assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), pos, 2));
+        }
+        // now we accumulate 16 requests, the maximum.
+        assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
+        assert_eq!(UnstakingRequests::<Test>::get(5).len(), 16);
+
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 2));
+        assert_noop!(
+            CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
+            Error::<Test>::TooManyUnstakingRequests
+        );
+
+        // if we claim the requests we can keep unstaking.
+        initialize_to_block(3);
+        assert_ok!(CollatorStaking::claim(RuntimeOrigin::signed(5)));
+        assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
     });
 }
 
@@ -1994,5 +2072,135 @@ fn claim() {
             staker: 5,
             amount: 20,
         }));
+    });
+}
+
+#[test]
+fn autocompound() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(Autocompound::<Test>::get(5), Percent::from_parts(0));
+        assert_ok!(CollatorStaking::set_autocompound_percentage(
+            RuntimeOrigin::signed(5),
+            Percent::from_parts(50)
+        ));
+        assert_eq!(Autocompound::<Test>::get(5), Percent::from_parts(50));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(
+            Event::AutocompoundPercentageSet {
+                staker: 5,
+                percentage: Percent::from_parts(50),
+            },
+        ));
+    });
+}
+
+#[test]
+fn set_collator_reward_percentage() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(
+            CollatorRewardPercentage::<Test>::get(),
+            Percent::from_parts(20)
+        );
+
+        // Invalid origin
+        assert_noop!(
+            CollatorStaking::set_collator_reward_percentage(
+                RuntimeOrigin::signed(5),
+                Percent::from_parts(50)
+            ),
+            BadOrigin
+        );
+        assert_ok!(CollatorStaking::set_collator_reward_percentage(
+            RuntimeOrigin::signed(RootAccount::get()),
+            Percent::from_parts(50)
+        ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(
+            Event::CollatorRewardPercentageSet {
+                percentage: Percent::from_parts(50),
+            },
+        ));
+        assert_eq!(
+            CollatorRewardPercentage::<Test>::get(),
+            Percent::from_parts(50)
+        );
+    });
+}
+
+#[test]
+fn set_extra_reward() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(ExtraReward::<Test>::get(), None);
+
+        // Invalid origin
+        assert_noop!(
+            CollatorStaking::set_extra_reward(RuntimeOrigin::signed(5), Some((777, 10))),
+            BadOrigin
+        );
+
+        // Set the reward
+        assert_ok!(CollatorStaking::set_extra_reward(
+            RuntimeOrigin::signed(RootAccount::get()),
+            Some((777, 10))
+        ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardSet {
+            account: 777,
+            amount: 10,
+        }));
+        assert_eq!(ExtraReward::<Test>::get(), Some((777, 10)));
+
+        // Revert the changes
+        assert_ok!(CollatorStaking::set_extra_reward(
+            RuntimeOrigin::signed(RootAccount::get()),
+            None
+        ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardRemoved {}));
+        assert_eq!(ExtraReward::<Test>::get(), None);
+    });
+}
+
+#[test]
+fn set_minimum_stake() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(MinStake::<Test>::get(), 2);
+
+        // Invalid origin
+        assert_noop!(
+            CollatorStaking::set_minimum_stake(RuntimeOrigin::signed(5), 5),
+            BadOrigin
+        );
+
+        // Set the reward over CandidacyBond
+        assert_noop!(
+            CollatorStaking::set_minimum_stake(RuntimeOrigin::signed(RootAccount::get()), 1000),
+            Error::<Test>::InvalidMinStake
+        );
+
+        // Zero is a valid value
+        assert_ok!(CollatorStaking::set_minimum_stake(
+            RuntimeOrigin::signed(RootAccount::get()),
+            0
+        ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewMinStake {
+            min_stake: 0,
+        }));
+        assert_eq!(MinStake::<Test>::get(), 0);
+
+        // Maximum is CandidacyBond
+        assert_eq!(CandidacyBond::<Test>::get(), 10);
+        assert_ok!(CollatorStaking::set_minimum_stake(
+            RuntimeOrigin::signed(RootAccount::get()),
+            10
+        ));
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewMinStake {
+            min_stake: 10,
+        }));
+        assert_eq!(MinStake::<Test>::get(), 10);
     });
 }
