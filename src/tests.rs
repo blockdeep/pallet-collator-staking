@@ -2,7 +2,7 @@ use crate as collator_staking;
 use crate::{
     mock::*, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage, Config,
     DesiredCandidates, Error, Event, Invulnerables, LastAuthoredBlock, MaxDesiredCandidates,
-    MinStake,
+    MinStake, StakeCount,
 };
 use crate::{Stake, UnstakeRequest, UnstakingRequests};
 use frame_support::pallet_prelude::TypedGet;
@@ -1616,8 +1616,10 @@ fn stake() {
         register_candidates(3..=3);
         assert_eq!(Balances::free_balance(3), 90);
         assert_eq!(Stake::<Test>::get(3, 3), 10);
+        assert_eq!(StakeCount::<Test>::get(3), 1);
         assert_eq!(CandidateList::<Test>::get()[0].deposit, 10);
 
+        assert_eq!(StakeCount::<Test>::get(4), 0);
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 3, 2));
         System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
             staker: 4,
@@ -1628,6 +1630,7 @@ fn stake() {
         assert_eq!(Stake::<Test>::get(3, 4), 2);
         assert_eq!(Stake::<Test>::get(3, 3), 10);
         assert_eq!(CandidateList::<Test>::get()[0].deposit, 12);
+        assert_eq!(StakeCount::<Test>::get(4), 1);
     });
 }
 
@@ -1743,6 +1746,7 @@ fn unstake_from_candidate() {
         initialize_to_block(1);
 
         register_candidates(3..=4);
+        assert_eq!(StakeCount::<Test>::get(5), 0);
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
         assert_eq!(
@@ -1761,6 +1765,7 @@ fn unstake_from_candidate() {
 
         // unstake from actual candidate
         assert_eq!(Balances::free_balance(5), 70);
+        assert_eq!(StakeCount::<Test>::get(5), 2);
         assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
             staker: 5,
@@ -1788,6 +1793,7 @@ fn unstake_from_candidate() {
                 },
             ]
         );
+        assert_eq!(StakeCount::<Test>::get(5), 1);
         assert_eq!(Stake::<Test>::get(3, 5), 0);
         assert_eq!(Balances::free_balance(5), 70);
         assert_eq!(
@@ -1806,6 +1812,7 @@ fn unstake_from_ex_candidate() {
         initialize_to_block(1);
 
         register_candidates(3..=4);
+        assert_eq!(StakeCount::<Test>::get(5), 0);
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
         assert_eq!(
@@ -1823,6 +1830,7 @@ fn unstake_from_ex_candidate() {
         );
 
         // unstake from ex-candidate
+        assert_eq!(StakeCount::<Test>::get(5), 2);
         assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
         assert_eq!(
             CandidateList::<Test>::get(),
@@ -1832,6 +1840,7 @@ fn unstake_from_ex_candidate() {
             },]
         );
 
+        assert_eq!(StakeCount::<Test>::get(5), 2);
         assert_eq!(Balances::free_balance(5), 70);
         assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
         System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {

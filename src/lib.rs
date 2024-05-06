@@ -263,6 +263,12 @@ pub mod pallet {
         ValueQuery,
     >;
 
+    /// Stores the number of candidates a given account deposited stake on.
+    ///
+    /// Cannot be higher than `MaxStakedCandidates`.
+    #[pallet::storage]
+    pub type StakeCount<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
+
     /// Unstaking requests a given user has.
     ///
     /// They can be claimed by calling the [`claim`] extrinsic.
@@ -463,30 +469,22 @@ pub mod pallet {
         CollatorNotRegistered,
         /// Could not insert in the candidate list.
         InsertToCandidateListFailed,
-        /// Could not remove from the candidate list.
-        RemoveFromCandidateListFailed,
-        /// Could not update the candidate list.
-        UpdateCandidateListFailed,
         /// Deposit amount is too low to take the target's slot in the candidate list.
         InsufficientBond,
-        /// The updated deposit amount is equal to the amount already reserved.
-        IdenticalDeposit,
-        /// Cannot lower candidacy bond while occupying a future collator slot in the list.
-        InvalidUnreserve,
         /// Amount not sufficient to be staked.
         InsufficientStake,
-        /// A collator cannot be removed during the session.
-        IsCollator,
         /// DesiredCandidates is out of bounds.
         TooManyDesiredCandidates,
         /// Too many unstaking requests. Claim some of them first.
         TooManyUnstakingRequests,
         /// Cannot take some candidate's slot while the candidate list is not full.
         CanRegister,
-        /// Invalid value for MinStake. It must be lower than or equal to CandidacyBond.
+        /// Invalid value for MinStake. It must be lower than or equal to `CandidacyBond`.
         InvalidMinStake,
-        /// Invalid value for CandidacyBond. It must be higher than or equal to MinStake.
+        /// Invalid value for CandidacyBond. It must be higher than or equal to `MinStake`.
         InvalidCandidacyBond,
+        /// Number of staked candidates is greater than `MaxStakedCandidates`.
+        TooManyStakedCandidates,
     }
 
     #[pallet::hooks]
@@ -1104,6 +1102,10 @@ pub mod pallet {
                 position < CandidateList::<T>::decode_len().unwrap_or_default(),
                 Error::<T>::NotCandidate
             );
+            ensure!(
+                StakeCount::<T>::get(&staker) < T::MaxStakedCandidates::get(),
+                Error::<T>::TooManyStakedCandidates,
+            );
             CandidateList::<T>::try_mutate(|candidates| -> DispatchResult {
                 let candidate = &mut candidates[position];
                 Stake::<T>::try_mutate(candidate.who.clone(), staker, |stake| -> DispatchResult {
@@ -1112,9 +1114,13 @@ pub mod pallet {
                         final_staker_stake >= MinStake::<T>::get(),
                         Error::<T>::InsufficientStake
                     );
+                    if stake.is_zero() {
+                        StakeCount::<T>::mutate(&staker, |count| count.saturating_inc());
+                    }
                     T::Currency::reserve(staker, amount)?;
                     *stake = final_staker_stake;
                     candidate.deposit.saturating_accrue(amount);
+
                     Self::deposit_event(Event::StakeAdded {
                         staker: staker.clone(),
                         candidate: candidate.who.clone(),
@@ -1200,6 +1206,7 @@ pub mod pallet {
                         Ok(())
                     })?;
                 }
+                StakeCount::<T>::mutate(&staker, |count| count.saturating_dec());
                 if let Some(position) = maybe_position {
                     CandidateList::<T>::mutate(|candidates| {
                         candidates[position].deposit.saturating_reduce(stake);
