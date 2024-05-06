@@ -1795,6 +1795,7 @@ fn unstake_from_candidate() {
         );
         assert_eq!(StakeCount::<Test>::get(5), 1);
         assert_eq!(Stake::<Test>::get(3, 5), 0);
+        assert_eq!(Stake::<Test>::get(4, 5), 10);
         assert_eq!(Balances::free_balance(5), 70);
         assert_eq!(
             UnstakingRequests::<Test>::get(5),
@@ -1802,7 +1803,7 @@ fn unstake_from_candidate() {
                 block: 3,
                 amount: 20
             }]
-        )
+        );
     });
 }
 
@@ -1828,6 +1829,8 @@ fn unstake_from_ex_candidate() {
                 },
             ]
         );
+        assert_eq!(Stake::<Test>::get(3, 5), 20);
+        assert_eq!(Stake::<Test>::get(4, 5), 10);
 
         // unstake from ex-candidate
         assert_eq!(StakeCount::<Test>::get(5), 2);
@@ -1850,6 +1853,75 @@ fn unstake_from_ex_candidate() {
         }));
         assert_eq!(UnstakingRequests::<Test>::get(5), vec![]);
         assert_eq!(Stake::<Test>::get(3, 5), 0);
+        assert_eq!(Stake::<Test>::get(4, 5), 10);
+        assert_eq!(StakeCount::<Test>::get(5), 1);
+        assert_eq!(Balances::free_balance(5), 90);
+    });
+}
+
+#[test]
+fn unstake_all() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        register_candidates(3..=4);
+        assert_eq!(StakeCount::<Test>::get(5), 0);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 4,
+                    deposit: 20
+                },
+                CandidateInfo {
+                    who: 3,
+                    deposit: 30
+                },
+            ]
+        );
+
+        assert_eq!(StakeCount::<Test>::get(5), 2);
+        assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 4,
+                deposit: 20
+            },]
+        );
+
+        assert_eq!(StakeCount::<Test>::get(5), 2);
+        assert_eq!(Balances::free_balance(5), 70);
+        assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 5,
+            candidate: 3,
+            amount: 20,
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 5,
+            candidate: 4,
+            amount: 10,
+        }));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::UnstakeRequestCreated {
+                staker: 5,
+                amount: 10,
+                block: 3,
+            },
+        ));
+        assert_eq!(
+            UnstakingRequests::<Test>::get(5),
+            vec![UnstakeRequest {
+                block: 3,
+                amount: 10
+            }]
+        );
+        assert_eq!(Stake::<Test>::get(3, 5), 0);
+        assert_eq!(Stake::<Test>::get(4, 5), 0);
+        assert_eq!(StakeCount::<Test>::get(5), 0);
         assert_eq!(Balances::free_balance(5), 90);
     });
 }
