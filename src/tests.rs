@@ -1840,7 +1840,7 @@ fn unstake_from_ex_candidate() {
             vec![CandidateInfo {
                 who: 4,
                 deposit: 20
-            },]
+            }]
         );
 
         assert_eq!(StakeCount::<Test>::get(5), 2);
@@ -1889,7 +1889,7 @@ fn unstake_all() {
             vec![CandidateInfo {
                 who: 4,
                 deposit: 20
-            },]
+            }]
         );
 
         assert_eq!(StakeCount::<Test>::get(5), 2);
@@ -1923,5 +1923,76 @@ fn unstake_all() {
         assert_eq!(Stake::<Test>::get(4, 5), 0);
         assert_eq!(StakeCount::<Test>::get(5), 0);
         assert_eq!(Balances::free_balance(5), 90);
+    });
+}
+
+#[test]
+fn claim_with_empty_list() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(System::events(), vec![]);
+        assert_eq!(UnstakingRequests::<Test>::get(5), vec![]);
+        assert_ok!(CollatorStaking::claim(RuntimeOrigin::signed(5)));
+        assert_eq!(System::events(), vec![]);
+        assert_eq!(UnstakingRequests::<Test>::get(5), vec![]);
+    });
+}
+
+#[test]
+fn claim() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        register_candidates(3..=3);
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
+        assert_eq!(Stake::<Test>::get(3, 5), 20);
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 3,
+                deposit: 30
+            }]
+        );
+
+        assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+        assert_eq!(StakeCount::<Test>::get(5), 0);
+        assert_eq!(Balances::free_balance(5), 80);
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
+            staker: 5,
+            candidate: 3,
+            amount: 20,
+        }));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 3,
+                deposit: 10
+            }]
+        );
+        // No changes until delay passes
+        assert_eq!(
+            UnstakingRequests::<Test>::get(5),
+            vec![UnstakeRequest {
+                block: 3,
+                amount: 20
+            }]
+        );
+        assert_ok!(CollatorStaking::claim(RuntimeOrigin::signed(5)));
+        assert_eq!(
+            UnstakingRequests::<Test>::get(5),
+            vec![UnstakeRequest {
+                block: 3,
+                amount: 20
+            }]
+        );
+
+        initialize_to_block(3);
+        assert_ok!(CollatorStaking::claim(RuntimeOrigin::signed(5)));
+        assert_eq!(UnstakingRequests::<Test>::get(5), vec![]);
+        System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeClaimed {
+            staker: 5,
+            amount: 20,
+        }));
     });
 }

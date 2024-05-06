@@ -1079,10 +1079,12 @@ pub mod pallet {
                     claimed.saturating_accrue(request.amount);
                 }
                 requests.drain(..pos);
-                Self::deposit_event(Event::StakeClaimed {
-                    staker: who.clone(),
-                    amount: claimed,
-                });
+                if !claimed.is_zero() {
+                    Self::deposit_event(Event::StakeClaimed {
+                        staker: who.clone(),
+                        amount: claimed,
+                    });
+                }
                 Ok(())
             })
         }
