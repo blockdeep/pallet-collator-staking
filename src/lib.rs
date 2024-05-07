@@ -1027,7 +1027,7 @@ pub mod pallet {
             // In case the staker already had non-claimed stake we calculate it now.
             // TODO check the performance penalty of this operation. The collection is unbounded.
             let already_staked: BalanceOf<T> = Stake::<T>::iter_prefix_values(who)
-                .fold(0u32.into(), |acc, s| acc.saturating_add(s));
+                .fold(Zero::zero(), |acc, s| acc.saturating_add(s));
 
             // First authored block is current block plus kick threshold to handle session delay
             CandidateList::<T>::try_mutate(
@@ -1410,6 +1410,10 @@ pub mod pallet {
         /// * The current desired candidate count should not exceed the candidate list capacity.
         /// * The number of selected candidates together with the invulnerables must be greater than
         ///   or equal to the minimum number of eligible collators.
+        ///
+        /// ## [`MaxCandidates`]
+        ///
+        /// * The amount of stakers per account is limited and its maximum value must not be surpassed.
         #[cfg(any(test, feature = "try-runtime"))]
         pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
             let desired_candidates = DesiredCandidates::<T>::get();
@@ -1424,6 +1428,11 @@ pub mod pallet {
 					T::MinEligibleCollators::get(),
 				"Invulnerable set together with desired candidates should be able to meet the collator quota."
 			);
+
+            frame_support::ensure!(
+                StakeCount::<T>::iter_values().all(|count| count < T::MaxStakedCandidates::get()),
+                "Stake count must not exceed MaxStakedCandidates"
+            );
 
             Ok(())
         }
