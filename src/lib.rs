@@ -1208,7 +1208,17 @@ pub mod pallet {
                         Ok(())
                     })?;
                 }
-                StakeCount::<T>::mutate(&staker, |count| count.saturating_dec());
+                StakeCount::<T>::mutate_exists(&staker, |count| {
+                    if let Some(c) = count.as_mut() {
+                        c.saturating_dec();
+                        match c {
+                            0 => None,
+                            _ => Some(*c),
+                        }
+                    } else {
+                        None
+                    }
+                });
                 if let Some(position) = maybe_position {
                     CandidateList::<T>::mutate(|candidates| {
                         candidates[position].deposit.saturating_reduce(stake);
