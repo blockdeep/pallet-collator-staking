@@ -1,11 +1,12 @@
 use crate as collator_staking;
 use crate::{
     mock::*, Autocompound, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
-    Config, DesiredCandidates, Error, Event, ExtraReward, Invulnerables, LastAuthoredBlock,
-    MaxDesiredCandidates, MinStake, StakeCount,
+    Config, CurrentSession, DesiredCandidates, Error, Event, ExtraReward, Invulnerables,
+    LastAuthoredBlock, MaxDesiredCandidates, MinStake, ProducedBlocks, StakeCount, TotalBlocks,
 };
 use crate::{Stake, UnstakeRequest, UnstakingRequests};
 use frame_support::pallet_prelude::TypedGet;
+use frame_support::traits::ExistenceRequirement::KeepAlive;
 use frame_support::{
     assert_noop, assert_ok,
     traits::{Currency, OnInitialize},
@@ -865,9 +866,7 @@ fn cannot_take_candidate_slot_if_insufficient_deposit() {
     new_test_ext().execute_with(|| {
         initialize_to_block(1);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
+        register_candidates(3..=3);
         assert_ok!(CollatorStaking::stake(
             RuntimeOrigin::signed(3),
             3,
@@ -1065,8 +1064,6 @@ fn fees_edgecases() {
 
         // Nothing panics, no reward when no ED in balance
         Authorship::on_initialize(1);
-        // put some money into the pot at ED
-        Balances::make_free_balance_be(&CollatorStaking::account_id(), 5);
         // 4 is the default author.
         assert_eq!(Balances::free_balance(4), 100);
         register_candidates(4..=4);
@@ -1108,9 +1105,7 @@ fn session_management_single_candidate() {
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
         // add a new collator
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
+        register_candidates(3..=3);
 
         // session won't see this.
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -1146,15 +1141,7 @@ fn session_management_max_candidates() {
         assert_eq!(SessionChangeBlock::get(), 0);
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(3..=5);
 
         // session won't see this.
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -1190,15 +1177,7 @@ fn session_management_increase_bid_with_list_update() {
         assert_eq!(SessionChangeBlock::get(), 0);
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(3..=5);
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
 
         // session won't see this.
@@ -1235,15 +1214,7 @@ fn session_management_candidate_list_eager_sort() {
         assert_eq!(SessionChangeBlock::get(), 0);
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(3..=5);
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
 
         // session won't see this.
@@ -1280,15 +1251,7 @@ fn session_management_reciprocal_outbidding() {
         assert_eq!(SessionChangeBlock::get(), 0);
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(3..=5);
 
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
 
@@ -1333,15 +1296,7 @@ fn session_management_decrease_bid_after_auction() {
         assert_eq!(SessionChangeBlock::get(), 0);
         assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(5)
-        ));
+        register_candidates(3..=5);
 
         assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
 
@@ -1473,13 +1428,10 @@ fn should_not_kick_mechanism_too_few() {
 #[test]
 fn should_kick_invulnerables_from_candidates_on_session_change() {
     new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
         assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(3)
-        ));
-        assert_ok!(CollatorStaking::register_as_candidate(
-            RuntimeOrigin::signed(4)
-        ));
+        register_candidates(3..=4);
         assert_eq!(Balances::free_balance(3), 90);
         assert_eq!(Balances::free_balance(4), 90);
         assert_ok!(CollatorStaking::set_invulnerables(
@@ -1784,6 +1736,16 @@ fn cannot_stake_too_many_candidates() {
         assert_noop!(
             CollatorStaking::stake(RuntimeOrigin::signed(1), 19, 2),
             Error::<Test>::TooManyStakedCandidates
+        );
+    });
+}
+
+#[test]
+fn cannot_stake_invulnerable() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(
+            CollatorStaking::stake(RuntimeOrigin::signed(3), 1, 2),
+            Error::<Test>::NotCandidate
         );
     });
 }
@@ -2250,5 +2212,396 @@ fn set_minimum_stake() {
             min_stake: 10,
         }));
         assert_eq!(MinStake::<Test>::get(), 10);
+    });
+}
+
+#[test]
+fn should_not_reward_invulnerables() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(CollatorStaking::add_invulnerable(
+            RuntimeOrigin::signed(RootAccount::get()),
+            4
+        ));
+        assert_eq!(ExtraReward::<Test>::get(), None);
+        assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
+        assert_eq!(CurrentSession::<Test>::get(), 0);
+        for block in 1..=9 {
+            initialize_to_block(block);
+            assert_eq!(CurrentSession::<Test>::get(), 0);
+            assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, 0));
+
+            // Assume we collected one unit in fees per block
+            assert_ok!(Balances::transfer(
+                &1,
+                &CollatorStaking::account_id(),
+                1,
+                KeepAlive
+            ));
+            finalize_current_block();
+        }
+
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 0);
+        initialize_to_block(10);
+        assert_eq!(CurrentSession::<Test>::get(), 1);
+        assert_eq!(TotalBlocks::<Test>::get(1), (1, 0));
+
+        // No StakingRewardReceived should have been emitted if only invulnerable is producing blocks.
+        assert!(!System::events().iter().any(|e| {
+            match e.event {
+                RuntimeEvent::CollatorStaking(Event::StakingRewardReceived { .. }) => true,
+                _ => false,
+            }
+        }));
+    });
+}
+
+#[test]
+fn should_reward_collator() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(4),
+        ));
+        assert_eq!(ExtraReward::<Test>::get(), None);
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+        assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
+        assert_eq!(CurrentSession::<Test>::get(), 0);
+        for block in 1..=9 {
+            initialize_to_block(block);
+            assert_eq!(CurrentSession::<Test>::get(), 0);
+            assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, block as u32));
+
+            // Assume we collected one unit in fees per block
+            assert_ok!(Balances::transfer(
+                &1,
+                &CollatorStaking::account_id(),
+                1,
+                KeepAlive
+            ));
+            finalize_current_block();
+        }
+        assert_eq!(
+            Balances::free_balance(CollatorStaking::account_id()),
+            Balances::minimum_balance() + 9
+        );
+        assert!(!System::events().iter().any(|e| {
+            match e.event {
+                RuntimeEvent::CollatorStaking(Event::StakingRewardReceived { .. }) => true,
+                _ => false,
+            }
+        }));
+
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 9);
+        initialize_to_block(10);
+        assert_eq!(CurrentSession::<Test>::get(), 1);
+        assert_eq!(TotalBlocks::<Test>::get(1), (1, 1));
+
+        finalize_current_block();
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 0);
+
+        // Total rewards: 9
+        // 2 (20%) for collators
+        // 8 (80%) for stakers
+
+        // Reward for collator
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 1,
+            },
+        ));
+        // Reward for staker
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 8,
+            },
+        ));
+
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+    });
+}
+
+#[test]
+fn should_reward_collator_with_extra_rewards() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(4),
+        ));
+        // Account 2 will pay an extra reward of 1.
+        ExtraReward::<Test>::put((2, 1));
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+        assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
+        assert_eq!(CurrentSession::<Test>::get(), 0);
+        for block in 1..=9 {
+            initialize_to_block(block);
+            assert_eq!(CurrentSession::<Test>::get(), 0);
+            assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, block as u32));
+
+            // Assume we collected one unit in fees per block
+            assert_ok!(Balances::transfer(
+                &1,
+                &CollatorStaking::account_id(),
+                1,
+                KeepAlive
+            ));
+            finalize_current_block();
+        }
+        assert_eq!(
+            Balances::free_balance(CollatorStaking::account_id()),
+            Balances::minimum_balance() + 9
+        );
+        assert!(!System::events().iter().any(|e| {
+            match e.event {
+                RuntimeEvent::CollatorStaking(Event::StakingRewardReceived { .. }) => true,
+                _ => false,
+            }
+        }));
+
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 9);
+        initialize_to_block(10);
+        assert_eq!(CurrentSession::<Test>::get(), 1);
+        assert_eq!(TotalBlocks::<Test>::get(1), (1, 1));
+
+        finalize_current_block();
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 0);
+
+        // Total rewards: 18
+        // 3 (20%) for collators
+        // 15 (80%) for stakers
+
+        // Reward for collator
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 3,
+            },
+        ));
+        // Reward for staker
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 15,
+            },
+        ));
+
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+    });
+}
+
+#[test]
+fn should_reward_collator_with_extra_rewards_and_no_funds() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(4),
+        ));
+        // This account has no funds
+        ExtraReward::<Test>::put((100, 1));
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+        assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
+        assert_eq!(CurrentSession::<Test>::get(), 0);
+        for block in 1..=9 {
+            initialize_to_block(block);
+            assert_eq!(CurrentSession::<Test>::get(), 0);
+            assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, block as u32));
+
+            // Assume we collected one unit in fees per block
+            assert_ok!(Balances::transfer(
+                &1,
+                &CollatorStaking::account_id(),
+                1,
+                KeepAlive
+            ));
+            finalize_current_block();
+        }
+        assert_eq!(
+            Balances::free_balance(CollatorStaking::account_id()),
+            Balances::minimum_balance() + 9
+        );
+        assert!(!System::events().iter().any(|e| {
+            match e.event {
+                RuntimeEvent::CollatorStaking(Event::StakingRewardReceived { .. }) => true,
+                _ => false,
+            }
+        }));
+
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 9);
+        initialize_to_block(10);
+        assert_eq!(CurrentSession::<Test>::get(), 1);
+        assert_eq!(TotalBlocks::<Test>::get(1), (1, 1));
+
+        finalize_current_block();
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 0);
+
+        // Total rewards: 9
+        // 1 (20%) for collators
+        // 8 (80%) for stakers
+
+        // Reward for collator
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 1,
+            },
+        ));
+        // Reward for staker
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 8,
+            },
+        ));
+
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+    });
+}
+
+#[test]
+fn should_reward_collator_with_extra_rewards_and_many_stakers() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(3),
+        ));
+        assert_ok!(CollatorStaking::register_as_candidate(
+            RuntimeOrigin::signed(4),
+        ));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(2), 4, 40));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 4, 50));
+        assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 91));
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 4,
+                    deposit: 100,
+                },
+                CandidateInfo {
+                    who: 3,
+                    deposit: 101,
+                }
+            ]
+        );
+
+        // Staker 3 will autocompound 40% of its earnings
+        Autocompound::<Test>::insert(3, Percent::from_parts(40));
+        ExtraReward::<Test>::put((1, 1));
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance()
+        );
+        assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
+        assert_eq!(CurrentSession::<Test>::get(), 0);
+        for block in 1..=9 {
+            initialize_to_block(block);
+            assert_eq!(CurrentSession::<Test>::get(), 0);
+            assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, block as u32));
+
+            // Assume we collected one unit in fees per block
+            assert_ok!(Balances::transfer(
+                &1,
+                &CollatorStaking::account_id(),
+                1,
+                KeepAlive
+            ));
+            finalize_current_block();
+        }
+        assert_eq!(
+            Balances::free_balance(CollatorStaking::account_id()),
+            Balances::minimum_balance() + 9
+        );
+        assert!(!System::events().iter().any(|e| {
+            match e.event {
+                RuntimeEvent::CollatorStaking(Event::StakingRewardReceived { .. }) => true,
+                _ => false,
+            }
+        }));
+
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 9);
+        initialize_to_block(10);
+        assert_eq!(CurrentSession::<Test>::get(), 1);
+        assert_eq!(TotalBlocks::<Test>::get(1), (1, 1));
+
+        finalize_current_block();
+        assert_eq!(ProducedBlocks::<Test>::get(0, 4), 0);
+
+        // Total rewards: 18
+        // 3 (20%) for collators
+        // 15 (80%) for stakers
+        //  - Staker 2 -> 40% = 6
+        //  - Staker 3 -> 50% = 7
+        //  - Staker 4 (collator) -> 10% = 1
+
+        // Reward for collator
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 3,
+            },
+        ));
+        // Reward for stakers
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 2,
+                amount: 6,
+            },
+        ));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 3,
+                amount: 7,
+            },
+        ));
+        System::assert_has_event(RuntimeEvent::CollatorStaking(
+            Event::StakingRewardReceived {
+                staker: 4,
+                amount: 1,
+            },
+        ));
+
+        // Check that staker 3 added 40% of its earnings via autocompound.
+        System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+            staker: 3,
+            candidate: 4,
+            amount: 2,
+        }));
+
+        // Check after adding the stake via autocompound the candidate list is sorted.
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![
+                CandidateInfo {
+                    who: 3,
+                    deposit: 101,
+                },
+                CandidateInfo {
+                    who: 4,
+                    deposit: 102,
+                },
+            ]
+        );
+
+        // We could not split the reward evenly, so what remains will be part of the next reward.
+        // This it not critical, as amounts are very low.
+        assert_eq!(
+            Balances::free_balance(&CollatorStaking::account_id()),
+            Balances::minimum_balance() + 1
+        );
     });
 }

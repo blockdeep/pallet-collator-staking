@@ -504,6 +504,18 @@ pub mod pallet {
             );
         }
 
+        /// Rewards are delivered when blocks have unused space. The underlined assumtion is that
+        /// the number of collators to be rewarded
+        fn on_idle(_n: BlockNumberFor<T>, _remaining_weight: Weight) -> Weight {
+            // Reward one collator for the previous session
+            let current_session = CurrentSession::<T>::get();
+            if current_session > 0 {
+                Self::reward_one_collator(current_session - 1);
+            }
+
+            Weight::zero()
+        }
+
         #[cfg(feature = "try-runtime")]
         fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
             Self::do_try_state()
@@ -908,7 +920,11 @@ pub mod pallet {
             percent: Percent,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            Autocompound::<T>::insert(&who, percent);
+            if percent.is_zero() {
+                Autocompound::<T>::remove(&who);
+            } else {
+                Autocompound::<T>::insert(&who, percent);
+            }
             Self::deposit_event(Event::AutocompoundPercentageSet {
                 staker: who,
                 percentage: percent,
@@ -1274,7 +1290,7 @@ pub mod pallet {
                 let collator_info = &CandidateList::<T>::get()[pos];
                 let total_rewards = Rewards::<T>::get(session);
                 let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
-                if rewardable_blocks.is_zero() {
+                if rewardable_blocks.is_zero() || collator_info.deposit.is_zero() {
                     // we cannot divide by zero
                     return;
                 }
@@ -1282,7 +1298,7 @@ pub mod pallet {
 
                 let rewards_all: BalanceOf<T> =
                     total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
-                let collator_only_reward = collator_percentage * rewards_all;
+                let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 
                 // Reward collator. Note these rewards are not autocompounded.
                 if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
@@ -1299,7 +1315,7 @@ pub mod pallet {
                     } else {
                         // Autocompound
                         let compound_percentage = Autocompound::<T>::get(staker.clone());
-                        let compound_amount = compound_percentage * stake;
+                        let compound_amount = compound_percentage.mul_floor(staker_reward);
                         if !compound_amount.is_zero() {
                             if let Err(error) =
                                 Self::do_stake_at_position(&staker, compound_amount, pos, false)
@@ -1316,6 +1332,8 @@ pub mod pallet {
                     }
                 });
                 let _ = Self::reassign_candidate_position(pos);
+            } else {
+                log::warn!("Collator {} is no longer a candidate", collator);
             }
         }
 
@@ -1451,21 +1469,16 @@ pub mod pallet {
             LastAuthoredBlock::<T>::insert(author.clone(), Self::current_block_number());
 
             // Invulnerables do not get rewards
-            if !Self::is_invulnerable(&author) {
-                ProducedBlocks::<T>::mutate(current_session, author, |b| b.saturating_inc());
+            if Self::is_invulnerable(&author) {
                 TotalBlocks::<T>::mutate(current_session, |(total, _)| {
                     total.saturating_inc();
                 });
             } else {
+                ProducedBlocks::<T>::mutate(current_session, author, |b| b.saturating_inc());
                 TotalBlocks::<T>::mutate(current_session, |(total, rewardable)| {
                     total.saturating_inc();
                     rewardable.saturating_inc();
                 });
-            }
-
-            // Reward one collator for the previous session
-            if current_session > 0 {
-                Self::reward_one_collator(current_session - 1);
             }
 
             frame_system::Pallet::<T>::register_extra_weight_unchecked(

@@ -1,5 +1,6 @@
-use super::*;
-use crate as collator_staking;
+use std::marker::PhantomData;
+
+use frame_support::weights::Weight;
 use frame_support::{
     derive_impl, ord_parameter_types, parameter_types,
     traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
@@ -13,7 +14,10 @@ use sp_runtime::{
     traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
     BuildStorage, Percent, RuntimeAppPublic,
 };
-use std::marker::PhantomData;
+
+use crate as collator_staking;
+
+use super::*;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 type AccountId = <Test as frame_system::Config>::AccountId;
@@ -253,4 +257,12 @@ pub fn initialize_to_block(n: u64) {
         System::set_block_number(i);
         <AllPalletsWithSystem as frame_support::traits::OnInitialize<u64>>::on_initialize(i);
     }
+}
+
+pub fn finalize_current_block() {
+    let current_block = System::block_number();
+    <AllPalletsWithSystem as frame_support::traits::OnIdle<u64>>::on_idle(
+        current_block,
+        Weight::MAX,
+    );
 }
