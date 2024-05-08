@@ -1580,6 +1580,27 @@ fn cannot_set_invalid_max_candidates_in_genesis() {
 }
 
 #[test]
+#[should_panic = "genesis invulnerables are more than T::MaxInvulnerables"]
+fn cannot_set_too_many_invulnerables_at_genesis() {
+    sp_tracing::try_init_simple();
+    let mut t = frame_system::GenesisConfig::<Test>::default()
+        .build_storage()
+        .unwrap();
+
+    let collator_staking = collator_staking::GenesisConfig::<Test> {
+        desired_candidates: 5,
+        candidacy_bond: 10,
+        min_stake: 2,
+        invulnerables: vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+        ],
+        collator_reward_percentage: Percent::from_parts(20),
+    };
+    // collator selection must be initialized before session.
+    collator_staking.assimilate_storage(&mut t).unwrap();
+}
+
+#[test]
 fn cannot_stake_if_not_candidate() {
     new_test_ext().execute_with(|| {
         // invulnerable
@@ -2103,7 +2124,7 @@ fn claim() {
 }
 
 #[test]
-fn autocompound() {
+fn set_autocompound_percentage() {
     new_test_ext().execute_with(|| {
         initialize_to_block(1);
 

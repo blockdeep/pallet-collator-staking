@@ -985,13 +985,13 @@ pub mod pallet {
         }
 
         /// Checks whether a given account is a candidate and returns its position if successful.
-        pub fn get_candidate(account: &T::AccountId) -> Result<usize, ()> {
+        pub fn get_candidate(account: &T::AccountId) -> Result<usize, DispatchError> {
             match CandidateList::<T>::get()
                 .iter()
                 .position(|c| c.who == *account)
             {
                 Some(pos) => Ok(pos),
-                None => Err(()),
+                None => Err(Error::<T>::NotCandidate.into()),
             }
         }
 
@@ -1007,7 +1007,7 @@ pub mod pallet {
             amount: BalanceOf<T>,
             sort: bool,
         ) -> Result<usize, DispatchError> {
-            let position = Self::get_candidate(candidate).map_err(|_| Error::<T>::NotCandidate)?;
+            let position = Self::get_candidate(candidate)?;
             Self::do_stake_at_position(staker, amount, position, sort)
         }
 
@@ -1097,7 +1097,7 @@ pub mod pallet {
                 Error::<T>::NotCandidate
             );
             ensure!(
-                StakeCount::<T>::get(&staker) < T::MaxStakedCandidates::get(),
+                StakeCount::<T>::get(staker) < T::MaxStakedCandidates::get(),
                 Error::<T>::TooManyStakedCandidates,
             );
             CandidateList::<T>::try_mutate(|candidates| -> DispatchResult {
@@ -1109,7 +1109,7 @@ pub mod pallet {
                         Error::<T>::InsufficientStake
                     );
                     if stake.is_zero() {
-                        StakeCount::<T>::mutate(&staker, |count| count.saturating_inc());
+                        StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
                     }
                     T::Currency::reserve(staker, amount)?;
                     *stake = final_staker_stake;
@@ -1200,7 +1200,7 @@ pub mod pallet {
                         Ok(())
                     })?;
                 }
-                StakeCount::<T>::mutate_exists(&staker, |count| {
+                StakeCount::<T>::mutate_exists(staker, |count| {
                     if let Some(c) = count.as_mut() {
                         c.saturating_dec();
                         match c {
