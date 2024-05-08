@@ -79,6 +79,14 @@ fn basic_setup_works() {
         );
         // genesis should sort input
         assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+
+        #[cfg(feature = "try-runtime")]
+        {
+            use frame_system::pallet_prelude::BlockNumberFor;
+            assert_ok!(<CollatorStaking as frame_support::traits::Hooks<
+                BlockNumberFor<Test>,
+            >>::try_state(1));
+        }
     });
 }
 
@@ -1736,6 +1744,25 @@ fn stake_and_reassign_position() {
                     deposit: 20
                 },
             ]
+        );
+    });
+}
+
+#[test]
+fn cannot_stake_too_many_candidates() {
+    new_test_ext().execute_with(|| {
+        initialize_to_block(1);
+
+        assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
+
+        register_candidates(3..=19);
+        for i in 3..=18 {
+            assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(1), i, 2));
+        }
+        assert_eq!(StakeCount::<Test>::get(1), 16);
+        assert_noop!(
+            CollatorStaking::stake(RuntimeOrigin::signed(1), 19, 2),
+            Error::<Test>::TooManyStakedCandidates
         );
     });
 }

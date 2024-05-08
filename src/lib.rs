@@ -985,8 +985,6 @@ pub mod pallet {
         }
 
         /// Checks whether a given account is a candidate and returns its position if successful.
-        ///
-        /// Computes in **O(n)** time.
         pub fn get_candidate(account: &T::AccountId) -> Result<usize, ()> {
             match CandidateList::<T>::get()
                 .iter()
@@ -998,15 +996,11 @@ pub mod pallet {
         }
 
         /// Checks whether a given account is an invulnerable.
-        ///
-        /// Computes in **O(log n)** time.
         pub fn is_invulnerable(account: &T::AccountId) -> bool {
             Invulnerables::<T>::get().binary_search(account).is_ok()
         }
 
         /// Adds stake into a given candidate by providing its address.
-        ///
-        /// Computes in **O(n)** time.
         pub fn do_stake_for_account(
             staker: &T::AccountId,
             candidate: &T::AccountId,
@@ -1092,8 +1086,6 @@ pub mod pallet {
         /// Adds stake into a given candidate by providing its position in [`CandidateList`].
         ///
         /// Returns the position of the candidate in the list after adding the stake.
-        ///
-        /// Computes in **O(1)** time.
         pub fn do_stake_at_position(
             staker: &T::AccountId,
             amount: BalanceOf<T>,
@@ -1216,6 +1208,7 @@ pub mod pallet {
                             _ => Some(*c),
                         }
                     } else {
+                        // This should never occur.
                         None
                     }
                 });
