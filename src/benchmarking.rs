@@ -12,6 +12,7 @@ use frame_support::traits::{Currency, EnsureOrigin, Get, ReservableCurrency};
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
+use sp_runtime::Percent;
 use sp_std::{cmp, prelude::*};
 
 pub type BalanceOf<T> =
@@ -511,6 +512,56 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()));
 
 		assert_eq!(0, UnstakingRequests::<T>::get(&caller).len());
+	}
+
+	#[benchmark]
+	fn set_autocompound_percentage() {
+		let caller: T::AccountId = whitelisted_caller();
+		let percent = Percent::from_parts(50);
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), percent);
+
+		assert_eq!(Autocompound::<T>::get(&caller), percent);
+	}
+
+	#[benchmark]
+	fn set_collator_reward_percentage() -> Result<(), BenchmarkError> {
+		let origin =
+			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+		let percent = Percent::from_parts(70);
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, percent);
+
+		assert_eq!(CollatorRewardPercentage::<T>::get(), percent);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn set_extra_reward() -> Result<(), BenchmarkError> {
+		let origin =
+			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+		let extra_reward = Some((account("extra_reward", 0, SEED), 5u32.into()));
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, extra_reward.clone());
+
+		assert_eq!(ExtraReward::<T>::get(), extra_reward);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn set_minimum_stake() -> Result<(), BenchmarkError> {
+		let origin =
+			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+		let min_stake = 3u32.into();
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, min_stake);
+
+		assert_eq!(MinStake::<T>::get(), min_stake);
+		Ok(())
 	}
 
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
