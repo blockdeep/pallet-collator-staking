@@ -1,68 +1,13 @@
-//! Collator Selection pallet.
+//! Collator Staking pallet.
 //!
-//! A pallet to manage collators in a parachain.
+//! A simple DPoS pallet for collators in a parachain.
 //!
 //! ## Overview
 //!
-//! The Collator Selection pallet manages the collators of a parachain. **Collation is _not_ a
-//! secure activity** and this pallet does not implement any game-theoretic mechanisms to meet BFT
-//! safety assumptions of the chosen set.
-//!
-//! ## Terminology
-//!
-//! - Collator: A parachain block producer.
-//! - Bond: An amount of `Balance` _reserved_ for candidate registration.
-//! - Invulnerable: An account guaranteed to be in the collator set.
-//!
-//! ## Implementation
-//!
-//! The final `Collators` are aggregated from two individual lists:
-//!
-//! 1. [`Invulnerables`]: a set of collators appointed by governance. These accounts will always be
-//!    collators.
-//! 2. [`CandidateList`]: these are *candidates to the collation task* and may or may not be elected
-//!    as a final collator.
-//!
-//! The current implementation resolves congestion of [`CandidateList`] through a simple auction
-//! mechanism. Candidates bid for the collator slots and at the end of the session, the auction ends
-//! and the top candidates are selected to become collators. The number of selected candidates is
-//! determined by the value of [`DesiredCandidates`].
-//!
-//! Before the list reaches full capacity, candidates can register by placing the minimum bond
-//! through `register_as_candidate`. Then, if an account wants to participate in the collator slot
-//! auction, they have to replace an existing candidate by placing a greater deposit through
-//! `take_candidate_slot`. Existing candidates can increase their bids through `stake`.
-//!
-//! At any point, an account can take the place of another account in the candidate list if they put
-//! up a greater deposit than the target. While new joiners would like to deposit as little as
-//! possible to participate in the auction, the replacement threat incentivizes candidates to bid as
-//! close to their budget as possible in order to avoid being replaced.
-//!
-//! Candidates which are not on "winning" slots in the list can also decrease their deposits through
-//! `stake`, but candidates who are on top slots and try to decrease their deposits will fail
-//! in order to enforce auction mechanics and have meaningful bids.
-//!
-//! Candidates will not be allowed to get kicked or `leave_intent` if the total number of collators
-//! would fall below `MinEligibleCollators`. This is to ensure that some collators will always
-//! exist, i.e. someone is eligible to produce a block.
-//!
-//! When a new session starts, candidates with the highest deposits will be selected in order until
-//! the desired number of collators is reached. Candidates can increase or decrease their deposits
-//! between sessions in order to ensure they receive a slot in the collator list.
-//!
-//! ### Rewards
-//!
-//! The Collator Selection pallet maintains an on-chain account (the "Pot"). In each block, the
-//! collator who authored it receives:
-//!
-//! - Half the value of the Pot.
-//! - Half the value of the transaction fees within the block. The other half of the transaction
-//!   fees are deposited into the Pot.
-//!
-//! To initiate rewards, an ED needs to be transferred to the pot address.
-//!
-//! Note: Eventually the Pot distribution may be modified as discussed in [this
-//! issue](https://github.com/paritytech/statemint/issues/21#issuecomment-810481073).
+//! The Collator Staking pallet provides DPoS functionality to manage collators of a parachain.
+//! It allows stakers to stake their tokens to back collators, and receive rewards proportionately.
+//! There is no slashing in place. If a collator does not produce blocks as expected,
+//! they are removed from the collator set.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -128,7 +73,6 @@ pub mod pallet {
 		}
 	}
 
-	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// Overarching event type.
@@ -173,17 +117,17 @@ pub mod pallet {
 		/// Maximum per-account number of candidates to deposit stake on.
 		type MaxStakedCandidates: Get<u32>;
 
-		/// Amount of blocks to wait before unreserving the stake by a collator.
+		/// Number of blocks to wait before unreserving the stake by a collator.
 		type CollatorUnstakingDelay: Get<BlockNumberFor<Self>>;
 
-		/// Amount of blocks to wait before unreserving the stake by a user.
+		/// Number of blocks to wait before unreserving the stake by a user.
 		type UserUnstakingDelay: Get<BlockNumberFor<Self>>;
 
 		/// The weight information of this pallet.
 		type WeightInfo: WeightInfo;
 	}
 
-	/// Basic information about a collation candidate.
+	/// Basic information about a collator candidate.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
@@ -519,7 +463,7 @@ pub mod pallet {
 			);
 			assert!(
 				T::MaxCandidates::get() >= T::MaxStakedCandidates::get(),
-				"CandidacyBond must be greater than or equal to MinStake"
+				"MaxCandidates must be greater than or equal to MaxStakedCandidates"
 			);
 		}
 
