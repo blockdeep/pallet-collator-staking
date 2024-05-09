@@ -502,6 +502,10 @@ pub mod pallet {
                 CandidacyBond::<T>::get() >= MinStake::<T>::get(),
                 "CandidacyBond must be greater than or equal to MinStake"
             );
+            assert!(
+                T::MaxCandidates::get() >= T::MaxStakedCandidates::get(),
+                "CandidacyBond must be greater than or equal to MinStake"
+            );
         }
 
         /// Rewards are delivered when blocks have unused space. The underlined assumtion is that
@@ -875,7 +879,7 @@ pub mod pallet {
                 Ok(pos) => (true, Some(pos)),
                 Err(_) => (false, None),
             };
-            Self::do_unstake(&who, &candidate, has_penalty, maybe_position)?;
+            Self::do_unstake(&who, &candidate, has_penalty, maybe_position, true)?;
             Ok(())
         }
 
@@ -898,9 +902,10 @@ pub mod pallet {
                         None => (false, None),
                         Some(pos) => (true, Some(*pos)),
                     };
-                    Self::do_unstake(&who, &candidate, is_candidate, maybe_position)?;
+                    Self::do_unstake(&who, &candidate, is_candidate, maybe_position, false)?;
                 }
             }
+            CandidateList::<T>::mutate(|candidates| candidates.sort_by_key(|c| c.deposit));
             Ok(())
         }
 
@@ -1184,11 +1189,12 @@ pub mod pallet {
         /// the session ends.
         ///
         /// Returns the amount unstaked.
-        pub fn do_unstake(
+        fn do_unstake(
             staker: &T::AccountId,
             candidate: &T::AccountId,
             has_penalty: bool,
             maybe_position: Option<usize>,
+            sort: bool,
         ) -> Result<BalanceOf<T>, DispatchError> {
             let stake = Stake::<T>::take(candidate, staker);
             if !stake.is_zero() {
@@ -1232,7 +1238,9 @@ pub mod pallet {
                     CandidateList::<T>::mutate(|candidates| {
                         candidates[position].deposit.saturating_reduce(stake);
                     });
-                    Self::reassign_candidate_position(position)?;
+                    if sort {
+                        Self::reassign_candidate_position(position)?;
+                    }
                 }
                 Self::deposit_event(Event::StakeRemoved {
                     staker: staker.clone(),
@@ -1257,7 +1265,7 @@ pub mod pallet {
                     if remove_last_authored {
                         LastAuthoredBlock::<T>::remove(candidate.who.clone())
                     };
-                    Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None)?;
+                    Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, true)?;
                     Self::deposit_event(Event::CandidateRemoved {
                         account_id: candidate.who.clone(),
                     });

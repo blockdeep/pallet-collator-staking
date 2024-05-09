@@ -456,7 +456,6 @@ mod benchmarks {
     fn stake(c: Linear<1, { T::MaxCandidates::get() }>) {
         let amount = T::Currency::minimum_balance();
         <CandidacyBond<T>>::put(amount);
-        <DesiredCandidates<T>>::put(c);
         frame_system::Pallet::<T>::set_block_number(0u32.into());
 
         register_validators::<T>(c);
@@ -485,7 +484,6 @@ mod benchmarks {
     fn unstake_from(c: Linear<1, { T::MaxCandidates::get() }>) {
         let amount = T::Currency::minimum_balance();
         <CandidacyBond<T>>::put(amount);
-        <DesiredCandidates<T>>::put(c);
         frame_system::Pallet::<T>::set_block_number(0u32.into());
 
         register_validators::<T>(c);
@@ -499,6 +497,44 @@ mod benchmarks {
 
         assert_eq!(Stake::<T>::get(&candidate, &candidate), 0u32.into());
         assert_eq!(&CandidateList::<T>::get()[0].who, &candidate);
+    }
+
+    // worst case is having stake in all collators
+    #[benchmark]
+    fn unstake_all(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+        let amount = T::Currency::minimum_balance();
+        <CandidacyBond<T>>::put(amount);
+        frame_system::Pallet::<T>::set_block_number(0u32.into());
+
+        register_validators::<T>(c);
+        register_candidates::<T>(c);
+
+        let caller = whitelisted_caller();
+        T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
+        CandidateList::<T>::get().iter().for_each(|cand| {
+            assert_eq!(cand.deposit, amount);
+            CollatorStaking::<T>::stake(
+                RawOrigin::Signed(caller.clone()).into(),
+                cand.who.clone(),
+                amount,
+            )
+            .unwrap();
+        });
+
+        CandidateList::<T>::get().iter().for_each(|cand| {
+            assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+            assert_eq!(Stake::<T>::get(&cand.who, &caller), amount);
+            assert_eq!(cand.deposit, amount * 2u32.into());
+        });
+
+        #[extrinsic_call]
+        _(RawOrigin::Signed(caller.clone()));
+
+        CandidateList::<T>::get().iter().for_each(|cand| {
+            assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+            assert_eq!(Stake::<T>::get(&cand.who, &caller), 0u32.into());
+            assert_eq!(cand.deposit, amount);
+        });
     }
 
     impl_benchmark_test_suite!(

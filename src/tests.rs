@@ -2011,6 +2011,13 @@ fn unstake_all() {
         assert_eq!(Stake::<Test>::get(4, 5), 0);
         assert_eq!(StakeCount::<Test>::get(5), 0);
         assert_eq!(Balances::free_balance(5), 90);
+        assert_eq!(
+            CandidateList::<Test>::get(),
+            vec![CandidateInfo {
+                who: 4,
+                deposit: 10
+            }]
+        );
     });
 }
 
