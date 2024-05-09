@@ -483,5 +483,35 @@ mod benchmarks {
 		});
 	}
 
+	#[benchmark]
+	fn claim(c: Linear<0, { T::MaxStakedCandidates::get() }>) {
+		let amount = T::Currency::minimum_balance();
+		<CandidacyBond<T>>::put(amount);
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
+
+		register_validators::<T>(c);
+		register_candidates::<T>(c);
+
+		let caller = whitelisted_caller();
+		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
+		CandidateList::<T>::get().iter().for_each(|cand| {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(caller.clone()).into(),
+				cand.who.clone(),
+				amount,
+			)
+			.unwrap();
+		});
+
+		CollatorStaking::<T>::unstake_all(RawOrigin::Signed(caller.clone()).into()).unwrap();
+		assert_eq!(c as usize, UnstakingRequests::<T>::get(&caller).len());
+		frame_system::Pallet::<T>::set_block_number(100u32.into());
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()));
+
+		assert_eq!(0, UnstakingRequests::<T>::get(&caller).len());
+	}
+
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
 }
