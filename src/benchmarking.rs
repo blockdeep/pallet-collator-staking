@@ -11,7 +11,7 @@ use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
 use frame_support::traits::{Currency, EnsureOrigin, Get, ReservableCurrency};
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
-use pallet_session::{self as session, SessionManager};
+use pallet_session::SessionManager;
 use sp_std::{cmp, prelude::*};
 
 pub type BalanceOf<T> =
@@ -38,7 +38,7 @@ fn create_funded_user<T: Config>(
     user
 }
 
-fn keys<T: Config + session::Config>(c: u32) -> <T as session::Config>::Keys {
+fn keys<T: Config + pallet_session::Config>(c: u32) -> <T as pallet_session::Config>::Keys {
     use rand::{RngCore, SeedableRng};
 
     let keys = {
@@ -55,15 +55,18 @@ fn keys<T: Config + session::Config>(c: u32) -> <T as session::Config>::Keys {
     Decode::decode(&mut &keys[..]).unwrap()
 }
 
-fn validator<T: Config + session::Config>(c: u32) -> (T::AccountId, <T as session::Config>::Keys) {
+fn validator<T: Config + pallet_session::Config>(
+    c: u32,
+) -> (T::AccountId, <T as pallet_session::Config>::Keys) {
     (create_funded_user::<T>("candidate", c, 1000), keys::<T>(c))
 }
 
-fn register_validators<T: Config + session::Config>(count: u32) -> Vec<T::AccountId> {
+fn register_validators<T: Config + pallet_session::Config>(count: u32) -> Vec<T::AccountId> {
     let validators = (0..count).map(|c| validator::<T>(c)).collect::<Vec<_>>();
 
     for (who, keys) in validators.clone() {
-        <session::Pallet<T>>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new()).unwrap();
+        <pallet_session::Pallet<T>>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new())
+            .unwrap();
     }
 
     validators.into_iter().map(|(who, _)| who).collect()
@@ -99,7 +102,7 @@ fn min_invulnerables<T: Config>() -> u32 {
     min_collators.saturating_sub(candidates_length)
 }
 
-#[benchmarks(where T: pallet_authorship::Config + session::Config)]
+#[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
     use super::*;
 
@@ -147,7 +150,7 @@ mod benchmarks {
         candidates.push((new_invulnerable.clone(), new_invulnerable_keys));
         // set their keys ...
         for (who, keys) in candidates.clone() {
-            <session::Pallet<T>>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new())
+            <pallet_session::Pallet<T>>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new())
                 .unwrap();
         }
         // ... and register them.
@@ -276,7 +279,7 @@ mod benchmarks {
         let bond: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
         T::Currency::make_free_balance_be(&caller, bond);
 
-        <session::Pallet<T>>::set_keys(
+        <pallet_session::Pallet<T>>::set_keys(
             RawOrigin::Signed(caller.clone()).into(),
             keys::<T>(c + 1),
             Vec::new(),
@@ -296,10 +299,11 @@ mod benchmarks {
     }
 
     #[benchmark]
-    fn take_candidate_slot(c: Linear<{ min_candidates::<T>() + 1 }, { T::MaxCandidates::get() }>) {
+    fn take_candidate_slot() {
         <CandidacyBond<T>>::put(T::Currency::minimum_balance());
         <DesiredCandidates<T>>::put(1);
 
+        let c = T::MaxCandidates::get();
         register_validators::<T>(c);
         register_candidates::<T>(c);
 
@@ -307,7 +311,7 @@ mod benchmarks {
         let bond: BalanceOf<T> = T::Currency::minimum_balance() * 10u32.into();
         T::Currency::make_free_balance_be(&caller, bond);
 
-        <session::Pallet<T>>::set_keys(
+        <pallet_session::Pallet<T>>::set_keys(
             RawOrigin::Signed(caller.clone()).into(),
             keys::<T>(c + 1),
             Vec::new(),
@@ -368,14 +372,14 @@ mod benchmarks {
         let new_block: BlockNumberFor<T> = 10u32.into();
 
         frame_system::Pallet::<T>::set_block_number(new_block);
-        assert!(T::Currency::free_balance(&author) == 0u32.into());
+        assert_eq!(T::Currency::free_balance(&author), 0u32.into());
 
         #[block]
         {
             <CollatorStaking<T> as EventHandler<_, _>>::note_author(author.clone())
         }
 
-        assert!(T::Currency::free_balance(&author) > 0u32.into());
+        assert_eq!(LastAuthoredBlock::<T>::get(&author), new_block);
         assert_eq!(frame_system::Pallet::<T>::block_number(), new_block);
     }
 
