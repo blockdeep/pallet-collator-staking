@@ -363,17 +363,10 @@ mod benchmarks {
     // worse case is paying a non-existing candidate account.
     #[benchmark]
     fn note_author() {
-        <CandidacyBond<T>>::put(T::Currency::minimum_balance());
-        T::Currency::make_free_balance_be(
-            &<CollatorStaking<T>>::account_id(),
-            T::Currency::minimum_balance() * 4u32.into(),
-        );
-        let author = account("author", 0, SEED);
+        let author: T::AccountId = account("author", 0, SEED);
         let new_block: BlockNumberFor<T> = 10u32.into();
 
         frame_system::Pallet::<T>::set_block_number(new_block);
-        assert_eq!(T::Currency::free_balance(&author), 0u32.into());
-
         #[block]
         {
             <CollatorStaking<T> as EventHandler<_, _>>::note_author(author.clone())
@@ -456,6 +449,56 @@ mod benchmarks {
                 pre_length
             );
         }
+    }
+
+    // worst case is promoting from first position to last one.
+    #[benchmark]
+    fn stake(c: Linear<1, { T::MaxCandidates::get() }>) {
+        let amount = T::Currency::minimum_balance();
+        <CandidacyBond<T>>::put(amount);
+        <DesiredCandidates<T>>::put(c);
+        frame_system::Pallet::<T>::set_block_number(0u32.into());
+
+        register_validators::<T>(c);
+        register_candidates::<T>(c);
+
+        let candidate = CandidateList::<T>::get()[0].who.clone();
+        whitelist_account!(candidate);
+        let stake_before = Stake::<T>::get(&candidate, &candidate);
+
+        #[extrinsic_call]
+        _(
+            RawOrigin::Signed(candidate.clone()),
+            candidate.clone(),
+            amount,
+        );
+
+        assert_eq!(
+            Stake::<T>::get(&candidate, &candidate),
+            stake_before + amount
+        );
+        assert_eq!(&CandidateList::<T>::get()[(c - 1) as usize].who, &candidate);
+    }
+
+    // worst case is promoting from last position to first one
+    #[benchmark]
+    fn unstake_from(c: Linear<1, { T::MaxCandidates::get() }>) {
+        let amount = T::Currency::minimum_balance();
+        <CandidacyBond<T>>::put(amount);
+        <DesiredCandidates<T>>::put(c);
+        frame_system::Pallet::<T>::set_block_number(0u32.into());
+
+        register_validators::<T>(c);
+        register_candidates::<T>(c);
+
+        let candidate = CandidateList::<T>::get()[(c - 1) as usize].who.clone();
+        whitelist_account!(candidate);
+
+        #[extrinsic_call]
+        _(RawOrigin::Signed(candidate.clone()), candidate.clone());
+
+        assert_eq!(Stake::<T>::get(&candidate, &candidate), 0u32.into());
+        assert_eq!(&CandidateList::<T>::get()[0].who, &candidate);
     }
 
     impl_benchmark_test_suite!(
