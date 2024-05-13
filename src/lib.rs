@@ -97,12 +97,15 @@ pub mod pallet {
 		/// Minimum number eligible collators. Should always be greater than zero. This includes
 		/// Invulnerable collators. This ensures that there will always be one collator who can
 		/// produce a block.
+		#[pallet::constant]
 		type MinEligibleCollators: Get<u32>;
 
 		/// Maximum number of invulnerables.
+		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
 		// Will be kicked if block is not produced in threshold.
+		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
 		/// A stable ID for a collator.
@@ -117,12 +120,15 @@ pub mod pallet {
 		type CollatorRegistration: ValidatorRegistration<Self::CollatorId>;
 
 		/// Maximum per-account number of candidates to deposit stake on.
+		#[pallet::constant]
 		type MaxStakedCandidates: Get<u32>;
 
 		/// Number of blocks to wait before unreserving the stake by a collator.
+		#[pallet::constant]
 		type CollatorUnstakingDelay: Get<BlockNumberFor<Self>>;
 
 		/// Number of blocks to wait before unreserving the stake by a user.
+		#[pallet::constant]
 		type UserUnstakingDelay: Get<BlockNumberFor<Self>>;
 
 		/// The weight information of this pallet.
@@ -1476,23 +1482,35 @@ pub mod pallet {
 			Some(result)
 		}
 
-		fn start_session(session: SessionIndex) {
+		fn start_session(index: SessionIndex) {
+			log::info!(
+				target: LOG_TARGET,
+				"Starting session {} at #{:?}",
+				index,
+				frame_system::Pallet::<T>::block_number(),
+			);
 			// Initialize counters for this session
-			TotalBlocks::<T>::insert(session, (0, 0));
-			CurrentSession::<T>::put(session);
+			TotalBlocks::<T>::insert(index, (0, 0));
+			CurrentSession::<T>::put(index);
 
 			// cleanup last session's stuff
-			if session > 1 {
-				let last_session = session - 2;
+			if index > 1 {
+				let last_session = index - 2;
 				TotalBlocks::<T>::remove(last_session);
 				Rewards::<T>::remove(last_session);
 				let _ = ProducedBlocks::<T>::clear_prefix(last_session, u32::MAX, None);
 			}
 		}
 
-		fn end_session(session: SessionIndex) {
+		fn end_session(index: SessionIndex) {
+			log::info!(
+				target: LOG_TARGET,
+				"Finishing session {} at #{:?}",
+				index,
+				frame_system::Pallet::<T>::block_number(),
+			);
 			let pot_account = Self::account_id();
-			let (produced_blocks, _) = TotalBlocks::<T>::get(session);
+			let (produced_blocks, _) = TotalBlocks::<T>::get(index);
 
 			// Transfer the extra reward, if any, to the pot
 			if let Some((account, per_block_extra_reward)) = ExtraReward::<T>::get() {
@@ -1507,7 +1525,7 @@ pub mod pallet {
 			// Rewards are the total amount in the pot minus the existential deposit.
 			let total_rewards = T::Currency::free_balance(&pot_account)
 				.saturating_sub(T::Currency::minimum_balance());
-			Rewards::<T>::insert(session, total_rewards);
+			Rewards::<T>::insert(index, total_rewards);
 		}
 	}
 }
