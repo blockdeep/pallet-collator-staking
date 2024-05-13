@@ -478,7 +478,7 @@ pub mod pallet {
 			if current_session > 0 {
 				let (rewards, compounds) = Self::reward_one_collator(current_session - 1);
 				weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
-					Self::eligible_collators(),
+					CandidateList::<T>::decode_len().unwrap_or_default() as u32,
 					rewards,
 					compounds * 100 / rewards,
 				));
@@ -746,12 +746,12 @@ pub mod pallet {
 		/// caller does not have registered session keys, the target is not a collator candidate,
 		/// and/or the `deposit` amount cannot be reserved.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::take_candidate_slot(T::MaxCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::take_candidate_slot())]
 		pub fn take_candidate_slot(
 			origin: OriginFor<T>,
 			deposit: BalanceOf<T>,
 			target: T::AccountId,
-		) -> DispatchResultWithPostInfo {
+		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			ensure!(!Self::is_invulnerable(&who), Error::<T>::AlreadyInvulnerable);
@@ -783,7 +783,7 @@ pub mod pallet {
 			}
 
 			Self::deposit_event(Event::CandidateReplaced { old: target, new: who, deposit });
-			Ok(Some(T::WeightInfo::take_candidate_slot(length as u32)).into())
+			Ok(())
 		}
 
 		/// Adds stake to a candidate.
@@ -797,10 +797,13 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
 			stake: BalanceOf<T>,
-		) -> DispatchResult {
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			Self::do_stake_for_account(&who, &candidate, stake, true)?;
-			Ok(())
+			Ok(Some(T::WeightInfo::stake(
+				CandidateList::<T>::decode_len().unwrap_or_default() as u32
+			))
+			.into())
 		}
 
 		/// Removes stake from an account.
@@ -811,15 +814,21 @@ pub mod pallet {
 		/// The candidate will have its position in the [`CandidateList`] conveniently modified, and
 		/// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
 		#[pallet::call_index(9)]
-		#[pallet::weight({0})]
-		pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get()))]
+		pub fn unstake_from(
+			origin: OriginFor<T>,
+			candidate: T::AccountId,
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let (has_penalty, maybe_position) = match Self::get_candidate(&candidate) {
 				Ok(pos) => (true, Some(pos)),
 				Err(_) => (false, None),
 			};
 			Self::do_unstake(&who, &candidate, has_penalty, maybe_position, true)?;
-			Ok(())
+			Ok(Some(T::WeightInfo::unstake_from(
+				CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+			))
+			.into())
 		}
 
 		/// Removes all stake from all candidates.
@@ -827,14 +836,18 @@ pub mod pallet {
 		/// If the account was once a candidate, but it has not been unstaked, funds will be
 		/// retrieved immediately.
 		#[pallet::call_index(10)]
-		#[pallet::weight({0})]
-		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::unstake_all(
+			T::MaxCandidates::get(),
+			T::MaxStakedCandidates::get()
+		))]
+		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let candidate_map: BTreeMap<T::AccountId, usize> = CandidateList::<T>::get()
 				.iter()
 				.enumerate()
 				.map(|(pos, c)| (c.who.clone(), pos))
 				.collect();
+			let mut operations = 0;
 			for (candidate, staker, stake) in Stake::<T>::iter() {
 				if staker == who && !stake.is_zero() {
 					let (is_candidate, maybe_position) = match candidate_map.get(&candidate) {
@@ -842,23 +855,29 @@ pub mod pallet {
 						Some(pos) => (true, Some(*pos)),
 					};
 					Self::do_unstake(&who, &candidate, is_candidate, maybe_position, false)?;
+					operations += 1;
 				}
 			}
 			CandidateList::<T>::mutate(|candidates| candidates.sort_by_key(|c| c.deposit));
-			Ok(())
+			Ok(Some(T::WeightInfo::unstake_all(
+				CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+				operations,
+			))
+			.into())
 		}
 
 		/// Claims all pending [`UnstakeRequest`] for a given account.
 		#[pallet::call_index(11)]
-		#[pallet::weight({0})]
-		pub fn claim(origin: OriginFor<T>) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::claim(T::MaxStakedCandidates::get()))]
+		pub fn claim(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::do_claim(&who)
+			let operations = Self::do_claim(&who)?;
+			Ok(Some(T::WeightInfo::claim(operations)).into())
 		}
 
 		/// Sets the percentage of rewards that should be autocompounded in the same candidate.
 		#[pallet::call_index(12)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
 		pub fn set_autocompound_percentage(
 			origin: OriginFor<T>,
 			percent: Percent,
@@ -880,7 +899,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(13)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::set_collator_reward_percentage())]
 		pub fn set_collator_reward_percentage(
 			origin: OriginFor<T>,
 			percent: Percent,
@@ -897,7 +916,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(14)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::set_extra_reward())]
 		pub fn set_extra_reward(
 			origin: OriginFor<T>,
 			maybe_extra_reward: Option<(T::AccountId, BalanceOf<T>)>,
@@ -918,7 +937,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(15)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::set_minimum_stake())]
 		pub fn set_minimum_stake(
 			origin: OriginFor<T>,
 			new_min_stake: BalanceOf<T>,
@@ -1001,11 +1020,13 @@ pub mod pallet {
 		}
 
 		/// Claims all pending unstaking requests for a given user.
-		pub fn do_claim(who: &T::AccountId) -> DispatchResult {
+		///
+		/// Returns the amount of operations performed.
+		pub fn do_claim(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut claimed: BalanceOf<T> = 0u32.into();
+			let mut pos = 0;
 			UnstakingRequests::<T>::try_mutate(who, |requests| {
 				let curr_block = Self::current_block_number();
-				let mut pos = 0;
 				for request in requests.iter() {
 					if request.block > curr_block {
 						break;
@@ -1021,7 +1042,7 @@ pub mod pallet {
 						amount: claimed,
 					});
 				}
-				Ok(())
+				Ok(pos as u32)
 			})
 		}
 

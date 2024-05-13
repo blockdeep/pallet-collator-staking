@@ -13,7 +13,7 @@ use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
 use sp_runtime::Percent;
-use sp_std::{cmp, prelude::*};
+use sp_std::prelude::*;
 
 pub type BalanceOf<T> =
 	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -211,29 +211,14 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn set_candidacy_bond(
-		c: Linear<0, { T::MaxCandidates::get() }>,
-		k: Linear<0, { T::MaxCandidates::get() }>,
-	) -> Result<(), BenchmarkError> {
+	fn set_candidacy_bond() -> Result<(), BenchmarkError> {
 		let initial_bond_amount: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
 		CandidacyBond::<T>::put(initial_bond_amount);
 		MinStake::<T>::put(T::Currency::minimum_balance());
 
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
-		let kicked = cmp::min(k, c);
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
-		let bond_amount = if k > 0 {
-			CandidateList::<T>::mutate(|candidates| {
-				for info in candidates.iter_mut().skip(kicked as usize) {
-					info.deposit = T::Currency::minimum_balance() * 3u32.into();
-				}
-			});
-			MinStake::<T>::get() * 3u32.into()
-		} else {
-			MinStake::<T>::get()
-		};
+		let bond_amount = MinStake::<T>::get();
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, bond_amount);
@@ -455,9 +440,12 @@ mod benchmarks {
 		assert_eq!(&CandidateList::<T>::get()[0].who, &candidate);
 	}
 
-	// worst case is having stake in all collators
+	// worst case is having stake in as many collators as possible
 	#[benchmark]
-	fn unstake_all(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+	fn unstake_all(
+		c: Linear<{ T::MaxStakedCandidates::get() }, { T::MaxCandidates::get() }>,
+		s: Linear<1, { T::MaxStakedCandidates::get() }>,
+	) {
 		let amount = T::Currency::minimum_balance();
 		CandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
@@ -468,7 +456,7 @@ mod benchmarks {
 
 		let caller = whitelisted_caller();
 		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
-		CandidateList::<T>::get().iter().for_each(|cand| {
+		CandidateList::<T>::get().iter().take(s as usize).for_each(|cand| {
 			assert_eq!(cand.deposit, amount);
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
@@ -476,12 +464,8 @@ mod benchmarks {
 				amount,
 			)
 			.unwrap();
-		});
-
-		CandidateList::<T>::get().iter().for_each(|cand| {
 			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
 			assert_eq!(Stake::<T>::get(&cand.who, &caller), amount);
-			assert_eq!(cand.deposit, amount * 2u32.into());
 		});
 
 		#[extrinsic_call]
