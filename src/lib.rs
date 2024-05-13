@@ -467,16 +467,22 @@ pub mod pallet {
 			);
 		}
 
-		/// Rewards are delivered when blocks have unused space. The underlined assumtion is that
-		/// the number of collators to be rewarded
+		/// Rewards are delivered when blocks have unused space. The underlined assumption is that
+		/// the number of collators to be rewarded is much lower than the number of blocks in
+		/// a given session.
 		fn on_idle(_n: BlockNumberFor<T>, _remaining_weight: Weight) -> Weight {
-			// Reward one collator for the previous session
+			let mut weight = T::DbWeight::get().reads_writes(1, 0);
 			let current_session = CurrentSession::<T>::get();
 			if current_session > 0 {
-				Self::reward_one_collator(current_session - 1);
+				let (rewards, compounds) = Self::reward_one_collator(current_session - 1);
+				weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
+					Self::eligible_collators(),
+					rewards,
+					compounds * 100 / rewards,
+				));
 			}
 
-			Weight::zero()
+			weight
 		}
 
 		#[cfg(feature = "try-runtime")]
@@ -1200,14 +1206,22 @@ pub mod pallet {
 		/// This includes specific rewards for the collator plus rewards for the stakers.
 		///
 		/// The collator must be a candidate in order to receive the rewards.
-		fn do_reward_collator(collator: &T::AccountId, blocks: u32, session: SessionIndex) {
+		///
+		/// Returns the amount of rewarded stakers.
+		fn do_reward_collator(
+			collator: &T::AccountId,
+			blocks: u32,
+			session: SessionIndex,
+		) -> (u32, u32) {
+			let mut total_stakers = 0;
+			let mut total_compound = 0;
 			if let Ok(pos) = Self::get_candidate(collator) {
 				let collator_info = &CandidateList::<T>::get()[pos];
 				let total_rewards = Rewards::<T>::get(session);
 				let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
 				if rewardable_blocks.is_zero() || collator_info.deposit.is_zero() {
 					// we cannot divide by zero
-					return;
+					return (0, 0);
 				}
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
 
@@ -1223,12 +1237,14 @@ pub mod pallet {
 				// Reward stakers
 				let stakers_only_rewards = total_rewards.saturating_sub(collator_only_reward);
 				Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
+					total_stakers += 1;
 					let staker_reward: BalanceOf<T> =
 						stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
 					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
 						log::warn!(target: LOG_TARGET, "Failure rewarding staker {}: {:?}", staker, error);
 					} else {
 						// Autocompound
+						total_compound += 1;
 						let compound_percentage = Autocompound::<T>::get(staker.clone());
 						let compound_amount = compound_percentage.mul_floor(staker_reward);
 						if !compound_amount.is_zero() {
@@ -1246,10 +1262,14 @@ pub mod pallet {
 						}
 					}
 				});
-				let _ = Self::reassign_candidate_position(pos);
+				if !total_compound.is_zero() {
+					// No need to sort again if no new investments were made.
+					let _ = Self::reassign_candidate_position(pos);
+				}
 			} else {
 				log::warn!("Collator {} is no longer a candidate", collator);
 			}
+			(total_stakers, total_compound)
 		}
 
 		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
@@ -1316,7 +1336,7 @@ pub mod pallet {
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
                         // TODO check if the collator should have a penalty in this case
-                        let _ = Self::try_remove_candidate_from_account(&candidate.who, true, false);
+                        let _ = Self::try_remove_candidate_from_account(&candidate.who, true, true);
                         None
                     }
                 })
@@ -1326,12 +1346,15 @@ pub mod pallet {
 		}
 
 		/// Rewards a pending collator from the previous round, if any.
-		fn reward_one_collator(session: SessionIndex) {
-			ProducedBlocks::<T>::iter_prefix(session).drain().take(1).for_each(
-				|(collator, blocks)| {
-					Self::do_reward_collator(&collator, blocks, session);
-				},
-			);
+		///
+		/// Returns a tuple with the number of rewards given and the number of autocompounds.
+		pub(crate) fn reward_one_collator(session: SessionIndex) -> (u32, u32) {
+			let mut iter = ProducedBlocks::<T>::iter_prefix(session).drain().take(1);
+			if let Some((collator, blocks)) = iter.next() {
+				Self::do_reward_collator(&collator, blocks, session)
+			} else {
+				(0, 0)
+			}
 		}
 
 		/// Ensure the correctness of the state of this pallet.

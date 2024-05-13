@@ -564,5 +564,52 @@ mod benchmarks {
 		Ok(())
 	}
 
+	#[benchmark]
+	fn reward_one_collator(
+		c: Linear<1, { T::MaxStakedCandidates::get() }>,
+		s: Linear<1, 1000>,
+		a: Linear<0, 100>,
+	) {
+		let amount = T::Currency::minimum_balance();
+		<CandidacyBond<T>>::put(amount);
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
+		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
+
+		let collator = register_validators::<T>(c)[0].clone();
+		register_candidates::<T>(c);
+
+		let autocompound = Percent::from_parts(a as u8) * s;
+		for n in 0..s {
+			let acc = create_funded_user::<T>("staker", s, 1000);
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(acc.clone()).into(),
+				collator.clone(),
+				amount,
+			)
+			.unwrap();
+			if n <= autocompound {
+				CollatorStaking::<T>::set_autocompound_percentage(
+					RawOrigin::Signed(acc.clone()).into(),
+					Percent::from_parts(50),
+				)
+				.unwrap();
+			}
+		}
+		<CollatorStaking<T> as SessionManager<_>>::start_session(0);
+		for _ in 0..10 {
+			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
+		}
+		frame_system::Pallet::<T>::set_block_number(10u32.into());
+		let _ =
+			T::Currency::make_free_balance_be(&CollatorStaking::<T>::account_id(), 100u32.into());
+		<CollatorStaking<T> as SessionManager<_>>::end_session(0);
+		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
+
+		#[block]
+		{
+			CollatorStaking::<T>::reward_one_collator(0);
+		}
+	}
+
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
 }

@@ -20,6 +20,7 @@ pub trait WeightInfo {
 	fn note_author() -> Weight;
 	fn new_session(_c: u32, _r: u32) -> Weight;
 	fn stake(_c: u32) -> Weight;
+	fn reward_one_collator(_c: u32, _s: u32, _a: u32) -> Weight;
 }
 
 impl WeightInfo for () {
@@ -64,6 +65,10 @@ impl WeightInfo for () {
 	}
 
 	fn stake(_c: u32) -> Weight {
+		Weight::from_parts(0, 0)
+	}
+
+	fn reward_one_collator(_c: u32, _s: u32, _a: u32) -> Weight {
 		Weight::from_parts(0, 0)
 	}
 }

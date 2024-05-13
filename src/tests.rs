@@ -1244,18 +1244,20 @@ fn kick_mechanism() {
 		assert_eq!(CandidateList::<Test>::get().iter().count(), 1);
 		// 3 will be kicked after 1 session delay
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 3, 4]);
-		// tuple of (id, deposit).
-		let collator = CandidateInfo { who: 4, deposit: 10 };
 		assert_eq!(
 			CandidateList::<Test>::get().iter().cloned().collect::<Vec<_>>(),
-			vec![collator]
+			vec![CandidateInfo { who: 4, deposit: 10 }]
 		);
 		assert_eq!(LastAuthoredBlock::<Test>::get(4), 20);
 		initialize_to_block(30);
 		// 3 gets kicked after 1 session delay
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 4]);
-		// kicked collator gets funds back
-		assert_eq!(Balances::free_balance(3), 100);
+		// kicked collator gets funds back after a delay
+		assert_eq!(Balances::free_balance(3), 90);
+		assert_eq!(
+			UnstakingRequests::<Test>::get(3),
+			vec![UnstakeRequest { block: 25, amount: 10 }]
+		);
 	});
 }
 
@@ -1297,8 +1299,12 @@ fn should_not_kick_mechanism_too_few() {
 		initialize_to_block(30);
 		// 3 gets kicked after 1 session delay
 		assert_eq!(SessionHandlerCollators::get(), vec![3]);
-		// kicked collator gets funds back
-		assert_eq!(Balances::free_balance(5), 100);
+		// kicked collator gets funds back after a delay
+		assert_eq!(Balances::free_balance(5), 90);
+		assert_eq!(
+			UnstakingRequests::<Test>::get(5),
+			vec![UnstakeRequest { block: 25, amount: 10 }]
+		);
 	});
 }
 
