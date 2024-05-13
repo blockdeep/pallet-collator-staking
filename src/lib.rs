@@ -483,11 +483,13 @@ pub mod pallet {
 			let current_session = CurrentSession::<T>::get();
 			if current_session > 0 {
 				let (rewards, compounds) = Self::reward_one_collator(current_session - 1);
-				weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
-					CandidateList::<T>::decode_len().unwrap_or_default() as u32,
-					rewards,
-					compounds * 100 / rewards,
-				));
+				if !rewards.is_zero() {
+					weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
+						CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+						rewards,
+						compounds * 100 / rewards,
+					));
+				}
 			}
 
 			weight

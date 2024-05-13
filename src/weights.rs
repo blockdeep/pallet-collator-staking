@@ -57,8 +57,8 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Storage: `Session::NextKeys` (r:20 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:0 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:0 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[1, 20]`.
 	fn set_invulnerables(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -74,12 +74,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:0)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:0)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[1, 19]`.
 	/// The range of component `c` is `[1, 99]`.
 	fn add_invulnerable(b: u32, c: u32, ) -> Weight {
@@ -97,10 +97,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 26).saturating_mul(b.into()))
 			.saturating_add(Weight::from_parts(0, 39).saturating_mul(c.into()))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[6, 20]`.
 	fn remove_invulnerable(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -113,8 +113,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(2_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::DesiredCandidates` (r:0 w:1)
-	/// Proof: `CollatorStaking::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::DesiredCandidates` (r:0 w:1)
+	/// Proof: `CollatorSelection::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	fn set_desired_candidates() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -123,10 +123,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:0 w:1)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:0 w:1)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	fn set_candidacy_bond() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `194`
@@ -136,22 +136,22 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:2 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:2 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 99]`.
 	fn register_as_candidate(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -165,24 +165,24 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes(4_u64))
 			.saturating_add(Weight::from_parts(0, 47).saturating_mul(c.into()))
 	}
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Stake` (r:3 w:2)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:3 w:2)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
 	/// Storage: `System::Account` (r:1 w:1)
 	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(116), added: 2591, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:2 w:2)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:2)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:2 w:2)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:2)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	fn take_candidate_slot() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `6252`
@@ -192,18 +192,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(11_u64))
 			.saturating_add(T::DbWeight::get().writes(8_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[4, 100]`.
 	fn leave_intent(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -216,16 +216,16 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(5_u64))
 	}
-	/// Storage: `CollatorStaking::CurrentSession` (r:1 w:0)
-	/// Proof: `CollatorStaking::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::ProducedBlocks` (r:1 w:1)
-	/// Proof: `CollatorStaking::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::TotalBlocks` (r:1 w:1)
-	/// Proof: `CollatorStaking::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CurrentSession` (r:1 w:0)
+	/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ProducedBlocks` (r:1 w:1)
+	/// Proof: `CollatorSelection::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::TotalBlocks` (r:1 w:1)
+	/// Proof: `CollatorSelection::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	fn note_author() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `287`
@@ -235,22 +235,22 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:100 w:0)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::DesiredCandidates` (r:1 w:0)
-	/// Proof: `CollatorStaking::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:97 w:97)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:97 w:97)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:97 w:97)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:100 w:0)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::DesiredCandidates` (r:1 w:0)
+	/// Proof: `CollatorSelection::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:97 w:97)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:97 w:97)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:97 w:97)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `r` is `[1, 100]`.
 	/// The range of component `c` is `[1, 100]`.
 	fn new_session(r: u32, c: u32, ) -> Weight {
@@ -267,14 +267,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 2507).saturating_mul(c.into()))
 			.saturating_add(Weight::from_parts(0, 2832).saturating_mul(r.into()))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:0)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:0)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 100]`.
 	fn stake(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -287,14 +287,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(2_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 100]`.
 	fn unstake_from(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -307,14 +307,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(4_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:117 w:16)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:117 w:16)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[16, 100]`.
 	/// The range of component `s` is `[1, 16]`.
 	fn unstake_all(c: u32, s: u32, ) -> Weight {
@@ -335,8 +335,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 2563).saturating_mul(c.into()))
 			.saturating_add(Weight::from_parts(0, 2563).saturating_mul(s.into()))
 	}
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[0, 16]`.
 	fn claim(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -349,8 +349,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::Autocompound` (r:0 w:1)
-	/// Proof: `CollatorStaking::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Autocompound` (r:0 w:1)
+	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	fn set_autocompound_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -359,8 +359,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(5_000_000, 0)
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CollatorRewardPercentage` (r:0 w:1)
-	/// Proof: `CollatorStaking::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CollatorRewardPercentage` (r:0 w:1)
+	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
 	fn set_collator_reward_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -369,8 +369,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::ExtraReward` (r:0 w:1)
-	/// Proof: `CollatorStaking::ExtraReward` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ExtraReward` (r:0 w:1)
+	/// Proof: `CollatorSelection::ExtraReward` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
 	fn set_extra_reward() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -379,10 +379,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:0 w:1)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:0 w:1)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	fn set_minimum_stake() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `231`
@@ -392,20 +392,20 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::ProducedBlocks` (r:2 w:1)
-	/// Proof: `CollatorStaking::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Rewards` (r:1 w:0)
-	/// Proof: `CollatorStaking::Rewards` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::TotalBlocks` (r:1 w:0)
-	/// Proof: `CollatorStaking::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CollatorRewardPercentage` (r:1 w:0)
-	/// Proof: `CollatorStaking::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:3 w:0)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Autocompound` (r:2 w:0)
-	/// Proof: `CollatorStaking::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ProducedBlocks` (r:2 w:1)
+	/// Proof: `CollatorSelection::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Rewards` (r:1 w:0)
+	/// Proof: `CollatorSelection::Rewards` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::TotalBlocks` (r:1 w:0)
+	/// Proof: `CollatorSelection::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CollatorRewardPercentage` (r:1 w:0)
+	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:3 w:0)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Autocompound` (r:2 w:0)
+	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 16]`.
 	/// The range of component `s` is `[1, 1000]`.
 	/// The range of component `a` is `[0, 100]`.
@@ -430,8 +430,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 impl WeightInfo for () {
 	/// Storage: `Session::NextKeys` (r:20 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:0 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:0 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[1, 20]`.
 	fn set_invulnerables(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -447,12 +447,12 @@ impl WeightInfo for () {
 	}
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:0)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:0)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[1, 19]`.
 	/// The range of component `c` is `[1, 99]`.
 	fn add_invulnerable(b: u32, c: u32, ) -> Weight {
@@ -470,10 +470,10 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 26).saturating_mul(b.into()))
 			.saturating_add(Weight::from_parts(0, 39).saturating_mul(c.into()))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:1)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:1)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// The range of component `b` is `[6, 20]`.
 	fn remove_invulnerable(b: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -486,8 +486,8 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(2_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::DesiredCandidates` (r:0 w:1)
-	/// Proof: `CollatorStaking::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::DesiredCandidates` (r:0 w:1)
+	/// Proof: `CollatorSelection::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	fn set_desired_candidates() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -496,10 +496,10 @@ impl WeightInfo for () {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:0 w:1)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:0 w:1)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	fn set_candidacy_bond() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `194`
@@ -509,22 +509,22 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:2 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:2 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 99]`.
 	fn register_as_candidate(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -538,24 +538,24 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(4_u64))
 			.saturating_add(Weight::from_parts(0, 47).saturating_mul(c.into()))
 	}
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// Storage: `Session::NextKeys` (r:1 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
-	/// Storage: `CollatorStaking::Stake` (r:3 w:2)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:3 w:2)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
 	/// Storage: `System::Account` (r:1 w:1)
 	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(116), added: 2591, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:2 w:2)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:2)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:2 w:2)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:2)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	fn take_candidate_slot() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `6252`
@@ -565,18 +565,18 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(11_u64))
 			.saturating_add(RocksDbWeight::get().writes(8_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[4, 100]`.
 	fn leave_intent(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -589,16 +589,16 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(5_u64))
 	}
-	/// Storage: `CollatorStaking::CurrentSession` (r:1 w:0)
-	/// Proof: `CollatorStaking::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::ProducedBlocks` (r:1 w:1)
-	/// Proof: `CollatorStaking::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::TotalBlocks` (r:1 w:1)
-	/// Proof: `CollatorStaking::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:0 w:1)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CurrentSession` (r:1 w:0)
+	/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ProducedBlocks` (r:1 w:1)
+	/// Proof: `CollatorSelection::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::TotalBlocks` (r:1 w:1)
+	/// Proof: `CollatorSelection::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:0 w:1)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
 	fn note_author() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `287`
@@ -608,22 +608,22 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::LastAuthoredBlock` (r:100 w:0)
-	/// Proof: `CollatorStaking::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Invulnerables` (r:1 w:0)
-	/// Proof: `CollatorStaking::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::DesiredCandidates` (r:1 w:0)
-	/// Proof: `CollatorStaking::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:97 w:97)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:97 w:97)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:97 w:97)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::LastAuthoredBlock` (r:100 w:0)
+	/// Proof: `CollatorSelection::LastAuthoredBlock` (`max_values`: None, `max_size`: Some(32), added: 2507, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Invulnerables` (r:1 w:0)
+	/// Proof: `CollatorSelection::Invulnerables` (`max_values`: Some(1), `max_size`: Some(401), added: 896, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::DesiredCandidates` (r:1 w:0)
+	/// Proof: `CollatorSelection::DesiredCandidates` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:97 w:97)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:97 w:97)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:97 w:97)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `r` is `[1, 100]`.
 	/// The range of component `c` is `[1, 100]`.
 	fn new_session(r: u32, c: u32, ) -> Weight {
@@ -640,14 +640,14 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 2507).saturating_mul(c.into()))
 			.saturating_add(Weight::from_parts(0, 2832).saturating_mul(r.into()))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:0)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:1 w:0)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:0)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 100]`.
 	fn stake(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -660,14 +660,14 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(2_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:1 w:1)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:1 w:1)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 100]`.
 	fn unstake_from(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -680,14 +680,14 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(4_u64))
 	}
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:117 w:16)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::StakeCount` (r:1 w:1)
-	/// Proof: `CollatorStaking::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:117 w:16)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::StakeCount` (r:1 w:1)
+	/// Proof: `CollatorSelection::StakeCount` (`max_values`: None, `max_size`: Some(40), added: 2515, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[16, 100]`.
 	/// The range of component `s` is `[1, 16]`.
 	fn unstake_all(c: u32, s: u32, ) -> Weight {
@@ -708,8 +708,8 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 2563).saturating_mul(c.into()))
 			.saturating_add(Weight::from_parts(0, 2563).saturating_mul(s.into()))
 	}
-	/// Storage: `CollatorStaking::UnstakingRequests` (r:1 w:1)
-	/// Proof: `CollatorStaking::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::UnstakingRequests` (r:1 w:1)
+	/// Proof: `CollatorSelection::UnstakingRequests` (`max_values`: None, `max_size`: Some(357), added: 2832, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[0, 16]`.
 	fn claim(c: u32, ) -> Weight {
 		// Proof Size summary in bytes:
@@ -722,8 +722,8 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::Autocompound` (r:0 w:1)
-	/// Proof: `CollatorStaking::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Autocompound` (r:0 w:1)
+	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	fn set_autocompound_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -732,8 +732,8 @@ impl WeightInfo for () {
 		Weight::from_parts(5_000_000, 0)
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CollatorRewardPercentage` (r:0 w:1)
-	/// Proof: `CollatorStaking::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CollatorRewardPercentage` (r:0 w:1)
+	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
 	fn set_collator_reward_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -742,8 +742,8 @@ impl WeightInfo for () {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::ExtraReward` (r:0 w:1)
-	/// Proof: `CollatorStaking::ExtraReward` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ExtraReward` (r:0 w:1)
+	/// Proof: `CollatorSelection::ExtraReward` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
 	fn set_extra_reward() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -752,10 +752,10 @@ impl WeightInfo for () {
 		Weight::from_parts(4_000_000, 0)
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::CandidacyBond` (r:1 w:0)
-	/// Proof: `CollatorStaking::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::MinStake` (r:0 w:1)
-	/// Proof: `CollatorStaking::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidacyBond` (r:1 w:0)
+	/// Proof: `CollatorSelection::CandidacyBond` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:0 w:1)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	fn set_minimum_stake() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `231`
@@ -765,20 +765,20 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorStaking::ProducedBlocks` (r:2 w:1)
-	/// Proof: `CollatorStaking::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CandidateList` (r:1 w:1)
-	/// Proof: `CollatorStaking::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Rewards` (r:1 w:0)
-	/// Proof: `CollatorStaking::Rewards` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::TotalBlocks` (r:1 w:0)
-	/// Proof: `CollatorStaking::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::CollatorRewardPercentage` (r:1 w:0)
-	/// Proof: `CollatorStaking::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Stake` (r:3 w:0)
-	/// Proof: `CollatorStaking::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorStaking::Autocompound` (r:2 w:0)
-	/// Proof: `CollatorStaking::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ProducedBlocks` (r:2 w:1)
+	/// Proof: `CollatorSelection::ProducedBlocks` (`max_values`: None, `max_size`: Some(60), added: 2535, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateList` (r:1 w:1)
+	/// Proof: `CollatorSelection::CandidateList` (`max_values`: Some(1), `max_size`: Some(3602), added: 4097, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Rewards` (r:1 w:0)
+	/// Proof: `CollatorSelection::Rewards` (`max_values`: None, `max_size`: Some(36), added: 2511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::TotalBlocks` (r:1 w:0)
+	/// Proof: `CollatorSelection::TotalBlocks` (`max_values`: None, `max_size`: Some(28), added: 2503, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CollatorRewardPercentage` (r:1 w:0)
+	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Stake` (r:3 w:0)
+	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Autocompound` (r:2 w:0)
+	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 16]`.
 	/// The range of component `s` is `[1, 1000]`.
 	/// The range of component `a` is `[0, 100]`.

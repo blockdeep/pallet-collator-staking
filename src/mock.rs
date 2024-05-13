@@ -31,7 +31,7 @@ frame_support::construct_runtime!(
 		Session: pallet_session,
 		Aura: pallet_aura,
 		Balances: pallet_balances,
-		CollatorStaking: collator_staking,
+		CollatorSelection: collator_staking,
 		Authorship: pallet_authorship,
 	}
 );
@@ -101,7 +101,7 @@ impl FindAuthor<u64> for Author4 {
 
 impl pallet_authorship::Config for Test {
 	type FindAuthor = Author4;
-	type EventHandler = CollatorStaking;
+	type EventHandler = CollatorSelection;
 }
 
 impl pallet_timestamp::Config for Test {
@@ -164,7 +164,7 @@ impl pallet_session::Config for Test {
 	type ValidatorIdOf = IdentityCollatorMock<Test>;
 	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
 	type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
-	type SessionManager = CollatorStaking;
+	type SessionManager = CollatorSelection;
 	type SessionHandler = TestSessionHandler;
 	type Keys = MockSessionKeys;
 	type WeightInfo = ();
