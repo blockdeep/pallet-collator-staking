@@ -11,6 +11,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use core::marker::PhantomData;
+use frame_support::traits::TypedGet;
 pub use pallet::*;
 
 #[cfg(test)]
@@ -46,8 +48,8 @@ pub mod pallet {
 		RuntimeDebug,
 	};
 	use sp_staking::SessionIndex;
+	use sp_std::collections::btree_map::BTreeMap;
 	use sp_std::vec::Vec;
-	use std::collections::BTreeMap;
 
 	/// The in-code storage version.
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -1231,7 +1233,7 @@ pub mod pallet {
 
 				// Reward collator. Note these rewards are not autocompounded.
 				if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
-					log::warn!(target: LOG_TARGET, "Failure rewarding collator {}: {:?}", collator, error);
+					log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
 				}
 
 				// Reward stakers
@@ -1241,7 +1243,7 @@ pub mod pallet {
 					let staker_reward: BalanceOf<T> =
 						stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
 					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
-						log::warn!(target: LOG_TARGET, "Failure rewarding staker {}: {:?}", staker, error);
+						log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
 					} else {
 						// Autocompound
 						total_compound += 1;
@@ -1253,7 +1255,7 @@ pub mod pallet {
 							{
 								log::warn!(
 									target: LOG_TARGET,
-									"Failure autocompounding for staker {} to candidate {}: {:?}",
+									"Failure autocompounding for staker {:?} to candidate {:?}: {:?}",
 									staker,
 									collator,
 									error
@@ -1267,7 +1269,7 @@ pub mod pallet {
 					let _ = Self::reassign_candidate_position(pos);
 				}
 			} else {
-				log::warn!("Collator {} is no longer a candidate", collator);
+				log::warn!("Collator {:?} is no longer a candidate", collator);
 			}
 			(total_stakers, total_compound)
 		}
@@ -1486,5 +1488,17 @@ pub mod pallet {
 				.saturating_sub(T::Currency::minimum_balance());
 			Rewards::<T>::insert(session, total_rewards);
 		}
+	}
+}
+
+/// [`TypedGet`] implementation to get the AccountId of the StakingPot.
+pub struct StakingPotAccountId<R>(PhantomData<R>);
+impl<R> TypedGet for StakingPotAccountId<R>
+where
+	R: crate::Config,
+{
+	type Type = <R as frame_system::Config>::AccountId;
+	fn get() -> Self::Type {
+		<crate::Pallet<R>>::account_id()
 	}
 }
