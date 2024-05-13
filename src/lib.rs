@@ -1434,7 +1434,7 @@ pub mod pallet {
 				target: LOG_TARGET,
 				"assembling new collators for new session {} at #{:?}",
 				index,
-				<frame_system::Pallet<T>>::block_number(),
+				frame_system::Pallet::<T>::block_number(),
 			);
 
 			// The `expect` below is safe because the list is a `BoundedVec` with a max size of
