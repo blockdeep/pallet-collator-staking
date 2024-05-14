@@ -152,7 +152,7 @@ mod benchmarks {
 			let deposit = CandidacyBond::<T>::get();
 			T::Currency::make_free_balance_be(who, deposit * 1000_u32.into());
 			CandidateList::<T>::try_mutate(|list| {
-				list.try_push(CandidateInfo { who: who.clone(), deposit }).unwrap();
+				list.try_push(CandidateInfo { who: who.clone(), deposit, stakers: 1 }).unwrap();
 				Ok::<(), BenchmarkError>(())
 			})
 			.unwrap();

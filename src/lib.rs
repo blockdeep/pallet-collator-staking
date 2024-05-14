@@ -144,6 +144,8 @@ pub mod pallet {
 		pub who: AccountId,
 		/// Reserved deposit.
 		pub deposit: Balance,
+		/// Amount of stakers.
+		pub stakers: u32,
 	}
 
 	/// Information about the unstaking requests.
@@ -329,56 +331,28 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// New Invulnerables were set.
-		NewInvulnerables {
-			invulnerables: Vec<T::AccountId>,
-		},
+		NewInvulnerables { invulnerables: Vec<T::AccountId> },
 		/// A new Invulnerable was added.
-		InvulnerableAdded {
-			account_id: T::AccountId,
-		},
+		InvulnerableAdded { account_id: T::AccountId },
 		/// An Invulnerable was removed.
-		InvulnerableRemoved {
-			account_id: T::AccountId,
-		},
+		InvulnerableRemoved { account_id: T::AccountId },
 		/// The number of desired candidates was set.
-		NewDesiredCandidates {
-			desired_candidates: u32,
-		},
+		NewDesiredCandidates { desired_candidates: u32 },
 		/// The candidacy bond was set.
-		NewCandidacyBond {
-			bond_amount: BalanceOf<T>,
-		},
+		NewCandidacyBond { bond_amount: BalanceOf<T> },
 		/// A new candidate joined.
-		CandidateAdded {
-			account_id: T::AccountId,
-			deposit: BalanceOf<T>,
-		},
+		CandidateAdded { account_id: T::AccountId, deposit: BalanceOf<T> },
 		/// A candidate was removed.
-		CandidateRemoved {
-			account_id: T::AccountId,
-		},
+		CandidateRemoved { account_id: T::AccountId },
 		/// An account was replaced in the candidate list by another one.
-		CandidateReplaced {
-			old: T::AccountId,
-			new: T::AccountId,
-			deposit: BalanceOf<T>,
-		},
+		CandidateReplaced { old: T::AccountId, new: T::AccountId, deposit: BalanceOf<T> },
 		/// An account was unable to be added to the Invulnerables because they did not have keys
 		/// registered. Other Invulnerables may have been set.
-		InvalidInvulnerableSkipped {
-			account_id: T::AccountId,
-		},
+		InvalidInvulnerableSkipped { account_id: T::AccountId },
 		/// A staker added stake to a candidate.
-		StakeAdded {
-			staker: T::AccountId,
-			candidate: T::AccountId,
-			amount: BalanceOf<T>,
-		},
+		StakeAdded { staker: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// Stake was claimed after a penalty period.
-		StakeClaimed {
-			staker: T::AccountId,
-			amount: BalanceOf<T>,
-		},
+		StakeClaimed { staker: T::AccountId, amount: BalanceOf<T> },
 		/// An unstake request was created.
 		UnstakeRequestCreated {
 			staker: T::AccountId,
@@ -386,36 +360,19 @@ pub mod pallet {
 			block: BlockNumberFor<T>,
 		},
 		/// A staker removed stake from a candidate
-		StakeRemoved {
-			staker: T::AccountId,
-			candidate: T::AccountId,
-			amount: BalanceOf<T>,
-		},
+		StakeRemoved { staker: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
-		StakingRewardReceived {
-			staker: T::AccountId,
-			amount: BalanceOf<T>,
-		},
+		StakingRewardReceived { staker: T::AccountId, amount: BalanceOf<T> },
 		/// Autocompound percentage was set.
-		AutocompoundPercentageSet {
-			staker: T::AccountId,
-			percentage: Percent,
-		},
+		AutocompoundPercentageSet { staker: T::AccountId, percentage: Percent },
 		/// Collator reward percentage was set.
-		CollatorRewardPercentageSet {
-			percentage: Percent,
-		},
+		CollatorRewardPercentageSet { percentage: Percent },
 		/// The extra reward was set.
-		ExtraRewardSet {
-			account: T::AccountId,
-			amount: BalanceOf<T>,
-		},
+		ExtraRewardSet { account: T::AccountId, amount: BalanceOf<T> },
 		/// The extra reward was removed.
 		ExtraRewardRemoved {},
 		/// The minimum amount to stake was changed.
-		NewMinStake {
-			min_stake: BalanceOf<T>,
-		},
+		NewMinStake { min_stake: BalanceOf<T> },
 	}
 
 	#[pallet::error]
@@ -998,8 +955,14 @@ pub mod pallet {
 
 			// In case the staker already had non-claimed stake we calculate it now.
 			// TODO check the performance penalty of this operation. The collection is unbounded.
-			let already_staked: BalanceOf<T> = Stake::<T>::iter_prefix_values(who)
-				.fold(Zero::zero(), |acc, s| acc.saturating_add(s));
+			let mut stakers = 0;
+			let already_staked: BalanceOf<T> =
+				Stake::<T>::iter_prefix_values(who).fold(Zero::zero(), |acc, s| {
+					if !s.is_zero() {
+						stakers += 1;
+					}
+					acc.saturating_add(s)
+				});
 
 			// First authored block is current block plus kick threshold to handle session delay
 			CandidateList::<T>::try_mutate(
@@ -1012,7 +975,7 @@ pub mod pallet {
 						who.clone(),
 						Self::current_block_number() + T::KickThreshold::get(),
 					);
-					let info = CandidateInfo { who: who.clone(), deposit: already_staked };
+					let info = CandidateInfo { who: who.clone(), deposit: already_staked, stakers };
 					candidates
 						.try_insert(0, info.clone())
 						.map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
@@ -1080,10 +1043,11 @@ pub mod pallet {
 						final_staker_stake >= MinStake::<T>::get(),
 						Error::<T>::InsufficientStake
 					);
+					T::Currency::reserve(staker, amount)?;
 					if stake.is_zero() {
 						StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
+						candidate.stakers.saturating_inc();
 					}
-					T::Currency::reserve(staker, amount)?;
 					*stake = final_staker_stake;
 					candidate.deposit.saturating_accrue(amount);
 
@@ -1182,6 +1146,7 @@ pub mod pallet {
 				if let Some(position) = maybe_position {
 					CandidateList::<T>::mutate(|candidates| {
 						candidates[position].deposit.saturating_reduce(stake);
+						candidates[position].stakers.saturating_dec();
 					});
 					if sort {
 						Self::reassign_candidate_position(position)?;
