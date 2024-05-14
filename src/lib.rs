@@ -368,6 +368,7 @@ pub mod pallet {
 		InvalidInvulnerableSkipped {
 			account_id: T::AccountId,
 		},
+		/// A staker added stake to a candidate.
 		StakeAdded {
 			staker: T::AccountId,
 			candidate: T::AccountId,
