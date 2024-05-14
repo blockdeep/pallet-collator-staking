@@ -436,11 +436,12 @@ pub mod pallet {
 		/// Rewards are delivered when blocks have unused space. The underlined assumption is that
 		/// the number of collators to be rewarded is much lower than the number of blocks in
 		/// a given session.
-		fn on_idle(_n: BlockNumberFor<T>, _remaining_weight: Weight) -> Weight {
+		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut weight = T::DbWeight::get().reads_writes(1, 0);
 			let current_session = CurrentSession::<T>::get();
 			if current_session > 0 {
-				let (rewards, compounds) = Self::reward_one_collator(current_session - 1);
+				let (rewards, compounds) =
+					Self::reward_one_collator(current_session - 1, remaining_weight);
 				if !rewards.is_zero() {
 					weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
 						CandidateList::<T>::decode_len().unwrap_or_default() as u32,
@@ -1209,16 +1210,25 @@ pub mod pallet {
 			collator: &T::AccountId,
 			blocks: u32,
 			session: SessionIndex,
-		) -> (u32, u32) {
+			remaining_weight: Weight,
+		) -> (bool, u32, u32) {
 			let mut total_stakers = 0;
 			let mut total_compound = 0;
 			if let Ok(pos) = Self::get_candidate(collator) {
 				let collator_info = &CandidateList::<T>::get()[pos];
+				let worst_case_weight = T::WeightInfo::reward_one_collator(
+					CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+					collator_info.stakers,
+					100, // we assume the worst case: all stakers have autocompound enabled
+				);
+				if worst_case_weight.any_gt(remaining_weight) {
+					return (false, 0, 0);
+				}
 				let total_rewards = Rewards::<T>::get(session);
 				let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
 				if rewardable_blocks.is_zero() || collator_info.deposit.is_zero() {
 					// we cannot divide by zero
-					return (0, 0);
+					return (true, 0, 0);
 				}
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
 
@@ -1266,7 +1276,7 @@ pub mod pallet {
 			} else {
 				log::warn!("Collator {:?} is no longer a candidate", collator);
 			}
-			(total_stakers, total_compound)
+			(true, total_stakers, total_compound)
 		}
 
 		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
@@ -1345,10 +1355,18 @@ pub mod pallet {
 		/// Rewards a pending collator from the previous round, if any.
 		///
 		/// Returns a tuple with the number of rewards given and the number of autocompounds.
-		pub(crate) fn reward_one_collator(session: SessionIndex) -> (u32, u32) {
-			let mut iter = ProducedBlocks::<T>::iter_prefix(session).drain().take(1);
+		pub(crate) fn reward_one_collator(
+			session: SessionIndex,
+			remaining_weight: Weight,
+		) -> (u32, u32) {
+			let mut iter = ProducedBlocks::<T>::iter_prefix(session);
 			if let Some((collator, blocks)) = iter.next() {
-				Self::do_reward_collator(&collator, blocks, session)
+				let (succeed, rewards, compounds) =
+					Self::do_reward_collator(&collator, blocks, session, remaining_weight);
+				if succeed {
+					ProducedBlocks::<T>::remove(session, collator.clone());
+				}
+				(rewards, compounds)
 			} else {
 				(0, 0)
 			}
