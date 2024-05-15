@@ -349,8 +349,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorSelection::Autocompound` (r:0 w:1)
-	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::AutoCompound` (r:0 w:1)
+	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	fn set_autocompound_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -404,8 +404,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
 	/// Storage: `CollatorSelection::Stake` (r:3 w:0)
 	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorSelection::Autocompound` (r:2 w:0)
-	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::AutoCompound` (r:2 w:0)
+	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 16]`.
 	/// The range of component `s` is `[1, 1000]`.
 	/// The range of component `a` is `[0, 100]`.
@@ -722,8 +722,8 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
-	/// Storage: `CollatorSelection::Autocompound` (r:0 w:1)
-	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::AutoCompound` (r:0 w:1)
+	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	fn set_autocompound_percentage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
@@ -777,8 +777,8 @@ impl WeightInfo for () {
 	/// Proof: `CollatorSelection::CollatorRewardPercentage` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
 	/// Storage: `CollatorSelection::Stake` (r:3 w:0)
 	/// Proof: `CollatorSelection::Stake` (`max_values`: None, `max_size`: Some(88), added: 2563, mode: `MaxEncodedLen`)
-	/// Storage: `CollatorSelection::Autocompound` (r:2 w:0)
-	/// Proof: `CollatorSelection::Autocompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::AutoCompound` (r:2 w:0)
+	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 16]`.
 	/// The range of component `s` is `[1, 1000]`.
 	/// The range of component `a` is `[0, 100]`.

@@ -1,6 +1,6 @@
 use crate as collator_staking;
 use crate::{
-	mock::*, Autocompound, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
+	mock::*, AutoCompound, CandidacyBond, CandidateInfo, CandidateList, CollatorRewardPercentage,
 	Config, CurrentSession, DesiredCandidates, Error, Event, ExtraReward, Invulnerables,
 	LastAuthoredBlock, MaxDesiredCandidates, MinStake, ProducedBlocks, StakeCount, TotalBlocks,
 };
@@ -1874,14 +1874,14 @@ fn set_autocompound_percentage() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
-		assert_eq!(Autocompound::<Test>::get(5), Percent::from_parts(0));
+		assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
 		assert_ok!(CollatorSelection::set_autocompound_percentage(
 			RuntimeOrigin::signed(5),
 			Percent::from_parts(50)
 		));
-		assert_eq!(Autocompound::<Test>::get(5), Percent::from_parts(50));
+		assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(50));
 		System::assert_last_event(RuntimeEvent::CollatorSelection(
-			Event::AutocompoundPercentageSet { staker: 5, percentage: Percent::from_parts(50) },
+			Event::AutoCompoundPercentageSet { staker: 5, percentage: Percent::from_parts(50) },
 		));
 	});
 }
@@ -2222,7 +2222,7 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 		);
 
 		// Staker 3 will autocompound 40% of its earnings
-		Autocompound::<Test>::insert(3, Percent::from_parts(40));
+		AutoCompound::<Test>::insert(3, Percent::from_parts(40));
 		ExtraReward::<Test>::put((1, 1));
 		assert_eq!(
 			Balances::free_balance(&CollatorSelection::account_id()),

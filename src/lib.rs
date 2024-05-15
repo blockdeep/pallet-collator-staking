@@ -193,9 +193,7 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type DesiredCandidates<T> = StorageValue<_, u32, ValueQuery>;
 
-	/// Fixed amount to deposit to become a collator.
-	///
-	/// When a collator calls `leave_intent` they immediately receive the deposit back.
+	/// Fixed amount to stake to become a collator.
 	#[pallet::storage]
 	pub type CandidacyBond<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
@@ -272,7 +270,7 @@ pub mod pallet {
 
 	/// Percentage of reward to be re-invested in collators.
 	#[pallet::storage]
-	pub type Autocompound<T: Config> =
+	pub type AutoCompound<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
 
 	#[pallet::genesis_config]
@@ -363,8 +361,8 @@ pub mod pallet {
 		StakeRemoved { staker: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
 		StakingRewardReceived { staker: T::AccountId, amount: BalanceOf<T> },
-		/// Autocompound percentage was set.
-		AutocompoundPercentageSet { staker: T::AccountId, percentage: Percent },
+		/// AutoCompound percentage was set.
+		AutoCompoundPercentageSet { staker: T::AccountId, percentage: Percent },
 		/// Collator reward percentage was set.
 		CollatorRewardPercentageSet { percentage: Percent },
 		/// The extra reward was set.
@@ -607,8 +605,8 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::register_as_candidate(length + 1)).into())
 		}
 
-		/// Deregister `origin` as a collator candidate. Note that the collator can only leave on
-		/// session change.
+		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
+		/// candidate after this moment.
 		///
 		/// This call will fail if the total number of candidates would drop below
 		/// `MinEligibleCollators`.
@@ -851,11 +849,11 @@ pub mod pallet {
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			if percent.is_zero() {
-				Autocompound::<T>::remove(&who);
+				AutoCompound::<T>::remove(&who);
 			} else {
-				Autocompound::<T>::insert(&who, percent);
+				AutoCompound::<T>::insert(&who, percent);
 			}
-			Self::deposit_event(Event::AutocompoundPercentageSet {
+			Self::deposit_event(Event::AutoCompoundPercentageSet {
 				staker: who,
 				percentage: percent,
 			});
@@ -1250,9 +1248,9 @@ pub mod pallet {
 					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
 						log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
 					} else {
-						// Autocompound
+						// AutoCompound
 						total_compound += 1;
-						let compound_percentage = Autocompound::<T>::get(staker.clone());
+						let compound_percentage = AutoCompound::<T>::get(staker.clone());
 						let compound_amount = compound_percentage.mul_floor(staker_reward);
 						if !compound_amount.is_zero() {
 							if let Err(error) =

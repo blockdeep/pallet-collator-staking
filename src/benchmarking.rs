@@ -518,7 +518,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), percent);
 
-		assert_eq!(Autocompound::<T>::get(&caller), percent);
+		assert_eq!(AutoCompound::<T>::get(&caller), percent);
 	}
 
 	#[benchmark]
