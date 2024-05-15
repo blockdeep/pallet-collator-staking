@@ -371,6 +371,8 @@ pub mod pallet {
 		ExtraRewardRemoved {},
 		/// The minimum amount to stake was changed.
 		NewMinStake { min_stake: BalanceOf<T> },
+		/// A session just ended.
+		SessionEnded { index: SessionIndex, rewards: BalanceOf<T> },
 	}
 
 	#[pallet::error]
@@ -1510,6 +1512,7 @@ pub mod pallet {
 			let total_rewards = T::Currency::free_balance(&pot_account)
 				.saturating_sub(T::Currency::minimum_balance());
 			Rewards::<T>::insert(index, total_rewards);
+			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 		}
 	}
 }
