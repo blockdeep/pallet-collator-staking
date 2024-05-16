@@ -930,7 +930,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(16)]
-		#[pallet::weight(T::WeightInfo::set_minimum_stake())]
+		#[pallet::weight(T::WeightInfo::stop_extra_reward())]
 		pub fn stop_extra_reward(origin: OriginFor<T>) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 
@@ -944,7 +944,7 @@ pub mod pallet {
 
 		/// Funds the extra reward pot account.
 		#[pallet::call_index(17)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::top_up_extra_rewards())]
 		pub fn top_up_extra_rewards(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
