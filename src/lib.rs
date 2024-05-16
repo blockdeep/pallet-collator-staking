@@ -315,13 +315,6 @@ pub mod pallet {
 			MinStake::<T>::put(self.min_stake);
 			Invulnerables::<T>::put(bounded_invulnerables);
 			CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
-
-			let pot_account = Pallet::<T>::account_id();
-			let pot_exists =
-				T::Currency::free_balance(&pot_account) >= T::Currency::minimum_balance();
-			if !pot_exists {
-				let _ = T::Currency::deposit_creating(&pot_account, T::Currency::minimum_balance());
-			}
 		}
 	}
 
