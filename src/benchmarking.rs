@@ -538,10 +538,10 @@ mod benchmarks {
 	fn set_extra_reward() -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
-		let extra_reward = Some((account("extra_reward", 0, SEED), 5u32.into()));
+		let extra_reward = 5u32.into();
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, extra_reward.clone());
+		_(origin as T::RuntimeOrigin, extra_reward);
 
 		assert_eq!(ExtraReward::<T>::get(), extra_reward);
 		Ok(())

@@ -87,7 +87,14 @@ pub mod pallet {
 		type UpdateOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
 		/// Account Identifier from which the internal Pot is generated.
+		///
+		/// To initiate rewards, an ED needs to be transferred to the pot address.
 		type PotId: Get<PalletId>;
+
+		/// Account Identifier from which the extra reward Pot is generated.
+		///
+		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called.
+		type ExtraRewardPotId: Get<PalletId>;
 
 		/// Maximum number of candidates that we should have.
 		///
@@ -239,7 +246,7 @@ pub mod pallet {
 
 	/// Per-block extra reward.
 	#[pallet::storage]
-	pub type ExtraReward<T: Config> = StorageValue<_, (T::AccountId, BalanceOf<T>), OptionQuery>;
+	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
 	/// Blocks produced in the current session. First value is actual total, and second is those
 	/// that have not been produced by invulnerables.
@@ -281,6 +288,7 @@ pub mod pallet {
 		pub min_stake: BalanceOf<T>,
 		pub desired_candidates: u32,
 		pub collator_reward_percentage: Percent,
+		pub extra_reward: BalanceOf<T>,
 	}
 
 	#[pallet::genesis_build]
@@ -315,6 +323,7 @@ pub mod pallet {
 			MinStake::<T>::put(self.min_stake);
 			Invulnerables::<T>::put(bounded_invulnerables);
 			CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
+			ExtraReward::<T>::put(self.extra_reward);
 		}
 	}
 
@@ -359,7 +368,7 @@ pub mod pallet {
 		/// Collator reward percentage was set.
 		CollatorRewardPercentageSet { percentage: Percent },
 		/// The extra reward was set.
-		ExtraRewardSet { account: T::AccountId, amount: BalanceOf<T> },
+		ExtraRewardSet { amount: BalanceOf<T> },
 		/// The extra reward was removed.
 		ExtraRewardRemoved {},
 		/// The minimum amount to stake was changed.
@@ -406,6 +415,10 @@ pub mod pallet {
 		InvalidCandidacyBond,
 		/// Number of staked candidates is greater than `MaxStakedCandidates`.
 		TooManyStakedCandidates,
+		/// Extra reward cannot be zero.
+		InvalidExtraReward,
+		/// Extra rewards are already zero.
+		ExtraRewardAlreadyDisabled,
 	}
 
 	#[pallet::hooks]
@@ -865,6 +878,7 @@ pub mod pallet {
 			percent: Percent,
 		) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
+
 			CollatorRewardPercentage::<T>::put(percent);
 			Self::deposit_event(Event::CollatorRewardPercentageSet { percentage: percent });
 			Ok(())
@@ -879,16 +893,13 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::set_extra_reward())]
 		pub fn set_extra_reward(
 			origin: OriginFor<T>,
-			maybe_extra_reward: Option<(T::AccountId, BalanceOf<T>)>,
+			extra_reward: BalanceOf<T>,
 		) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
-			if let Some((account, amount)) = maybe_extra_reward {
-				ExtraReward::<T>::put((account.clone(), amount));
-				Self::deposit_event(Event::ExtraRewardSet { account, amount });
-			} else {
-				ExtraReward::<T>::kill();
-				Self::deposit_event(Event::ExtraRewardRemoved {});
-			}
+			ensure!(!extra_reward.is_zero(), Error::<T>::InvalidExtraReward);
+
+			ExtraReward::<T>::put(extra_reward);
+			Self::deposit_event(Event::ExtraRewardSet { amount: extra_reward });
 			Ok(())
 		}
 
@@ -904,8 +915,26 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(new_min_stake <= CandidacyBond::<T>::get(), Error::<T>::InvalidMinStake);
+
 			MinStake::<T>::put(new_min_stake);
 			Self::deposit_event(Event::NewMinStake { min_stake: new_min_stake });
+			Ok(())
+		}
+
+		/// Sets minimum amount that can be staked. The new amount must be lower than or equal to
+		/// the candidacy bond.
+		///
+		/// The origin for this call must be the `UpdateOrigin`.
+		#[pallet::call_index(16)]
+		#[pallet::weight(T::WeightInfo::set_minimum_stake())]
+		pub fn stop_extra_reward(origin: OriginFor<T>) -> DispatchResult {
+			T::UpdateOrigin::ensure_origin(origin)?;
+
+			let extra_reward = ExtraReward::<T>::get();
+			ensure!(!extra_reward.is_zero(), Error::<T>::ExtraRewardAlreadyDisabled);
+
+			ExtraReward::<T>::kill();
+			Self::deposit_event(Event::ExtraRewardRemoved {});
 			Ok(())
 		}
 	}
@@ -914,6 +943,11 @@ pub mod pallet {
 		/// Get a unique, inaccessible account ID from the `PotId`.
 		pub fn account_id() -> T::AccountId {
 			T::PotId::get().into_account_truncating()
+		}
+
+		/// Get a unique, inaccessible account ID from the `PotId`.
+		pub fn extra_reward_account_id() -> T::AccountId {
+			T::ExtraRewardPotId::get().into_account_truncating()
 		}
 
 		/// Checks whether a given account is a candidate and returns its position if successful.
@@ -1488,15 +1522,19 @@ pub mod pallet {
 				index,
 				frame_system::Pallet::<T>::block_number(),
 			);
-			let pot_account = Self::account_id();
-			let (produced_blocks, _) = TotalBlocks::<T>::get(index);
 
-			// Transfer the extra reward, if any, to the pot
-			if let Some((account, per_block_extra_reward)) = ExtraReward::<T>::get() {
+			// Transfer the extra reward, if any, to the pot.
+			let pot_account = Self::account_id();
+			let per_block_extra_reward = ExtraReward::<T>::get();
+			if !per_block_extra_reward.is_zero() {
+				let (produced_blocks, _) = TotalBlocks::<T>::get(index);
 				let extra_reward = per_block_extra_reward.saturating_mul(produced_blocks.into());
-				if let Err(error) =
-					T::Currency::transfer(&account, &pot_account, extra_reward, KeepAlive)
-				{
+				if let Err(error) = T::Currency::transfer(
+					&Self::extra_reward_account_id(),
+					&pot_account,
+					extra_reward,
+					KeepAlive,
+				) {
 					log::warn!(target: LOG_TARGET, "Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
 				}
 			}

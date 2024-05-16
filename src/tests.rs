@@ -66,11 +66,8 @@ fn basic_setup_works() {
 		assert_eq!(MinStake::<Test>::get(), 2);
 		assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
 		assert_eq!(CollatorRewardPercentage::<Test>::get(), Percent::from_parts(20));
-		// The minimum balance should have been minted
-		assert_eq!(
-			Balances::free_balance(CollatorSelection::account_id()),
-			Balances::minimum_balance()
-		);
+		// The minimum balance should not have been minted
+		assert_eq!(Balances::free_balance(CollatorSelection::account_id()), 0);
 		// genesis should sort input
 		assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
@@ -987,6 +984,11 @@ fn fees_edgecases() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
+		Balances::make_free_balance_be(
+			&CollatorSelection::account_id(),
+			Balances::minimum_balance(),
+		);
+
 		// Nothing panics, no reward when no ED in balance
 		Authorship::on_initialize(1);
 		// 4 is the default author.
@@ -1227,7 +1229,7 @@ fn session_management_decrease_bid_after_auction() {
 		initialize_to_block(5);
 
 		// candidate 5 saw it was outbid and wants to take back its bid, but
-		// not entirely so they still keep their place in the candidate list
+		// not entirely so, they still keep their place in the candidate list
 		// in case there is an opportunity in the future.
 		assert_ok!(CollatorSelection::stake(RuntimeOrigin::signed(5), 5, 10));
 
@@ -1379,6 +1381,7 @@ fn cannot_set_genesis_value_twice() {
 		min_stake: 1,
 		invulnerables,
 		collator_reward_percentage: Percent::from_parts(20),
+		extra_reward: 0,
 	};
 	// collator selection must be initialized before session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
@@ -1396,6 +1399,7 @@ fn cannot_set_invalid_min_stake_in_genesis() {
 		min_stake: 15,
 		invulnerables: vec![1, 2],
 		collator_reward_percentage: Percent::from_parts(20),
+		extra_reward: 0,
 	};
 	// collator selection must be initialized before session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
@@ -1413,6 +1417,7 @@ fn cannot_set_invalid_max_candidates_in_genesis() {
 		min_stake: 2,
 		invulnerables: vec![1, 2],
 		collator_reward_percentage: Percent::from_parts(20),
+		extra_reward: 0,
 	};
 	// collator selection must be initialized before session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
@@ -1432,6 +1437,7 @@ fn cannot_set_too_many_invulnerables_at_genesis() {
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 		],
 		collator_reward_percentage: Percent::from_parts(20),
+		extra_reward: 0,
 	};
 	// collator selection must be initialized before session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
@@ -1917,32 +1923,33 @@ fn set_extra_reward() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
-		assert_eq!(ExtraReward::<Test>::get(), None);
+		assert_eq!(ExtraReward::<Test>::get(), 0);
 
 		// Invalid origin
-		assert_noop!(
-			CollatorSelection::set_extra_reward(RuntimeOrigin::signed(5), Some((777, 10))),
-			BadOrigin
-		);
+		assert_noop!(CollatorSelection::set_extra_reward(RuntimeOrigin::signed(5), 10), BadOrigin);
 
 		// Set the reward
 		assert_ok!(CollatorSelection::set_extra_reward(
 			RuntimeOrigin::signed(RootAccount::get()),
-			Some((777, 10))
+			10
 		));
 		System::assert_last_event(RuntimeEvent::CollatorSelection(Event::ExtraRewardSet {
-			account: 777,
 			amount: 10,
 		}));
-		assert_eq!(ExtraReward::<Test>::get(), Some((777, 10)));
+		assert_eq!(ExtraReward::<Test>::get(), 10);
+
+		// Cannot set to zero
+		assert_noop!(
+			CollatorSelection::set_extra_reward(RuntimeOrigin::signed(RootAccount::get()), 0),
+			Error::<Test>::InvalidExtraReward
+		);
 
 		// Revert the changes
-		assert_ok!(CollatorSelection::set_extra_reward(
-			RuntimeOrigin::signed(RootAccount::get()),
-			None
-		));
+		assert_ok!(
+			CollatorSelection::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get()),)
+		);
 		System::assert_last_event(RuntimeEvent::CollatorSelection(Event::ExtraRewardRemoved {}));
-		assert_eq!(ExtraReward::<Test>::get(), None);
+		assert_eq!(ExtraReward::<Test>::get(), 0);
 	});
 }
 
@@ -1992,13 +1999,19 @@ fn should_not_reward_invulnerables() {
 			RuntimeOrigin::signed(RootAccount::get()),
 			4
 		));
-		assert_eq!(ExtraReward::<Test>::get(), None);
+		assert_eq!(ExtraReward::<Test>::get(), 0);
 		assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
 		assert_eq!(CurrentSession::<Test>::get(), 0);
 		for block in 1..=9 {
 			initialize_to_block(block);
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			assert_eq!(TotalBlocks::<Test>::get(0), (block as u32, 0));
+
+			// Transfer the ED first
+			Balances::make_free_balance_be(
+				&CollatorSelection::account_id(),
+				Balances::minimum_balance(),
+			);
 
 			// Assume we collected one unit in fees per block
 			assert_ok!(Balances::transfer(&1, &CollatorSelection::account_id(), 1, KeepAlive));
@@ -2024,10 +2037,11 @@ fn should_not_reward_invulnerables() {
 fn should_reward_collator() {
 	new_test_ext().execute_with(|| {
 		assert_ok!(CollatorSelection::register_as_candidate(RuntimeOrigin::signed(4),));
-		assert_eq!(ExtraReward::<Test>::get(), None);
-		assert_eq!(
-			Balances::free_balance(&CollatorSelection::account_id()),
-			Balances::minimum_balance()
+		assert_eq!(ExtraReward::<Test>::get(), 0);
+		assert_eq!(Balances::free_balance(&CollatorSelection::account_id()), 0);
+		Balances::make_free_balance_be(
+			&CollatorSelection::account_id(),
+			Balances::minimum_balance(),
 		);
 		assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
 		assert_eq!(CurrentSession::<Test>::get(), 0);
@@ -2085,12 +2099,14 @@ fn should_reward_collator() {
 fn should_reward_collator_with_extra_rewards() {
 	new_test_ext().execute_with(|| {
 		assert_ok!(CollatorSelection::register_as_candidate(RuntimeOrigin::signed(4),));
-		// Account 2 will pay an extra reward of 1.
-		ExtraReward::<Test>::put((2, 1));
-		assert_eq!(
-			Balances::free_balance(&CollatorSelection::account_id()),
-			Balances::minimum_balance()
+		ExtraReward::<Test>::put(1);
+		assert_eq!(Balances::free_balance(&CollatorSelection::account_id()), 0);
+		Balances::make_free_balance_be(
+			&CollatorSelection::account_id(),
+			Balances::minimum_balance(),
 		);
+		fund_account(CollatorSelection::extra_reward_account_id());
+
 		assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
 		assert_eq!(CurrentSession::<Test>::get(), 0);
 		for block in 1..=9 {
@@ -2148,11 +2164,13 @@ fn should_reward_collator_with_extra_rewards_and_no_funds() {
 	new_test_ext().execute_with(|| {
 		assert_ok!(CollatorSelection::register_as_candidate(RuntimeOrigin::signed(4),));
 		// This account has no funds
-		ExtraReward::<Test>::put((100, 1));
-		assert_eq!(
-			Balances::free_balance(&CollatorSelection::account_id()),
-			Balances::minimum_balance()
+		ExtraReward::<Test>::put(1);
+		assert_eq!(Balances::free_balance(&CollatorSelection::account_id()), 0);
+		Balances::make_free_balance_be(
+			&CollatorSelection::account_id(),
+			Balances::minimum_balance(),
 		);
+
 		assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
 		assert_eq!(CurrentSession::<Test>::get(), 0);
 		for block in 1..=9 {
@@ -2223,11 +2241,14 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 
 		// Staker 3 will autocompound 40% of its earnings
 		AutoCompound::<Test>::insert(3, Percent::from_parts(40));
-		ExtraReward::<Test>::put((1, 1));
-		assert_eq!(
-			Balances::free_balance(&CollatorSelection::account_id()),
-			Balances::minimum_balance()
+		ExtraReward::<Test>::put(1);
+		assert_eq!(Balances::free_balance(&CollatorSelection::account_id()), 0);
+		Balances::make_free_balance_be(
+			&CollatorSelection::account_id(),
+			Balances::minimum_balance(),
 		);
+		fund_account(CollatorSelection::extra_reward_account_id());
+
 		assert_eq!(TotalBlocks::<Test>::get(0), (0, 0));
 		assert_eq!(CurrentSession::<Test>::get(), 0);
 		for block in 1..=9 {
@@ -2306,5 +2327,31 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 			Balances::free_balance(&CollatorSelection::account_id()),
 			Balances::minimum_balance() + 1
 		);
+	});
+}
+
+#[test]
+fn stop_extra_reward() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		fund_account(CollatorSelection::extra_reward_account_id());
+		assert_eq!(ExtraReward::<Test>::get(), 0);
+
+		// Cannot stop if already zero
+		assert_noop!(
+			CollatorSelection::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get())),
+			Error::<Test>::ExtraRewardAlreadyDisabled
+		);
+
+		// Now we can stop it
+		assert_ok!(CollatorSelection::set_extra_reward(
+			RuntimeOrigin::signed(RootAccount::get()),
+			2
+		));
+		assert_ok!(CollatorSelection::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get())));
+
+		System::assert_last_event(RuntimeEvent::CollatorSelection(Event::ExtraRewardRemoved {}));
+		assert_eq!(ExtraReward::<Test>::get(), 0);
 	});
 }

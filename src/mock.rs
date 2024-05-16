@@ -176,6 +176,7 @@ ord_parameter_types! {
 
 parameter_types! {
 	pub const PotId: PalletId = PalletId(*b"PotStake");
+	pub const ExtraRewardPotId: PalletId = PalletId(*b"PotExtra");
 }
 
 pub struct IsRegistered;
@@ -200,6 +201,7 @@ impl Config for Test {
 	type Currency = Balances;
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
+	type ExtraRewardPotId = ExtraRewardPotId;
 	type MaxCandidates = ConstU32<20>;
 	type MinEligibleCollators = ConstU32<1>;
 	type MaxInvulnerables = ConstU32<20>;
@@ -229,6 +231,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		min_stake: 2,
 		invulnerables,
 		collator_reward_percentage: Percent::from_parts(20),
+		extra_reward: 0,
 	};
 	let session = pallet_session::GenesisConfig::<Test> { keys };
 	pallet_balances::GenesisConfig::<Test> { balances }
