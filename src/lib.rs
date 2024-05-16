@@ -99,11 +99,12 @@ pub mod pallet {
 		/// Maximum number of candidates that we should have.
 		///
 		/// This does not take into account the invulnerables.
+		/// This must be more than or equal to `DesiredCandidates`.
 		type MaxCandidates: Get<u32>;
 
-		/// Minimum number eligible collators. Should always be greater than zero. This includes
-		/// Invulnerable collators. This ensures that there will always be one collator who can
-		/// produce a block.
+		/// Minimum number eligible collators including Invulnerables. 
+		/// Should always be greater than zero. This ensures that there will always be 
+		/// one collator who can produce blocks.
 		#[pallet::constant]
 		type MinEligibleCollators: Get<u32>;
 
@@ -111,7 +112,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		// Will be kicked if block is not produced in threshold.
+		// Collator will be kicked if block is not produced within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
