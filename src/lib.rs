@@ -375,6 +375,8 @@ pub mod pallet {
 		NewMinStake { min_stake: BalanceOf<T> },
 		/// A session just ended.
 		SessionEnded { index: SessionIndex, rewards: BalanceOf<T> },
+		/// The extra reward pot account was funded.
+		ExtraRewardPotFunded { pot: T::AccountId, amount: BalanceOf<T> },
 	}
 
 	#[pallet::error]
@@ -419,6 +421,8 @@ pub mod pallet {
 		InvalidExtraReward,
 		/// Extra rewards are already zero.
 		ExtraRewardAlreadyDisabled,
+		/// The amount to fund the extra reward pot must be greater than zero
+		InvalidFundingAmount,
 	}
 
 	#[pallet::hooks]
@@ -935,6 +939,23 @@ pub mod pallet {
 
 			ExtraReward::<T>::kill();
 			Self::deposit_event(Event::ExtraRewardRemoved {});
+			Ok(())
+		}
+
+		/// Funds the extra reward pot account.
+		#[pallet::call_index(17)]
+		#[pallet::weight({0})]
+		pub fn top_up_extra_rewards(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+
+			ensure!(!amount.is_zero(), Error::<T>::InvalidFundingAmount);
+
+			let extra_reward_pot_account = Self::extra_reward_account_id();
+			T::Currency::transfer(&who, &extra_reward_pot_account, amount, KeepAlive)?;
+			Self::deposit_event(Event::<T>::ExtraRewardPotFunded {
+				amount,
+				pot: extra_reward_pot_account,
+			});
 			Ok(())
 		}
 	}

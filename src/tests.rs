@@ -2310,3 +2310,30 @@ fn stop_extra_reward() {
 		assert_eq!(ExtraReward::<Test>::get(), 0);
 	});
 }
+
+#[test]
+fn top_up_extra_rewards() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		assert_eq!(Balances::free_balance(&CollatorStaking::extra_reward_account_id()), 0);
+
+		// Cannot fund with an amount equal to zero.
+		assert_noop!(
+			CollatorStaking::top_up_extra_rewards(RuntimeOrigin::signed(1), 0),
+			Error::<Test>::InvalidFundingAmount
+		);
+
+		// Cannot fund if total balance less than ED.
+		assert!(CollatorStaking::top_up_extra_rewards(RuntimeOrigin::signed(1), 1).is_err());
+
+		// Now we can stop it
+		assert_ok!(CollatorStaking::top_up_extra_rewards(RuntimeOrigin::signed(1), 10));
+
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardPotFunded {
+			pot: CollatorStaking::extra_reward_account_id(),
+			amount: 10,
+		}));
+		assert_eq!(Balances::free_balance(&CollatorStaking::extra_reward_account_id()), 10);
+	});
+}
