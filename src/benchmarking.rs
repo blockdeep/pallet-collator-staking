@@ -5,7 +5,7 @@
 use super::*;
 
 #[allow(unused)]
-use crate::Pallet as CollatorSelection;
+use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
 use frame_support::pallet_prelude::Weight;
@@ -80,7 +80,7 @@ fn register_candidates<T: Config>(count: u32) {
 
 	for who in candidates {
 		T::Currency::make_free_balance_be(&who, CandidacyBond::<T>::get() * 3u32.into());
-		CollatorSelection::<T>::register_as_candidate(RawOrigin::Signed(who).into()).unwrap();
+		CollatorStaking::<T>::register_as_candidate(RawOrigin::Signed(who).into()).unwrap();
 	}
 }
 
@@ -318,7 +318,7 @@ mod benchmarks {
 		frame_system::Pallet::<T>::set_block_number(new_block);
 		#[block]
 		{
-			<CollatorSelection<T> as EventHandler<_, _>>::note_author(author.clone())
+			<CollatorStaking<T> as EventHandler<_, _>>::note_author(author.clone())
 		}
 
 		assert_eq!(LastAuthoredBlock::<T>::get(&author), new_block);
@@ -374,7 +374,7 @@ mod benchmarks {
 		assert!(c == current_length);
 		#[block]
 		{
-			<CollatorSelection<T> as SessionManager<_>>::new_session(0);
+			<CollatorStaking<T> as SessionManager<_>>::new_session(0);
 		}
 
 		if c > r && non_removals >= min_candidates {
@@ -459,7 +459,7 @@ mod benchmarks {
 		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
 		CandidateList::<T>::get().iter().take(s as usize).for_each(|cand| {
 			assert_eq!(cand.deposit, amount);
-			CollatorSelection::<T>::stake(
+			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
 				cand.who.clone(),
 				amount,
@@ -492,7 +492,7 @@ mod benchmarks {
 		let caller = whitelisted_caller();
 		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
 		CandidateList::<T>::get().iter().for_each(|cand| {
-			CollatorSelection::<T>::stake(
+			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
 				cand.who.clone(),
 				amount,
@@ -500,7 +500,7 @@ mod benchmarks {
 			.unwrap();
 		});
 
-		CollatorSelection::<T>::unstake_all(RawOrigin::Signed(caller.clone()).into()).unwrap();
+		CollatorStaking::<T>::unstake_all(RawOrigin::Signed(caller.clone()).into()).unwrap();
 		assert_eq!(c as usize, UnstakingRequests::<T>::get(&caller).len());
 		frame_system::Pallet::<T>::set_block_number(100u32.into());
 
@@ -578,35 +578,35 @@ mod benchmarks {
 		let autocompound = Percent::from_parts(a as u8) * s;
 		for n in 0..s {
 			let acc = create_funded_user::<T>("staker", s, 1000);
-			CollatorSelection::<T>::stake(
+			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(acc.clone()).into(),
 				collator.clone(),
 				amount,
 			)
 			.unwrap();
 			if n <= autocompound {
-				CollatorSelection::<T>::set_autocompound_percentage(
+				CollatorStaking::<T>::set_autocompound_percentage(
 					RawOrigin::Signed(acc.clone()).into(),
 					Percent::from_parts(50),
 				)
 				.unwrap();
 			}
 		}
-		<CollatorSelection<T> as SessionManager<_>>::start_session(0);
+		<CollatorStaking<T> as SessionManager<_>>::start_session(0);
 		for _ in 0..10 {
-			<CollatorSelection<T> as EventHandler<_, _>>::note_author(collator.clone())
+			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
 		}
 		frame_system::Pallet::<T>::set_block_number(10u32.into());
 		let _ =
-			T::Currency::make_free_balance_be(&CollatorSelection::<T>::account_id(), 100u32.into());
-		<CollatorSelection<T> as SessionManager<_>>::end_session(0);
-		<CollatorSelection<T> as SessionManager<_>>::start_session(1);
+			T::Currency::make_free_balance_be(&CollatorStaking::<T>::account_id(), 100u32.into());
+		<CollatorStaking<T> as SessionManager<_>>::end_session(0);
+		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
 
 		#[block]
 		{
-			CollatorSelection::<T>::reward_one_collator(0, Weight::MAX);
+			CollatorStaking::<T>::reward_one_collator(0, Weight::MAX);
 		}
 	}
 
-	impl_benchmark_test_suite!(CollatorSelection, crate::mock::new_test_ext(), crate::mock::Test,);
+	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
 }
