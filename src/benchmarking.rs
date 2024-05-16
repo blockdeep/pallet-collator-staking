@@ -561,6 +561,40 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn stop_extra_reward() -> Result<(), BenchmarkError> {
+		let origin =
+			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+		let initial_reward: BalanceOf<T> = 10u32.into();
+		ExtraReward::<T>::put(initial_reward);
+		let _ = T::Currency::make_free_balance_be(
+			&CollatorStaking::<T>::extra_reward_account_id(),
+			100u32.into(),
+		);
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin);
+
+		assert_eq!(ExtraReward::<T>::get(), 0u32.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn top_up_extra_rewards() -> Result<(), BenchmarkError> {
+		let caller: T::AccountId = whitelisted_caller();
+		let balance: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
+		T::Currency::make_free_balance_be(&caller, balance);
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), T::Currency::minimum_balance());
+
+		assert_eq!(
+			T::Currency::free_balance(&CollatorStaking::<T>::extra_reward_account_id()),
+			T::Currency::minimum_balance()
+		);
+		Ok(())
+	}
+
+	#[benchmark]
 	fn reward_one_collator(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		s: Linear<1, 1000>,
