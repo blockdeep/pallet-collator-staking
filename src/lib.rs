@@ -798,7 +798,7 @@ pub mod pallet {
 		/// The candidate will have its position in the [`CandidateList`] conveniently modified, and
 		/// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get() - 1))]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
@@ -812,6 +812,7 @@ pub mod pallet {
 				Self::do_unstake(&who, &candidate, has_penalty, maybe_position, true)?;
 			Ok(Some(T::WeightInfo::unstake_from(
 				CandidateList::<T>::decode_len().unwrap_or_default() as u32,
+				unstaking_requests,
 			))
 			.into())
 		}
@@ -1164,7 +1165,7 @@ pub mod pallet {
 			has_penalty: bool,
 			maybe_position: Option<usize>,
 			sort: bool,
-		) -> Result<(BalanceOf<T>, usize), DispatchError> {
+		) -> Result<(BalanceOf<T>, u32), DispatchError> {
 			let stake = Stake::<T>::take(candidate, staker);
 			let mut unstaking_requests = 0;
 			ensure!(!stake.is_zero(), Error::<T>::NothingToUnstake);
@@ -1222,7 +1223,7 @@ pub mod pallet {
 				amount: stake,
 			});
 
-			Ok((stake, unstaking_requests))
+			Ok((stake, unstaking_requests as u32))
 		}
 
 		/// Removes a candidate, identified by its index, if it exists and refunds the stake.
@@ -1557,7 +1558,7 @@ pub mod pallet {
 					&Self::extra_reward_account_id(),
 					&pot_account,
 					extra_reward,
-					AllowDeath,  // we do not care if the extra reward pot gets destroyed.
+					AllowDeath, // we do not care if the extra reward pot gets destroyed.
 				) {
 					log::warn!(target: LOG_TARGET, "Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
 				}
