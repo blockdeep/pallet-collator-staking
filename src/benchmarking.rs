@@ -650,5 +650,44 @@ mod benchmarks {
 		}
 	}
 
+	#[benchmark]
+	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() - 1 }>) {
+		let amount = T::Currency::minimum_balance();
+		CandidacyBond::<T>::put(amount);
+		MinStake::<T>::put(amount);
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
+		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
+
+		let collator = register_validators::<T>(1)[0].clone();
+		register_candidates::<T>(1);
+
+		let stakers = (0..s)
+			.map(|n| {
+				let acc = create_funded_user::<T>("staker", n, 1000);
+				CollatorStaking::<T>::stake(
+					RawOrigin::Signed(acc.clone()).into(),
+					collator.clone(),
+					amount,
+				)
+				.unwrap();
+				acc
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), (s + 1) as usize);
+
+		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
+		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
+
+		#[block]
+		{
+			CollatorStaking::<T>::refund_stakers(&collator);
+		}
+
+		for staker in stakers {
+			assert_eq!(Stake::<T>::get(&collator, &staker), 0u32.into());
+		}
+	}
+
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
 }

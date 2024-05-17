@@ -253,6 +253,12 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
+	/// Candidates with pending stake to be redeemed to their stakers. Insertion and deletions
+	/// are made in a FIFO manner.
+	#[pallet::storage]
+	pub type PendingExCandidates<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+
 	/// Blocks produced in the current session. First value is actual total, and second is those
 	/// that have not been produced by invulnerables.
 	#[pallet::storage]
@@ -474,6 +480,30 @@ pub mod pallet {
 				}
 			}
 
+			weight
+		}
+
+		/// Traverses pending ex-candidates and rewards their stakers.
+		///
+		/// Note only at most one ex-candidate will be processed per block.
+		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+			let mut weight = T::DbWeight::get().reads(1);
+			let worst_case_weight = weight.saturating_add(T::WeightInfo::refund_stakers(
+				T::MaxStakers::get().saturating_sub(1),
+			));
+			if worst_case_weight.any_gt(remaining_weight) {
+				return Weight::zero();
+			}
+			if let Some((account, is_excandidate)) = PendingExCandidates::<T>::iter().drain().next()
+			{
+				weight.saturating_accrue(T::DbWeight::get().writes(1));
+
+				// This must always be true. If not we simply do nothing and cleanup the storage.
+				if is_excandidate {
+					let stakers = Self::refund_stakers(&account);
+					weight.saturating_accrue(T::WeightInfo::refund_stakers(stakers));
+				}
+			}
 			weight
 		}
 
@@ -804,7 +834,7 @@ pub mod pallet {
 		/// The candidate will have its position in the [`CandidateList`] conveniently modified, and
 		/// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get() - 1))]
+		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get().saturating_sub(1)))]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
@@ -1000,7 +1030,7 @@ pub mod pallet {
 		}
 
 		/// Adds stake into a given candidate by providing its address.
-		pub fn do_stake_for_account(
+		fn do_stake_for_account(
 			staker: &T::AccountId,
 			candidate: &T::AccountId,
 			amount: BalanceOf<T>,
@@ -1042,6 +1072,7 @@ pub mod pallet {
 					candidates
 						.try_insert(0, info.clone())
 						.map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
+					PendingExCandidates::<T>::remove(who);
 					Ok(info)
 				},
 			)?;
@@ -1084,7 +1115,7 @@ pub mod pallet {
 		/// Adds stake into a given candidate by providing its position in [`CandidateList`].
 		///
 		/// Returns the position of the candidate in the list after adding the stake.
-		pub fn do_stake_at_position(
+		fn do_stake_at_position(
 			staker: &T::AccountId,
 			amount: BalanceOf<T>,
 			position: usize,
@@ -1108,7 +1139,7 @@ pub mod pallet {
 					);
 					if stake.is_zero() {
 						ensure!(
-							candidate.stakers + 1 <= T::MaxStakers::get(),
+							candidate.stakers < T::MaxStakers::get(),
 							Error::<T>::TooManyStakers
 						);
 						StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
@@ -1135,7 +1166,7 @@ pub mod pallet {
 		/// Relocate a candidate after modifying its stake.
 		///
 		/// Returns the final position of the candidate.
-		pub fn reassign_candidate_position(position: usize) -> Result<usize, DispatchError> {
+		fn reassign_candidate_position(position: usize) -> Result<usize, DispatchError> {
 			CandidateList::<T>::try_mutate(|candidates| -> Result<usize, DispatchError> {
 				let info = candidates.remove(position);
 				let new_pos = candidates
@@ -1238,7 +1269,7 @@ pub mod pallet {
 		/// Removes a candidate, identified by its index, if it exists and refunds the stake.
 		///
 		/// Returns the candidate info before its removal.
-		pub fn try_remove_candidate_at_position(
+		fn try_remove_candidate_at_position(
 			idx: usize,
 			remove_last_authored: bool,
 			has_penalty: bool,
@@ -1250,6 +1281,7 @@ pub mod pallet {
 						LastAuthoredBlock::<T>::remove(candidate.who.clone())
 					};
 					Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, true)?;
+					PendingExCandidates::<T>::set(&candidate.who, true);
 					Self::deposit_event(Event::CandidateRemoved {
 						account_id: candidate.who.clone(),
 					});
@@ -1261,7 +1293,7 @@ pub mod pallet {
 		/// Removes a candidate, identified by its account, if it exists and refunds the stake.
 		///
 		/// Returns the candidate info before its removal.
-		pub fn try_remove_candidate_from_account(
+		fn try_remove_candidate_from_account(
 			who: &T::AccountId,
 			remove_last_authored: bool,
 			has_penalty: bool,
@@ -1417,7 +1449,7 @@ pub mod pallet {
 
 		/// Rewards a pending collator from the previous round, if any.
 		///
-		/// Returns a tuple with the number of rewards given and the number of autocompounds.
+		/// Returns a tuple with the number of rewards given and the number of auto compounds.
 		pub(crate) fn reward_one_collator(session: SessionIndex) -> (u32, u32) {
 			let mut iter = ProducedBlocks::<T>::iter_prefix(session);
 			if let Some((collator, blocks)) = iter.next() {
@@ -1430,6 +1462,30 @@ pub mod pallet {
 			} else {
 				(0, 0)
 			}
+		}
+
+		/// Refunds any stake deposited in a given ex-candidate to the corresponding stakers.
+		///
+		/// Returns the amount of refunded stakers.
+		pub(crate) fn refund_stakers(account: &T::AccountId) -> u32 {
+			Stake::<T>::drain_prefix(account)
+				.filter_map(|(staker, amount)| {
+					if !amount.is_zero() {
+						if let Err(e) = Self::do_unstake(&staker, account, false, None, false) {
+							// This should never occur.
+							log::warn!(
+								"Could not unstake staker {:?} from candidate {:?}: {:?}",
+								staker,
+								account,
+								e
+							);
+						}
+						Some(())
+					} else {
+						None
+					}
+				})
+				.count() as u32
 		}
 
 		/// Ensure the correctness of the state of this pallet.
