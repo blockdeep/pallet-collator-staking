@@ -8,7 +8,6 @@ use super::*;
 use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
-use frame_support::pallet_prelude::Weight;
 use frame_support::traits::{Currency, EnsureOrigin, Get, ReservableCurrency};
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
@@ -385,7 +384,7 @@ mod benchmarks {
 		} else if c > r && non_removals < min_candidates {
 			// candidates > removals and remaining candidates would be less than min candidates
 			// => remaining candidates should equal min candidates, i.e. some were removed up to
-			//    the minimum, but then any more were "forced" to stay in candidates.
+			//    the minimum, but then anymore were "forced" to stay in candidates.
 			let current_length: u32 = CandidateList::<T>::decode_len()
 				.unwrap_or_default()
 				.try_into()
@@ -422,7 +421,10 @@ mod benchmarks {
 
 	// worst case is promoting from last position to first one
 	#[benchmark]
-	fn unstake_from(c: Linear<1, { T::MaxCandidates::get() }>) {
+	fn unstake_from(
+		c: Linear<1, { T::MaxCandidates::get() }>,
+		u: Linear<0, { T::MaxStakedCandidates::get() - 1 }>,
+	) {
 		let amount = T::Currency::minimum_balance();
 		CandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
@@ -431,8 +433,14 @@ mod benchmarks {
 		register_validators::<T>(c);
 		register_candidates::<T>(c);
 
+		let requests = (0..u)
+			// worst case is inserting at the beginning
+			.map(|_| UnstakeRequest { block: 1000u32.into(), amount })
+			.collect::<Vec<_>>();
+
 		let candidate = CandidateList::<T>::get()[(c - 1) as usize].who.clone();
 		whitelist_account!(candidate);
+		UnstakingRequests::<T>::set(&candidate, requests.try_into().unwrap());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone());
@@ -561,6 +569,40 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn stop_extra_reward() -> Result<(), BenchmarkError> {
+		let origin =
+			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
+		let initial_reward: BalanceOf<T> = 10u32.into();
+		ExtraReward::<T>::put(initial_reward);
+		let _ = T::Currency::make_free_balance_be(
+			&CollatorStaking::<T>::extra_reward_account_id(),
+			100u32.into(),
+		);
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin);
+
+		assert_eq!(ExtraReward::<T>::get(), 0u32.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn top_up_extra_rewards() -> Result<(), BenchmarkError> {
+		let caller: T::AccountId = whitelisted_caller();
+		let balance: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
+		T::Currency::make_free_balance_be(&caller, balance);
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), T::Currency::minimum_balance());
+
+		assert_eq!(
+			T::Currency::free_balance(&CollatorStaking::<T>::extra_reward_account_id()),
+			T::Currency::minimum_balance()
+		);
+		Ok(())
+	}
+
+	#[benchmark]
 	fn reward_one_collator(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		s: Linear<1, 1000>,
@@ -604,7 +646,46 @@ mod benchmarks {
 
 		#[block]
 		{
-			CollatorStaking::<T>::reward_one_collator(0, Weight::MAX);
+			CollatorStaking::<T>::reward_one_collator(0);
+		}
+	}
+
+	#[benchmark]
+	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() - 1 }>) {
+		let amount = T::Currency::minimum_balance();
+		CandidacyBond::<T>::put(amount);
+		MinStake::<T>::put(amount);
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
+		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
+
+		let collator = register_validators::<T>(1)[0].clone();
+		register_candidates::<T>(1);
+
+		let stakers = (0..s)
+			.map(|n| {
+				let acc = create_funded_user::<T>("staker", n, 1000);
+				CollatorStaking::<T>::stake(
+					RawOrigin::Signed(acc.clone()).into(),
+					collator.clone(),
+					amount,
+				)
+				.unwrap();
+				acc
+			})
+			.collect::<Vec<_>>();
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), (s + 1) as usize);
+
+		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
+		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
+
+		#[block]
+		{
+			CollatorStaking::<T>::refund_stakers(&collator);
+		}
+
+		for staker in stakers {
+			assert_eq!(Stake::<T>::get(&collator, &staker), 0u32.into());
 		}
 	}
 
