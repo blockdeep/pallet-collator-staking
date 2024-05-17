@@ -357,6 +357,7 @@ pub mod pallet {
 		/// An unstake request was created.
 		UnstakeRequestCreated {
 			staker: T::AccountId,
+			candidate: T::AccountId,
 			amount: BalanceOf<T>,
 			block: BlockNumberFor<T>,
 		},
@@ -1187,6 +1188,7 @@ pub mod pallet {
 						.map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
 					Self::deposit_event(Event::UnstakeRequestCreated {
 						staker: staker.clone(),
+						candidate: candidate.clone(),
 						amount: stake,
 						block,
 					});

@@ -1599,6 +1599,7 @@ fn unstake_from_candidate() {
 		}));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::UnstakeRequestCreated {
 			staker: 5,
+			candidate: 3,
 			amount: 20,
 			block: 3,
 		}));
@@ -1650,6 +1651,7 @@ fn unstake_self() {
 		}));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::UnstakeRequestCreated {
 			staker: 3,
+			candidate: 3,
 			amount: 30,
 			block: 6, // higher delay
 		}));
@@ -1788,6 +1790,7 @@ fn unstake_all() {
 		}));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::UnstakeRequestCreated {
 			staker: 5,
+			candidate: 4,
 			amount: 10,
 			block: 3,
 		}));
