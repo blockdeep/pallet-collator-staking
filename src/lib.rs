@@ -234,9 +234,9 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type StakeCount<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
 
-	/// Unstaking requests a given user has.
+	/// Unstaking requests for an account.
 	///
-	/// They can be claimed by calling the [`claim`] extrinsic.
+	/// They can be claimed by calling the [`claim`] extrinsic, after the relevant delay.
 	#[pallet::storage]
 	pub type UnstakingRequests<T: Config> = StorageMap<
 		_,
@@ -271,7 +271,7 @@ pub mod pallet {
 	pub type Rewards<T: Config> =
 		StorageMap<_, Blake2_128Concat, SessionIndex, BalanceOf<T>, ValueQuery>;
 
-	/// Blocks produced by each collator in a given session.
+	/// Mapping of blocks and their authors.
 	#[pallet::storage]
 	pub type ProducedBlocks<T: Config> = StorageDoubleMap<
 		_,
