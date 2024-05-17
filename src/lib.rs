@@ -35,8 +35,9 @@ pub mod pallet {
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
 		traits::{
-			Currency, EnsureOrigin, ExistenceRequirement::KeepAlive, ReservableCurrency,
-			ValidatorRegistration,
+			Currency, EnsureOrigin,
+			ExistenceRequirement::{AllowDeath, KeepAlive},
+			ReservableCurrency, ValidatorRegistration,
 		},
 		BoundedVec, DefaultNoBound, PalletId,
 	};
@@ -1554,7 +1555,7 @@ pub mod pallet {
 					&Self::extra_reward_account_id(),
 					&pot_account,
 					extra_reward,
-					KeepAlive,
+					AllowDeath,  // we do not care if the extra reward pot gets destroyed.
 				) {
 					log::warn!(target: LOG_TARGET, "Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
 				}
