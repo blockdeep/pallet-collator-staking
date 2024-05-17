@@ -487,7 +487,7 @@ pub mod pallet {
 		///
 		/// Note only at most one ex-candidate will be processed per block.
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
-			let mut weight = T::DbWeight::get().reads(1);
+			let mut weight = T::DbWeight::get().reads_writes(1, 0);
 			let worst_case_weight = weight.saturating_add(T::WeightInfo::refund_stakers(
 				T::MaxStakers::get().saturating_sub(1),
 			));
@@ -496,7 +496,7 @@ pub mod pallet {
 			}
 			if let Some((account, is_excandidate)) = PendingExCandidates::<T>::iter().drain().next()
 			{
-				weight.saturating_accrue(T::DbWeight::get().writes(1));
+				weight.saturating_accrue(T::DbWeight::get().reads_writes(0, 1));
 
 				// This must always be true. If not we simply do nothing and cleanup the storage.
 				if is_excandidate {
@@ -602,15 +602,12 @@ pub mod pallet {
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::set_desired_candidates())]
-		pub fn set_desired_candidates(
-			origin: OriginFor<T>,
-			max: u32,
-		) -> DispatchResultWithPostInfo {
+		pub fn set_desired_candidates(origin: OriginFor<T>, max: u32) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(max <= MaxDesiredCandidates::<T>::get(), Error::<T>::TooManyDesiredCandidates);
 			DesiredCandidates::<T>::put(max);
 			Self::deposit_event(Event::NewDesiredCandidates { desired_candidates: max });
-			Ok(().into())
+			Ok(())
 		}
 
 		/// Set the candidacy bond amount.
