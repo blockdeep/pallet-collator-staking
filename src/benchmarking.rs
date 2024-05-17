@@ -605,7 +605,7 @@ mod benchmarks {
 	#[benchmark]
 	fn reward_one_collator(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		s: Linear<1, 1000>,
+		s: Linear<0, { T::MaxStakers::get() - 1 }>,
 		a: Linear<0, 100>,
 	) {
 		let amount = T::Currency::minimum_balance();
@@ -619,7 +619,7 @@ mod benchmarks {
 
 		let autocompound = Percent::from_parts(a as u8) * s;
 		for n in 0..s {
-			let acc = create_funded_user::<T>("staker", s, 1000);
+			let acc = create_funded_user::<T>("staker", n, 1000);
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(acc.clone()).into(),
 				collator.clone(),
