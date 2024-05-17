@@ -385,7 +385,7 @@ mod benchmarks {
 		} else if c > r && non_removals < min_candidates {
 			// candidates > removals and remaining candidates would be less than min candidates
 			// => remaining candidates should equal min candidates, i.e. some were removed up to
-			//    the minimum, but then any more were "forced" to stay in candidates.
+			//    the minimum, but then anymore were "forced" to stay in candidates.
 			let current_length: u32 = CandidateList::<T>::decode_len()
 				.unwrap_or_default()
 				.try_into()
@@ -422,7 +422,10 @@ mod benchmarks {
 
 	// worst case is promoting from last position to first one
 	#[benchmark]
-	fn unstake_from(c: Linear<1, { T::MaxCandidates::get() }>) {
+	fn unstake_from(
+		c: Linear<1, { T::MaxCandidates::get() }>,
+		u: Linear<0, { T::MaxStakedCandidates::get() - 1 }>,
+	) {
 		let amount = T::Currency::minimum_balance();
 		CandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
@@ -431,8 +434,14 @@ mod benchmarks {
 		register_validators::<T>(c);
 		register_candidates::<T>(c);
 
+		let requests = (0..u)
+			// worst case is inserting at the beginning
+			.map(|_| UnstakeRequest { block: 1000u32.into(), amount })
+			.collect::<Vec<_>>();
+
 		let candidate = CandidateList::<T>::get()[(c - 1) as usize].who.clone();
 		whitelist_account!(candidate);
+		UnstakingRequests::<T>::set(&candidate, requests.try_into().unwrap());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone());

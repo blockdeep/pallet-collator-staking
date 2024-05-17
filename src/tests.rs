@@ -1627,17 +1627,21 @@ fn unstake_self() {
 		initialize_to_block(1);
 
 		assert_eq!(StakeCount::<Test>::get(3), 0);
-		register_candidates(3..=3);
+		register_candidates(3..=4);
 		assert_eq!(StakeCount::<Test>::get(3), 1);
 		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
+		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 4, 10));
 		assert_eq!(
 			CandidateList::<Test>::get(),
-			vec![CandidateInfo { who: 3, deposit: 30, stakers: 1 },]
+			vec![
+				CandidateInfo { who: 4, deposit: 20, stakers: 2 },
+				CandidateInfo { who: 3, deposit: 30, stakers: 1 },
+			]
 		);
 
 		// unstake from actual candidate
-		assert_eq!(Balances::free_balance(3), 70);
-		assert_eq!(StakeCount::<Test>::get(3), 1);
+		assert_eq!(Balances::free_balance(3), 60);
+		assert_eq!(StakeCount::<Test>::get(3), 2);
 		assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(3), 3));
 		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
 			staker: 3,
@@ -1651,14 +1655,25 @@ fn unstake_self() {
 		}));
 		assert_eq!(
 			CandidateList::<Test>::get(),
-			vec![CandidateInfo { who: 3, deposit: 0, stakers: 0 }]
+			vec![
+				CandidateInfo { who: 3, deposit: 0, stakers: 0 },
+				CandidateInfo { who: 4, deposit: 20, stakers: 2 }
+			]
 		);
-		assert_eq!(StakeCount::<Test>::get(3), 0);
+		assert_eq!(StakeCount::<Test>::get(3), 1);
 		assert_eq!(Stake::<Test>::get(3, 3), 0);
-		assert_eq!(Balances::free_balance(3), 70);
+		assert_eq!(Stake::<Test>::get(4, 3), 10);
+		assert_eq!(Balances::free_balance(3), 60);
 		assert_eq!(
 			UnstakingRequests::<Test>::get(3),
 			vec![UnstakeRequest { block: 6, amount: 30 }]
+		);
+
+		// check after unstaking with a shorter delay the list remains sorted by block
+		assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(3), 4));
+		assert_eq!(
+			UnstakingRequests::<Test>::get(3),
+			vec![UnstakeRequest { block: 3, amount: 10 }, UnstakeRequest { block: 6, amount: 30 }]
 		);
 	});
 }

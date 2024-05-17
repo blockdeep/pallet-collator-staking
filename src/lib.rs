@@ -423,6 +423,8 @@ pub mod pallet {
 		ExtraRewardAlreadyDisabled,
 		/// The amount to fund the extra reward pot must be greater than zero
 		InvalidFundingAmount,
+		/// There is nothing to unstake
+		NothingToUnstake,
 	}
 
 	#[pallet::hooks]
@@ -801,7 +803,8 @@ pub mod pallet {
 				Ok(pos) => (true, Some(pos)),
 				Err(_) => (false, None),
 			};
-			Self::do_unstake(&who, &candidate, has_penalty, maybe_position, true)?;
+			let (_, unstaking_requests) =
+				Self::do_unstake(&who, &candidate, has_penalty, maybe_position, true)?;
 			Ok(Some(T::WeightInfo::unstake_from(
 				CandidateList::<T>::decode_len().unwrap_or_default() as u32,
 			))
@@ -1149,65 +1152,71 @@ pub mod pallet {
 		/// If the candidate reduces its stake below the [`CandidacyBond`] it will be kicked when
 		/// the session ends.
 		///
-		/// Returns the amount unstaked.
+		/// Returns the amount unstaked and the number of unstaking requests the user originally had.
 		fn do_unstake(
 			staker: &T::AccountId,
 			candidate: &T::AccountId,
 			has_penalty: bool,
 			maybe_position: Option<usize>,
 			sort: bool,
-		) -> Result<BalanceOf<T>, DispatchError> {
+		) -> Result<(BalanceOf<T>, usize), DispatchError> {
 			let stake = Stake::<T>::take(candidate, staker);
-			if !stake.is_zero() {
-				if !has_penalty {
-					T::Currency::unreserve(staker, stake);
+			let mut unstaking_requests = 0;
+			ensure!(!stake.is_zero(), Error::<T>::NothingToUnstake);
+
+			if !has_penalty {
+				T::Currency::unreserve(staker, stake);
+			} else {
+				let delay = if staker == candidate {
+					T::CollatorUnstakingDelay::get()
 				} else {
-					let delay = if staker == candidate {
-						T::CollatorUnstakingDelay::get()
-					} else {
-						T::UserUnstakingDelay::get()
-					};
-					UnstakingRequests::<T>::try_mutate(staker, |requests| -> DispatchResult {
-						let block = Self::current_block_number() + delay;
-						requests
-							.try_push(UnstakeRequest { block, amount: stake })
-							.map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
-						Self::deposit_event(Event::UnstakeRequestCreated {
-							staker: staker.clone(),
-							amount: stake,
-							block,
-						});
-						Ok(())
-					})?;
-				}
-				StakeCount::<T>::mutate_exists(staker, |count| {
-					if let Some(c) = count.as_mut() {
-						c.saturating_dec();
-						match c {
-							0 => None,
-							_ => Some(*c),
-						}
-					} else {
-						// This should never occur.
-						None
-					}
-				});
-				if let Some(position) = maybe_position {
-					CandidateList::<T>::mutate(|candidates| {
-						candidates[position].deposit.saturating_reduce(stake);
-						candidates[position].stakers.saturating_dec();
+					T::UserUnstakingDelay::get()
+				};
+				UnstakingRequests::<T>::try_mutate(staker, |requests| -> DispatchResult {
+					unstaking_requests = requests.len();
+					let block = Self::current_block_number() + delay;
+					let pos = requests
+						.binary_search_by_key(&block, |r| r.block)
+						.unwrap_or_else(|pos| pos);
+					requests
+						.try_insert(pos, UnstakeRequest { block, amount: stake })
+						.map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
+					Self::deposit_event(Event::UnstakeRequestCreated {
+						staker: staker.clone(),
+						amount: stake,
+						block,
 					});
-					if sort {
-						Self::reassign_candidate_position(position)?;
-					}
-				}
-				Self::deposit_event(Event::StakeRemoved {
-					staker: staker.clone(),
-					candidate: candidate.clone(),
-					amount: stake,
-				});
+					Ok(())
+				})?;
 			}
-			Ok(stake)
+			StakeCount::<T>::mutate_exists(staker, |count| {
+				if let Some(c) = count.as_mut() {
+					c.saturating_dec();
+					match c {
+						0 => None,
+						_ => Some(*c),
+					}
+				} else {
+					// This should never occur.
+					None
+				}
+			});
+			if let Some(position) = maybe_position {
+				CandidateList::<T>::mutate(|candidates| {
+					candidates[position].deposit.saturating_reduce(stake);
+					candidates[position].stakers.saturating_dec();
+				});
+				if sort {
+					Self::reassign_candidate_position(position)?;
+				}
+			}
+			Self::deposit_event(Event::StakeRemoved {
+				staker: staker.clone(),
+				candidate: candidate.clone(),
+				amount: stake,
+			});
+
+			Ok((stake, unstaking_requests))
 		}
 
 		/// Removes a candidate, identified by its index, if it exists and refunds the stake.
