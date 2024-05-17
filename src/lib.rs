@@ -43,11 +43,11 @@ pub mod pallet {
 	};
 	use frame_system::{pallet_prelude::*, Config as SystemConfig};
 	use pallet_session::SessionManager;
-	use sp_runtime::Percent;
 	use sp_runtime::{
 		traits::{AccountIdConversion, Convert, Saturating, Zero},
 		RuntimeDebug,
 	};
+	use sp_runtime::{Perbill, Percent};
 	use sp_staking::SessionIndex;
 	use sp_std::collections::btree_map::BTreeMap;
 	use sp_std::vec::Vec;
@@ -1343,7 +1343,7 @@ pub mod pallet {
 				Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
 					total_stakers += 1;
 					let staker_reward: BalanceOf<T> =
-						stakers_only_rewards.saturating_mul(stake) / collator_info.deposit;
+						Perbill::from_rational(stake, collator_info.deposit) * stakers_only_rewards;
 					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
 						log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
 					} else {
