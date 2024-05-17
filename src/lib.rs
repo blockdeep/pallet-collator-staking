@@ -131,6 +131,10 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxStakedCandidates: Get<u32>;
 
+		/// Maximum per-candidate number of stakers.
+		#[pallet::constant]
+		type MaxStakers: Get<u32>;
+
 		/// Number of blocks to wait before unreserving the stake by a collator.
 		#[pallet::constant]
 		type CollatorUnstakingDelay: Get<BlockNumberFor<Self>>;
@@ -427,6 +431,8 @@ pub mod pallet {
 		InvalidFundingAmount,
 		/// There is nothing to unstake
 		NothingToUnstake,
+		/// Cannot add more stakers to a given candidate
+		TooManyStakers,
 	}
 
 	#[pallet::hooks]
@@ -1012,7 +1018,6 @@ pub mod pallet {
 			let deposit = CandidacyBond::<T>::get();
 
 			// In case the staker already had non-claimed stake we calculate it now.
-			// TODO check the performance penalty of this operation. The collection is unbounded.
 			let mut stakers = 0;
 			let already_staked: BalanceOf<T> =
 				Stake::<T>::iter_prefix_values(who).fold(Zero::zero(), |acc, s| {
@@ -1101,11 +1106,15 @@ pub mod pallet {
 						final_staker_stake >= MinStake::<T>::get(),
 						Error::<T>::InsufficientStake
 					);
-					T::Currency::reserve(staker, amount)?;
 					if stake.is_zero() {
+						ensure!(
+							candidate.stakers + 1 <= T::MaxStakers::get(),
+							Error::<T>::TooManyStakers
+						);
 						StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
 						candidate.stakers.saturating_inc();
 					}
+					T::Currency::reserve(staker, amount)?;
 					*stake = final_staker_stake;
 					candidate.deposit.saturating_accrue(amount);
 
@@ -1397,7 +1406,6 @@ pub mod pallet {
                         Some(candidate)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
-                        // TODO check if the collator should have a penalty in this case
                         let _ = Self::try_remove_candidate_from_account(&candidate.who, true, true);
                         None
                     }

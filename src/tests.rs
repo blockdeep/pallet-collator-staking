@@ -58,6 +58,7 @@ fn basic_setup_works() {
 		assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
 		assert_eq!(<Test as Config>::CollatorUnstakingDelay::get(), 5);
 		assert_eq!(<Test as Config>::UserUnstakingDelay::get(), 2);
+		assert_eq!(<Test as Config>::MaxStakers::get(), 25);
 		// should always be MaxInvulnerables + MaxCandidates
 		assert_eq!(MaxDesiredCandidates::<Test>::get(), 40);
 
@@ -1543,7 +1544,7 @@ fn stake_and_reassign_position() {
 }
 
 #[test]
-fn cannot_stake_too_many_candidates() {
+fn cannot_stake_too_many_staked_candidates() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
@@ -1557,6 +1558,27 @@ fn cannot_stake_too_many_candidates() {
 		assert_noop!(
 			CollatorStaking::stake(RuntimeOrigin::signed(1), 19, 2),
 			Error::<Test>::TooManyStakedCandidates
+		);
+	});
+}
+
+#[test]
+fn cannot_stake_too_many_stakers() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		assert_eq!(<Test as Config>::MaxStakers::get(), 25);
+
+		register_candidates(3..=3);
+		for i in 4..=27 {
+			fund_account(i);
+			assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(i), 3, 2));
+		}
+		assert_eq!(CandidateList::<Test>::get()[0].stakers, 25);
+		fund_account(28);
+		assert_noop!(
+			CollatorStaking::stake(RuntimeOrigin::signed(28), 3, 2),
+			Error::<Test>::TooManyStakers
 		);
 	});
 }
