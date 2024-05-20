@@ -63,7 +63,7 @@ pub mod pallet {
 	/// just identity.
 	pub struct IdentityCollator;
 
-	impl<T> sp_runtime::traits::Convert<T, Option<T>> for IdentityCollator {
+	impl<T> Convert<T, Option<T>> for IdentityCollator {
 		fn convert(t: T) -> Option<T> {
 			Some(t)
 		}
@@ -1533,7 +1533,7 @@ pub mod pallet {
 					}
 				})
 				.count() as u32;
-			let _ = Stake::<T>::clear_prefix(&account, u32::MAX, None);
+			let _ = Stake::<T>::clear_prefix(account, u32::MAX, None);
 			count
 		}
 
@@ -1556,18 +1556,18 @@ pub mod pallet {
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 			let desired_candidates = DesiredCandidates::<T>::get();
 
-			frame_support::ensure!(
+			ensure!(
 				desired_candidates <= T::MaxCandidates::get(),
 				"Shouldn't demand more candidates than the pallet config allows."
 			);
 
-			frame_support::ensure!(
+			ensure!(
 				desired_candidates.saturating_add(T::MaxInvulnerables::get()) >=
 					T::MinEligibleCollators::get(),
 				"Invulnerable set together with desired candidates should be able to meet the collator quota."
 			);
 
-			frame_support::ensure!(
+			ensure!(
 				StakeCount::<T>::iter_values().all(|count| count < T::MaxStakedCandidates::get()),
 				"Stake count must not exceed MaxStakedCandidates"
 			);
