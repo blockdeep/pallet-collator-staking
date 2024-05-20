@@ -509,7 +509,7 @@ pub mod pallet {
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut weight = T::DbWeight::get().reads_writes(1, 0);
 			let worst_case_weight = weight.saturating_add(T::WeightInfo::refund_stakers(
-				T::MaxStakers::get().saturating_sub(1),
+				T::MaxStakers::get(),
 			));
 			if worst_case_weight.any_gt(remaining_weight) {
 				return Weight::zero();
@@ -850,7 +850,7 @@ pub mod pallet {
 		/// The candidate will have its position in the [`CandidateList`] conveniently modified, and
 		/// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get().saturating_sub(1)))]
+		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get()))]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
