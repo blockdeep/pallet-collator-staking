@@ -35,13 +35,14 @@ pub mod pallet {
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
 		traits::{
-			Currency, EnsureOrigin,
-			ExistenceRequirement::{AllowDeath, KeepAlive},
-			ReservableCurrency, ValidatorRegistration,
+			fungible::{Inspect, Mutate, MutateHold},
+			tokens::Precision::Exact,
+			tokens::Preservation::{Expendable, Preserve},
+			EnsureOrigin, ValidatorRegistration,
 		},
 		BoundedVec, DefaultNoBound, PalletId,
 	};
-	use frame_system::{pallet_prelude::*, Config as SystemConfig};
+	use frame_system::pallet_prelude::*;
 	use pallet_session::SessionManager;
 	use sp_runtime::{
 		traits::{AccountIdConversion, Convert, Saturating, Zero},
@@ -55,8 +56,8 @@ pub mod pallet {
 	/// The in-code storage version.
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
 
-	type BalanceOf<T> =
-		<<T as Config>::Currency as Currency<<T as SystemConfig>::AccountId>>::Balance;
+	pub type BalanceOf<T> =
+		<<T as Config>::Currency as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
 
 	/// A convertor from collators id. Since this pallet does not have stash/controller, this is
 	/// just identity.
@@ -82,7 +83,12 @@ pub mod pallet {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// The currency mechanism.
-		type Currency: ReservableCurrency<Self::AccountId>;
+		type Currency: Inspect<Self::AccountId>
+			+ Mutate<Self::AccountId>
+			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>;
+
+		/// Overarching hold reason.
+		type RuntimeHoldReason: From<HoldReason>;
 
 		/// Origin that can dictate updating parameters of this pallet.
 		type UpdateOrigin: EnsureOrigin<Self::RuntimeOrigin>;
@@ -145,6 +151,13 @@ pub mod pallet {
 
 		/// The weight information of this pallet.
 		type WeightInfo: WeightInfo;
+	}
+
+	/// A reason for the pallet placing a hold on funds.
+	#[pallet::composite_enum]
+	pub enum HoldReason {
+		/// Funds are held for candidacy bonds and staking.
+		Staking,
 	}
 
 	/// Basic information about a collator candidate.
@@ -999,7 +1012,7 @@ pub mod pallet {
 			ensure!(!amount.is_zero(), Error::<T>::InvalidFundingAmount);
 
 			let extra_reward_pot_account = Self::extra_reward_account_id();
-			T::Currency::transfer(&who, &extra_reward_pot_account, amount, KeepAlive)?;
+			T::Currency::transfer(&who, &extra_reward_pot_account, amount, Preserve)?;
 			Self::deposit_event(Event::<T>::ExtraRewardPotFunded {
 				amount,
 				pot: extra_reward_pot_account,
@@ -1081,7 +1094,7 @@ pub mod pallet {
 						deposit: bond,
 						stakers,
 					};
-					T::Currency::reserve(who, bond)?;
+					T::Currency::hold(&HoldReason::Staking.into(), who, bond)?;
 					candidates
 						.try_insert(0, info.clone())
 						.map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
@@ -1107,7 +1120,7 @@ pub mod pallet {
 						break;
 					}
 					pos += 1;
-					T::Currency::unreserve(who, request.amount);
+					T::Currency::release(&HoldReason::Staking.into(), who, request.amount, Exact)?;
 					claimed.saturating_accrue(request.amount);
 				}
 				requests.drain(..pos);
@@ -1154,7 +1167,7 @@ pub mod pallet {
 						StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
 						candidate.stakers.saturating_inc();
 					}
-					T::Currency::reserve(staker, amount)?;
+					T::Currency::hold(&HoldReason::Staking.into(), staker, amount)?;
 					*stake = final_staker_stake;
 					candidate.stake.saturating_accrue(amount);
 
@@ -1220,7 +1233,7 @@ pub mod pallet {
 			ensure!(!stake.is_zero(), Error::<T>::NothingToUnstake);
 
 			if !has_penalty {
-				T::Currency::unreserve(staker, stake);
+				T::Currency::release(&HoldReason::Staking.into(), staker, stake, Exact)?;
 			} else {
 				let delay = if staker == candidate {
 					T::CollatorUnstakingDelay::get()
@@ -1310,7 +1323,12 @@ pub mod pallet {
 							},
 						)?;
 					} else {
-						T::Currency::unreserve(&candidate.who, candidate.deposit);
+						T::Currency::release(
+							&HoldReason::Staking.into(),
+							&candidate.who,
+							candidate.deposit,
+							Exact,
+						)?;
 					}
 
 					PendingExCandidates::<T>::set(&candidate.who, true);
@@ -1405,7 +1423,7 @@ pub mod pallet {
 		}
 
 		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
-			T::Currency::transfer(&Self::account_id(), who, reward, KeepAlive)?;
+			T::Currency::transfer(&Self::account_id(), who, reward, Preserve)?;
 			Self::deposit_event(Event::StakingRewardReceived {
 				staker: who.clone(),
 				amount: reward,
@@ -1651,15 +1669,15 @@ pub mod pallet {
 					&Self::extra_reward_account_id(),
 					&pot_account,
 					extra_reward,
-					AllowDeath, // we do not care if the extra reward pot gets destroyed.
+					Expendable, // we do not care if the extra reward pot gets destroyed.
 				) {
 					log::warn!(target: LOG_TARGET, "Failure transferring extra rewards to the pallet-collator-staking pot account: {:?}", error);
 				}
 			}
 
 			// Rewards are the total amount in the pot minus the existential deposit.
-			let total_rewards = T::Currency::free_balance(&pot_account)
-				.saturating_sub(T::Currency::minimum_balance());
+			let total_rewards =
+				T::Currency::balance(&pot_account).saturating_sub(T::Currency::minimum_balance());
 			Rewards::<T>::insert(index, total_rewards);
 			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 		}
@@ -1670,10 +1688,10 @@ pub mod pallet {
 pub struct StakingPotAccountId<R>(PhantomData<R>);
 impl<R> TypedGet for StakingPotAccountId<R>
 where
-	R: crate::Config,
+	R: Config,
 {
 	type Type = <R as frame_system::Config>::AccountId;
 	fn get() -> Self::Type {
-		<crate::Pallet<R>>::account_id()
+		Pallet::<R>::account_id()
 	}
 }

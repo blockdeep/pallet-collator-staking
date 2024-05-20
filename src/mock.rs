@@ -199,6 +199,7 @@ impl<T> sp_runtime::traits::Convert<AccountId, Option<AccountId>> for IdentityCo
 impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
 	type ExtraRewardPotId = ExtraRewardPotId;
