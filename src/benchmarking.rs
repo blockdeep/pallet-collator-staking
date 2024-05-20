@@ -8,15 +8,13 @@ use super::*;
 use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
-use frame_support::traits::{Currency, EnsureOrigin, Get, ReservableCurrency};
+use frame_support::traits::fungible::{Inspect, Mutate};
+use frame_support::traits::{EnsureOrigin, Get};
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
 use sp_runtime::Percent;
 use sp_std::prelude::*;
-
-pub type BalanceOf<T> =
-	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 const SEED: u32 = 0;
 
@@ -35,7 +33,7 @@ fn create_funded_user<T: Config>(
 ) -> T::AccountId {
 	let user = account(string, n, SEED);
 	let balance = T::Currency::minimum_balance() * balance_factor.into();
-	let _ = T::Currency::make_free_balance_be(&user, balance);
+	T::Currency::mint_into(&user, balance).unwrap();
 	user
 }
 
@@ -78,7 +76,7 @@ fn register_candidates<T: Config>(count: u32) {
 	assert!(CandidacyBond::<T>::get() > 0u32.into(), "Bond cannot be zero!");
 
 	for who in candidates {
-		T::Currency::make_free_balance_be(&who, CandidacyBond::<T>::get() * 3u32.into());
+		T::Currency::mint_into(&who, CandidacyBond::<T>::get() * 3u32.into()).unwrap();
 		CollatorStaking::<T>::register_as_candidate(RawOrigin::Signed(who).into()).unwrap();
 	}
 }
@@ -101,6 +99,7 @@ fn min_invulnerables<T: Config>() -> u32 {
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
 	use super::*;
+	use frame_support::traits::fungible::{Inspect, Mutate, MutateHold};
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -150,13 +149,19 @@ mod benchmarks {
 		// ... and register them.
 		for (who, _) in candidates.iter() {
 			let deposit = CandidacyBond::<T>::get();
-			T::Currency::make_free_balance_be(who, deposit * 1000_u32.into());
+			T::Currency::mint_into(who, deposit * 1000_u32.into()).unwrap();
 			CandidateList::<T>::try_mutate(|list| {
-				list.try_push(CandidateInfo { who: who.clone(), deposit, stakers: 1 }).unwrap();
+				list.try_push(CandidateInfo {
+					who: who.clone(),
+					stake: 0u32.into(),
+					deposit,
+					stakers: 1,
+				})
+				.unwrap();
 				Ok::<(), BenchmarkError>(())
 			})
 			.unwrap();
-			T::Currency::reserve(who, deposit)?;
+			T::Currency::hold(&HoldReason::Staking.into(), who, deposit)?;
 			LastAuthoredBlock::<T>::insert(
 				who.clone(),
 				frame_system::Pallet::<T>::block_number() + T::KickThreshold::get(),
@@ -240,7 +245,7 @@ mod benchmarks {
 
 		let caller: T::AccountId = whitelisted_caller();
 		let bond: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
-		T::Currency::make_free_balance_be(&caller, bond);
+		T::Currency::mint_into(&caller, bond).unwrap();
 
 		pallet_session::Pallet::<T>::set_keys(
 			RawOrigin::Signed(caller.clone()).into(),
@@ -268,8 +273,8 @@ mod benchmarks {
 		register_candidates::<T>(c);
 
 		let caller: T::AccountId = whitelisted_caller();
-		let bond: BalanceOf<T> = T::Currency::minimum_balance() * 10u32.into();
-		T::Currency::make_free_balance_be(&caller, bond);
+		let balance: BalanceOf<T> = T::Currency::minimum_balance() * 10u32.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
 
 		pallet_session::Pallet::<T>::set_keys(
 			RawOrigin::Signed(caller.clone()).into(),
@@ -281,11 +286,16 @@ mod benchmarks {
 		let target = CandidateList::<T>::get().iter().last().unwrap().who.clone();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), bond / 2u32.into(), target.clone());
+		_(RawOrigin::Signed(caller.clone()), balance / 2u32.into(), target.clone());
 
 		assert_last_event::<T>(
-			Event::CandidateReplaced { old: target, new: caller, deposit: bond / 2u32.into() }
-				.into(),
+			Event::CandidateReplaced {
+				old: target,
+				new: caller,
+				stake: balance / 2u32.into(),
+				deposit: T::Currency::minimum_balance(),
+			}
+			.into(),
 		);
 	}
 
@@ -433,6 +443,15 @@ mod benchmarks {
 		register_validators::<T>(c);
 		register_candidates::<T>(c);
 
+		CandidateList::<T>::get().iter().for_each(|cand| {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(cand.who.clone()).into(),
+				cand.who.clone(),
+				amount,
+			)
+			.unwrap();
+		});
+
 		let requests = (0..u)
 			// worst case is inserting at the beginning
 			.map(|_| UnstakeRequest { block: 1000u32.into(), amount })
@@ -464,16 +483,17 @@ mod benchmarks {
 		register_candidates::<T>(c);
 
 		let caller = whitelisted_caller();
-		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
+		T::Currency::mint_into(&caller, amount * 2u32.into() * c.into()).unwrap();
 		CandidateList::<T>::get().iter().take(s as usize).for_each(|cand| {
 			assert_eq!(cand.deposit, amount);
+			assert_eq!(cand.stake, 0u32.into());
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
 				cand.who.clone(),
 				amount,
 			)
 			.unwrap();
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
 			assert_eq!(Stake::<T>::get(&cand.who, &caller), amount);
 		});
 
@@ -481,9 +501,9 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()));
 
 		CandidateList::<T>::get().iter().for_each(|cand| {
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
 			assert_eq!(Stake::<T>::get(&cand.who, &caller), 0u32.into());
-			assert_eq!(cand.deposit, amount);
+			assert_eq!(cand.stake, 0u32.into());
 		});
 	}
 
@@ -498,7 +518,7 @@ mod benchmarks {
 		register_candidates::<T>(c);
 
 		let caller = whitelisted_caller();
-		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
+		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into()).unwrap();
 		CandidateList::<T>::get().iter().for_each(|cand| {
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
@@ -572,12 +592,10 @@ mod benchmarks {
 	fn stop_extra_reward() -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
-		let initial_reward: BalanceOf<T> = 10u32.into();
+		let initial_reward: BalanceOf<T> = T::Currency::minimum_balance();
 		ExtraReward::<T>::put(initial_reward);
-		let _ = T::Currency::make_free_balance_be(
-			&CollatorStaking::<T>::extra_reward_account_id(),
-			100u32.into(),
-		);
+		T::Currency::mint_into(&CollatorStaking::<T>::extra_reward_account_id(), initial_reward)
+			.unwrap();
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin);
@@ -589,14 +607,14 @@ mod benchmarks {
 	#[benchmark]
 	fn top_up_extra_rewards() -> Result<(), BenchmarkError> {
 		let caller: T::AccountId = whitelisted_caller();
-		let balance: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
-		T::Currency::make_free_balance_be(&caller, balance);
+		let balance = T::Currency::minimum_balance() * 2u32.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), T::Currency::minimum_balance());
 
 		assert_eq!(
-			T::Currency::free_balance(&CollatorStaking::<T>::extra_reward_account_id()),
+			T::Currency::balance(&CollatorStaking::<T>::extra_reward_account_id()),
 			T::Currency::minimum_balance()
 		);
 		Ok(())
@@ -605,7 +623,7 @@ mod benchmarks {
 	#[benchmark]
 	fn reward_one_collator(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		s: Linear<0, { T::MaxStakers::get() - 1 }>,
+		s: Linear<0, { T::MaxStakers::get() }>,
 		a: Linear<0, 100>,
 	) {
 		let amount = T::Currency::minimum_balance();
@@ -639,8 +657,7 @@ mod benchmarks {
 			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
 		}
 		frame_system::Pallet::<T>::set_block_number(10u32.into());
-		let _ =
-			T::Currency::make_free_balance_be(&CollatorStaking::<T>::account_id(), 100u32.into());
+		T::Currency::mint_into(&CollatorStaking::<T>::account_id(), amount).unwrap();
 		<CollatorStaking<T> as SessionManager<_>>::end_session(0);
 		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
 
@@ -651,7 +668,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() - 1 }>) {
+	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		CandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
@@ -660,6 +677,7 @@ mod benchmarks {
 
 		let collator = register_validators::<T>(1)[0].clone();
 		register_candidates::<T>(1);
+		let amount_staked = amount * 500u32.into();
 
 		let stakers = (0..s)
 			.map(|n| {
@@ -667,17 +685,18 @@ mod benchmarks {
 				CollatorStaking::<T>::stake(
 					RawOrigin::Signed(acc.clone()).into(),
 					collator.clone(),
-					amount,
+					amount_staked,
 				)
 				.unwrap();
 				acc
 			})
 			.collect::<Vec<_>>();
-		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), (s + 1) as usize);
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
 
 		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
 		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
 		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
+		assert!(Stake::<T>::iter_prefix(&collator).all(|(_, amount)| { amount == amount_staked }));
 
 		#[block]
 		{
