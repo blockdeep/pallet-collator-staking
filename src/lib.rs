@@ -1361,19 +1361,26 @@ pub mod pallet {
 			collator: &T::AccountId,
 			blocks: u32,
 			session: SessionIndex,
-		) -> (bool, u32, u32) {
+		) -> (u32, u32) {
 			let mut total_stakers = 0;
 			let mut total_compound = 0;
 			if let Ok(pos) = Self::get_candidate(collator) {
-				let collator_info = &CandidateList::<T>::get()[pos];
-				let total_rewards = Rewards::<T>::get(session);
 				let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
-				if rewardable_blocks.is_zero() || collator_info.stake.is_zero() {
-					// we cannot divide by zero
-					return (true, 0, 0);
+				// We cannot divide by zero.
+				if rewardable_blocks.is_zero() {
+					log::debug!(
+						"Rewardable blocks is zero. Skipping rewards for collators and stakers..."
+					);
+					return (0, 0);
+				}
+				if blocks > rewardable_blocks {
+					// The only case this could happen is if the candidate was an invulnerable during the session.
+					log::warn!("Cannot reward collator {:?} for producing more blocks than rewardable ones", collator);
+					return (0, 0);
 				}
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
-
+				let collator_info = &CandidateList::<T>::get()[pos];
+				let total_rewards = Rewards::<T>::get(session);
 				let rewards_all: BalanceOf<T> =
 					total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
 				let collator_only_reward = collator_percentage.mul_floor(rewards_all);
@@ -1383,8 +1390,17 @@ pub mod pallet {
 					log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
 				}
 
+				// Again, we cannot divide by zero.
+				if collator_info.stake.is_zero() {
+					log::debug!(
+						"Candidate {:?} has no stakers. Skipping rewards for stakers...",
+						collator
+					);
+					return (0, 0);
+				}
+
 				// Reward stakers
-				let stakers_only_rewards = total_rewards.saturating_sub(collator_only_reward);
+				let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
 				Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
 					total_stakers += 1;
 					let staker_reward: BalanceOf<T> =
@@ -1397,6 +1413,7 @@ pub mod pallet {
 						let compound_percentage = AutoCompound::<T>::get(staker.clone());
 						let compound_amount = compound_percentage.mul_floor(staker_reward);
 						if !compound_amount.is_zero() {
+							// We sort at the end, when the whole stake is included.
 							if let Err(error) =
 								Self::do_stake_at_position(&staker, compound_amount, pos, false)
 							{
@@ -1411,14 +1428,14 @@ pub mod pallet {
 						}
 					}
 				});
+				// No need to sort again if no new investments were made.
 				if !total_compound.is_zero() {
-					// No need to sort again if no new investments were made.
 					let _ = Self::reassign_candidate_position(pos);
 				}
 			} else {
 				log::warn!("Collator {:?} is no longer a candidate", collator);
 			}
-			(true, total_stakers, total_compound)
+			(total_stakers, total_compound)
 		}
 
 		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
@@ -1497,13 +1514,8 @@ pub mod pallet {
 		///
 		/// Returns a tuple with the number of rewards given and the number of auto compounds.
 		pub(crate) fn reward_one_collator(session: SessionIndex) -> (u32, u32) {
-			let mut iter = ProducedBlocks::<T>::iter_prefix(session);
-			if let Some((collator, blocks)) = iter.next() {
-				let (succeed, rewards, compounds) =
-					Self::do_reward_collator(&collator, blocks, session);
-				if succeed {
-					ProducedBlocks::<T>::remove(session, collator.clone());
-				}
+			if let Some((collator, blocks)) = ProducedBlocks::<T>::drain_prefix(session).next() {
+				let (rewards, compounds) = Self::do_reward_collator(&collator, blocks, session);
 				(rewards, compounds)
 			} else {
 				(0, 0)
