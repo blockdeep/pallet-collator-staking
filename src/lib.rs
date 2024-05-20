@@ -154,7 +154,9 @@ pub mod pallet {
 	pub struct CandidateInfo<AccountId, Balance> {
 		/// Account identifier.
 		pub who: AccountId,
-		/// Reserved deposit.
+		/// Total stake.
+		pub stake: Balance,
+		/// Initial bond.
 		pub deposit: Balance,
 		/// Amount of stakers.
 		pub stakers: u32,
@@ -356,7 +358,12 @@ pub mod pallet {
 		/// A candidate was removed.
 		CandidateRemoved { account_id: T::AccountId },
 		/// An account was replaced in the candidate list by another one.
-		CandidateReplaced { old: T::AccountId, new: T::AccountId, deposit: BalanceOf<T> },
+		CandidateReplaced {
+			old: T::AccountId,
+			new: T::AccountId,
+			deposit: BalanceOf<T>,
+			stake: BalanceOf<T>,
+		},
 		/// An account was unable to be added to the Invulnerables because they did not have keys
 		/// registered. Other Invulnerables may have been set.
 		InvalidInvulnerableSkipped { account_id: T::AccountId },
@@ -414,7 +421,7 @@ pub mod pallet {
 		/// Could not insert in the candidate list.
 		InsertToCandidateListFailed,
 		/// Deposit amount is too low to take the target's slot in the candidate list.
-		InsufficientBond,
+		InsufficientDeposit,
 		/// Amount not sufficient to be staked.
 		InsufficientStake,
 		/// DesiredCandidates is out of bounds.
@@ -433,11 +440,11 @@ pub mod pallet {
 		InvalidExtraReward,
 		/// Extra rewards are already zero.
 		ExtraRewardAlreadyDisabled,
-		/// The amount to fund the extra reward pot must be greater than zero
+		/// The amount to fund the extra reward pot must be greater than zero.
 		InvalidFundingAmount,
-		/// There is nothing to unstake
+		/// There is nothing to unstake.
 		NothingToUnstake,
-		/// Cannot add more stakers to a given candidate
+		/// Cannot add more stakers to a given candidate.
 		TooManyStakers,
 	}
 
@@ -766,16 +773,13 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::take_candidate_slot())]
 		pub fn take_candidate_slot(
 			origin: OriginFor<T>,
-			deposit: BalanceOf<T>,
+			stake: BalanceOf<T>,
 			target: T::AccountId,
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			ensure!(!Self::is_invulnerable(&who), Error::<T>::AlreadyInvulnerable);
 			ensure!(Self::get_candidate(&who).is_err(), Error::<T>::AlreadyCandidate);
-
-			let candidacy_bond = CandidacyBond::<T>::get();
-			ensure!(deposit >= candidacy_bond, Error::<T>::InsufficientBond);
 
 			let collator_key =
 				T::CollatorIdOf::convert(who.clone()).ok_or(Error::<T>::NoAssociatedCollatorId)?;
@@ -786,20 +790,22 @@ pub mod pallet {
 
 			// only allow this operation if the candidate list is full
 			let length = CandidateList::<T>::decode_len().unwrap_or_default();
-			ensure!(length >= T::MaxCandidates::get() as usize, Error::<T>::CanRegister);
+			ensure!(length == T::MaxCandidates::get() as usize, Error::<T>::CanRegister);
 
 			// Remove old candidate
 			let target_info = Self::try_remove_candidate_from_account(&target, true, false)?;
-			ensure!(deposit > target_info.deposit, Error::<T>::InsufficientBond);
+			ensure!(stake > target_info.stake, Error::<T>::InsufficientDeposit);
 
 			// Register the new candidate
-			Self::do_register_as_candidate(&who)?;
-			let stake_left = deposit.saturating_sub(candidacy_bond);
-			if !stake_left.is_zero() {
-				Self::do_stake_at_position(&who, stake_left, 0, true)?;
-			}
+			let candidate = Self::do_register_as_candidate(&who)?;
+			Self::do_stake_at_position(&who, stake, 0, true)?;
 
-			Self::deposit_event(Event::CandidateReplaced { old: target, new: who, deposit });
+			Self::deposit_event(Event::CandidateReplaced {
+				old: target,
+				new: who,
+				deposit: candidate.deposit,
+				stake,
+			});
 			Ok(())
 		}
 
@@ -877,7 +883,7 @@ pub mod pallet {
 					operations += 1;
 				}
 			}
-			CandidateList::<T>::mutate(|candidates| candidates.sort_by_key(|c| c.deposit));
+			CandidateList::<T>::mutate(|candidates| candidates.sort_by_key(|c| c.stake));
 			Ok(Some(T::WeightInfo::unstake_all(
 				CandidateList::<T>::decode_len().unwrap_or_default() as u32,
 				operations,
@@ -1041,8 +1047,12 @@ pub mod pallet {
 		///
 		/// The account has to reserve the candidacy bond. If the account was previously a candidate
 		/// the retained stake will be reincluded.
-		pub fn do_register_as_candidate(who: &T::AccountId) -> DispatchResult {
-			let deposit = CandidacyBond::<T>::get();
+		///
+		/// Returns the registered candidate.
+		pub fn do_register_as_candidate(
+			who: &T::AccountId,
+		) -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
+			let bond = CandidacyBond::<T>::get();
 
 			// In case the staker already had non-claimed stake we calculate it now.
 			let mut stakers = 0;
@@ -1055,7 +1065,7 @@ pub mod pallet {
 				});
 
 			// First authored block is current block plus kick threshold to handle session delay
-			CandidateList::<T>::try_mutate(
+			let candidate = CandidateList::<T>::try_mutate(
 				|candidates| -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
 					ensure!(
 						!candidates.iter().any(|candidate_info| candidate_info.who == *who),
@@ -1065,7 +1075,13 @@ pub mod pallet {
 						who.clone(),
 						Self::current_block_number() + T::KickThreshold::get(),
 					);
-					let info = CandidateInfo { who: who.clone(), deposit: already_staked, stakers };
+					let info = CandidateInfo {
+						who: who.clone(),
+						stake: already_staked,
+						deposit: bond,
+						stakers,
+					};
+					T::Currency::reserve(who, bond)?;
 					candidates
 						.try_insert(0, info.clone())
 						.map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
@@ -1073,13 +1089,9 @@ pub mod pallet {
 					Ok(info)
 				},
 			)?;
-			// We must add the stake AFTER inserting the candidate into the list.
-			// otherwise the function will check the account is not yet a candidate and fail.
-			let sort = !already_staked.is_zero();
-			Self::do_stake_at_position(who, deposit, 0, sort)?;
 
-			Self::deposit_event(Event::CandidateAdded { account_id: who.clone(), deposit });
-			Ok(())
+			Self::deposit_event(Event::CandidateAdded { account_id: who.clone(), deposit: bond });
+			Ok(candidate)
 		}
 
 		/// Claims all pending unstaking requests for a given user.
@@ -1144,7 +1156,7 @@ pub mod pallet {
 					}
 					T::Currency::reserve(staker, amount)?;
 					*stake = final_staker_stake;
-					candidate.deposit.saturating_accrue(amount);
+					candidate.stake.saturating_accrue(amount);
 
 					Self::deposit_event(Event::StakeAdded {
 						staker: staker.clone(),
@@ -1168,7 +1180,7 @@ pub mod pallet {
 				let info = candidates.remove(position);
 				let new_pos = candidates
 					.iter()
-					.position(|candidate| candidate.deposit >= info.deposit)
+					.position(|candidate| candidate.stake >= info.stake)
 					.unwrap_or_else(|| candidates.len());
 				candidates
 					.try_insert(new_pos, info)
@@ -1247,7 +1259,7 @@ pub mod pallet {
 			});
 			if let Some(position) = maybe_position {
 				CandidateList::<T>::mutate(|candidates| {
-					candidates[position].deposit.saturating_reduce(stake);
+					candidates[position].stake.saturating_reduce(stake);
 					candidates[position].stakers.saturating_dec();
 				});
 				if sort {
@@ -1277,7 +1289,30 @@ pub mod pallet {
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(candidate.who.clone())
 					};
-					Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, true)?;
+					let stake = Stake::<T>::get(&candidate.who, &candidate.who);
+					if !stake.is_zero() {
+						Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, false)?;
+					}
+
+					// Return the bond too.
+					if has_penalty {
+						UnstakingRequests::<T>::try_mutate(
+							&candidate.who,
+							|requests| -> DispatchResult {
+								requests
+									.try_push(UnstakeRequest {
+										block: Self::current_block_number()
+											+ T::CollatorUnstakingDelay::get(),
+										amount: candidate.deposit,
+									})
+									.map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
+								Ok(())
+							},
+						)?;
+					} else {
+						T::Currency::unreserve(&candidate.who, candidate.deposit);
+					}
+
 					PendingExCandidates::<T>::set(&candidate.who, true);
 					Self::deposit_event(Event::CandidateRemoved {
 						account_id: candidate.who.clone(),
@@ -1295,10 +1330,7 @@ pub mod pallet {
 			remove_last_authored: bool,
 			has_penalty: bool,
 		) -> Result<CandidateInfo<T::AccountId, BalanceOf<T>>, DispatchError> {
-			let idx = CandidateList::<T>::get()
-				.iter()
-				.position(|candidate_info| candidate_info.who == *who)
-				.ok_or(Error::<T>::NotCandidate)?;
+			let idx = Self::get_candidate(who)?;
 			Self::try_remove_candidate_at_position(idx, remove_last_authored, has_penalty)
 		}
 
@@ -1319,7 +1351,7 @@ pub mod pallet {
 				let collator_info = &CandidateList::<T>::get()[pos];
 				let total_rewards = Rewards::<T>::get(session);
 				let (_, rewardable_blocks) = TotalBlocks::<T>::get(session);
-				if rewardable_blocks.is_zero() || collator_info.deposit.is_zero() {
+				if rewardable_blocks.is_zero() || collator_info.stake.is_zero() {
 					// we cannot divide by zero
 					return (true, 0, 0);
 				}
@@ -1339,7 +1371,7 @@ pub mod pallet {
 				Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
 					total_stakers += 1;
 					let staker_reward: BalanceOf<T> =
-						Perbill::from_rational(stake, collator_info.deposit) * stakers_only_rewards;
+						Perbill::from_rational(stake, collator_info.stake) * stakers_only_rewards;
 					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
 						log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
 					} else {
@@ -1429,9 +1461,9 @@ pub mod pallet {
                         // should not be a collator twice.
                         let _ = Self::try_remove_candidate_from_account(&candidate.who, false, false);
                         None
-                    } else if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit >= candidacy_bond) {
+                    } else if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit.saturating_add(candidate.stake) >= candidacy_bond) {
                         // Either this is a good collator (not lazy) or we are at the minimum
-                        // that the system needs. They get to stay, as long as they have sufficient deposit.
+                        // that the system needs. They get to stay, as long as they have sufficient deposit plus stake.
                         Some(candidate)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.

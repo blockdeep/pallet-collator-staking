@@ -152,7 +152,13 @@ mod benchmarks {
 			let deposit = CandidacyBond::<T>::get();
 			T::Currency::make_free_balance_be(who, deposit * 1000_u32.into());
 			CandidateList::<T>::try_mutate(|list| {
-				list.try_push(CandidateInfo { who: who.clone(), deposit, stakers: 1 }).unwrap();
+				list.try_push(CandidateInfo {
+					who: who.clone(),
+					stake: 0u32.into(),
+					deposit,
+					stakers: 1,
+				})
+				.unwrap();
 				Ok::<(), BenchmarkError>(())
 			})
 			.unwrap();
@@ -268,8 +274,8 @@ mod benchmarks {
 		register_candidates::<T>(c);
 
 		let caller: T::AccountId = whitelisted_caller();
-		let bond: BalanceOf<T> = T::Currency::minimum_balance() * 10u32.into();
-		T::Currency::make_free_balance_be(&caller, bond);
+		let balance: BalanceOf<T> = T::Currency::minimum_balance() * 10u32.into();
+		T::Currency::make_free_balance_be(&caller, balance);
 
 		pallet_session::Pallet::<T>::set_keys(
 			RawOrigin::Signed(caller.clone()).into(),
@@ -281,11 +287,16 @@ mod benchmarks {
 		let target = CandidateList::<T>::get().iter().last().unwrap().who.clone();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), bond / 2u32.into(), target.clone());
+		_(RawOrigin::Signed(caller.clone()), balance / 2u32.into(), target.clone());
 
 		assert_last_event::<T>(
-			Event::CandidateReplaced { old: target, new: caller, deposit: bond / 2u32.into() }
-				.into(),
+			Event::CandidateReplaced {
+				old: target,
+				new: caller,
+				stake: balance / 2u32.into(),
+				deposit: T::Currency::minimum_balance(),
+			}
+			.into(),
 		);
 	}
 
@@ -433,6 +444,15 @@ mod benchmarks {
 		register_validators::<T>(c);
 		register_candidates::<T>(c);
 
+		CandidateList::<T>::get().iter().for_each(|cand| {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(cand.who.clone()).into(),
+				cand.who.clone(),
+				amount,
+			)
+			.unwrap();
+		});
+
 		let requests = (0..u)
 			// worst case is inserting at the beginning
 			.map(|_| UnstakeRequest { block: 1000u32.into(), amount })
@@ -467,13 +487,14 @@ mod benchmarks {
 		T::Currency::make_free_balance_be(&caller, amount * 2u32.into() * c.into());
 		CandidateList::<T>::get().iter().take(s as usize).for_each(|cand| {
 			assert_eq!(cand.deposit, amount);
+			assert_eq!(cand.stake, 0u32.into());
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
 				cand.who.clone(),
 				amount,
 			)
 			.unwrap();
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
 			assert_eq!(Stake::<T>::get(&cand.who, &caller), amount);
 		});
 
@@ -481,9 +502,9 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()));
 
 		CandidateList::<T>::get().iter().for_each(|cand| {
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), amount);
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
 			assert_eq!(Stake::<T>::get(&cand.who, &caller), 0u32.into());
-			assert_eq!(cand.deposit, amount);
+			assert_eq!(cand.stake, 0u32.into());
 		});
 	}
 
@@ -673,7 +694,7 @@ mod benchmarks {
 				acc
 			})
 			.collect::<Vec<_>>();
-		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), (s + 1) as usize);
+		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
 
 		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
 		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
