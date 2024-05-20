@@ -1515,7 +1515,7 @@ pub mod pallet {
 		///
 		/// Returns the amount of refunded stakers.
 		pub(crate) fn refund_stakers(account: &T::AccountId) -> u32 {
-			Stake::<T>::drain_prefix(account)
+			let count = Stake::<T>::iter_prefix(account)
 				.filter_map(|(staker, amount)| {
 					if !amount.is_zero() {
 						if let Err(e) = Self::do_unstake(&staker, account, false, None, false) {
@@ -1532,7 +1532,9 @@ pub mod pallet {
 						None
 					}
 				})
-				.count() as u32
+				.count() as u32;
+			let _ = Stake::<T>::clear_prefix(&account, u32::MAX, None);
+			count
 		}
 
 		/// Ensure the correctness of the state of this pallet.
@@ -1632,12 +1634,6 @@ pub mod pallet {
 		}
 
 		fn start_session(index: SessionIndex) {
-			log::info!(
-				target: LOG_TARGET,
-				"Starting session {} at #{:?}",
-				index,
-				frame_system::Pallet::<T>::block_number(),
-			);
 			// Initialize counters for this session
 			TotalBlocks::<T>::insert(index, (0, 0));
 			CurrentSession::<T>::put(index);
@@ -1652,13 +1648,6 @@ pub mod pallet {
 		}
 
 		fn end_session(index: SessionIndex) {
-			log::info!(
-				target: LOG_TARGET,
-				"Finishing session {} at #{:?}",
-				index,
-				frame_system::Pallet::<T>::block_number(),
-			);
-
 			// Transfer the extra reward, if any, to the pot.
 			let pot_account = Self::account_id();
 			let per_block_extra_reward = ExtraReward::<T>::get();

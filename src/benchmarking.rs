@@ -592,11 +592,10 @@ mod benchmarks {
 	fn stop_extra_reward() -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
-		let initial_reward: BalanceOf<T> = 10u32.into();
+		let initial_reward: BalanceOf<T> = T::Currency::minimum_balance();
 		ExtraReward::<T>::put(initial_reward);
-		let _ =
-			T::Currency::mint_into(&CollatorStaking::<T>::extra_reward_account_id(), 100u32.into())
-				.unwrap();
+		T::Currency::mint_into(&CollatorStaking::<T>::extra_reward_account_id(), initial_reward)
+			.unwrap();
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin);
@@ -624,7 +623,7 @@ mod benchmarks {
 	#[benchmark]
 	fn reward_one_collator(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		s: Linear<0, { T::MaxStakers::get() - 1 }>,
+		s: Linear<0, { T::MaxStakers::get() }>,
 		a: Linear<0, 100>,
 	) {
 		let amount = T::Currency::minimum_balance();
@@ -658,7 +657,7 @@ mod benchmarks {
 			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
 		}
 		frame_system::Pallet::<T>::set_block_number(10u32.into());
-		T::Currency::mint_into(&CollatorStaking::<T>::account_id(), 100u32.into()).unwrap();
+		T::Currency::mint_into(&CollatorStaking::<T>::account_id(), amount).unwrap();
 		<CollatorStaking<T> as SessionManager<_>>::end_session(0);
 		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
 
@@ -669,7 +668,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() - 1 }>) {
+	fn refund_stakers(s: Linear<0, { T::MaxStakers::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		CandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
@@ -678,6 +677,7 @@ mod benchmarks {
 
 		let collator = register_validators::<T>(1)[0].clone();
 		register_candidates::<T>(1);
+		let amount_staked = amount * 500u32.into();
 
 		let stakers = (0..s)
 			.map(|n| {
@@ -685,7 +685,7 @@ mod benchmarks {
 				CollatorStaking::<T>::stake(
 					RawOrigin::Signed(acc.clone()).into(),
 					collator.clone(),
-					amount,
+					amount_staked,
 				)
 				.unwrap();
 				acc
@@ -696,6 +696,7 @@ mod benchmarks {
 		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
 		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
 		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
+		assert!(Stake::<T>::iter_prefix(&collator).all(|(_, amount)| { amount == amount_staked }));
 
 		#[block]
 		{
