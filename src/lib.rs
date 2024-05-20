@@ -219,7 +219,7 @@ pub mod pallet {
 	/// This should always be less than [`Config::MaxCandidates`] for weights to be correct.
 	///
 	/// IMP: This must be less than the session length,
-	/// because the reward are distributed for one collator per block.
+	/// because rewards are distributed for one collator per block.
 	#[pallet::storage]
 	pub type DesiredCandidates<T> = StorageValue<_, u32, ValueQuery>;
 
