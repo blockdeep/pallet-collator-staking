@@ -93,14 +93,15 @@ pub mod pallet {
 		/// Origin that can dictate updating parameters of this pallet.
 		type UpdateOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
-		/// Account Identifier from which the internal Pot is generated.
+		/// Account Identifier from which the internal pot is generated.
 		///
 		/// To initiate rewards, an ED needs to be transferred to the pot address.
 		type PotId: Get<PalletId>;
 
-		/// Account Identifier from which the extra reward Pot is generated.
+		/// Account Identifier from which the extra reward pot is generated.
 		///
-		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called.
+		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called;
+		/// and this pot should be funded using [`top_up_extra_rewards`] extrinsic.
 		type ExtraRewardPotId: Get<PalletId>;
 
 		/// Maximum number of candidates that we should have.
@@ -109,8 +110,8 @@ pub mod pallet {
 		/// This must be more than or equal to `DesiredCandidates`.
 		type MaxCandidates: Get<u32>;
 
-		/// Minimum number eligible collators including Invulnerables. 
-		/// Should always be greater than zero. This ensures that there will always be 
+		/// Minimum number eligible collators including Invulnerables.
+		/// Should always be greater than zero. This ensures that there will always be
 		/// one collator who can produce blocks.
 		#[pallet::constant]
 		type MinEligibleCollators: Get<u32>;
@@ -119,7 +120,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		// Collator will be kicked if block is not produced within this threshold.
+		// Collator will be  removed from active collator set, if block is not produced within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
@@ -131,22 +132,22 @@ pub mod pallet {
 		/// Its cost must be at most one storage read.
 		type CollatorIdOf: Convert<Self::AccountId, Option<Self::CollatorId>>;
 
-		/// Validate a user is registered.
+		/// Validate a collator is registered.
 		type CollatorRegistration: ValidatorRegistration<Self::CollatorId>;
 
-		/// Maximum per-account number of candidates to deposit stake on.
+		/// Maximum candidates a staker can stake on.
 		#[pallet::constant]
 		type MaxStakedCandidates: Get<u32>;
 
-		/// Maximum per-candidate number of stakers.
+		/// Maximum stakers per candidate.
 		#[pallet::constant]
 		type MaxStakers: Get<u32>;
 
-		/// Number of blocks to wait before unreserving the stake by a collator.
+		/// Number of blocks to wait before returning the bond by a collator.
 		#[pallet::constant]
 		type CollatorUnstakingDelay: Get<BlockNumberFor<Self>>;
 
-		/// Number of blocks to wait before unreserving the stake by a user.
+		/// Number of blocks to wait before returning the stake by a user.
 		#[pallet::constant]
 		type UserUnstakingDelay: Get<BlockNumberFor<Self>>;
 
@@ -199,7 +200,7 @@ pub mod pallet {
 	/// The (community, limited) collation candidates. `Candidates` and `Invulnerables` should be
 	/// mutually exclusive.
 	///
-	/// This list is sorted in ascending order by deposit and when the deposits are equal, the least
+	/// This list is sorted in ascending order by total stake and when the stake amounts are equal, the least
 	/// recently updated is considered greater.
 	#[pallet::storage]
 	pub type CandidateList<T: Config> = StorageValue<
@@ -208,16 +209,17 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
-	/// Last block authored by collator.
+	/// Last block authored by a collator.
 	#[pallet::storage]
 	pub type LastAuthoredBlock<T: Config> =
 		StorageMap<_, Twox64Concat, T::AccountId, BlockNumberFor<T>, ValueQuery>;
 
 	/// Desired number of candidates.
 	///
-	/// This should ideally always be less than [`Config::MaxCandidates`] for weights to be correct.
-	/// This should also be less than the session length, as otherwise rewards will not be able
-	/// to be delivered.
+	/// This should always be less than [`Config::MaxCandidates`] for weights to be correct.
+	///
+	/// IMP: This must be less than the session length,
+	/// because the reward are distributed for one collator per block.
 	#[pallet::storage]
 	pub type DesiredCandidates<T> = StorageValue<_, u32, ValueQuery>;
 
@@ -225,11 +227,11 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CandidacyBond<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Minimum amount of stake an account can add to a candidate.
+	/// Minimum amount a user can stake.
 	#[pallet::storage]
 	pub type MinStake<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Stores the amount staked by a given user into a candidate.
+	/// Amount staked by users per candidate.
 	///
 	/// First key is the candidate, and second one is the staker.
 	#[pallet::storage]
@@ -243,7 +245,7 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
-	/// Stores the number of candidates a given account deposited stake on.
+	/// Number of candidates staked on by a user.
 	///
 	/// Cannot be higher than `MaxStakedCandidates`.
 	#[pallet::storage]
@@ -269,14 +271,14 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Candidates with pending stake to be redeemed to their stakers. Insertion and deletions
+	/// Tracks the refund of stake for stakers of kicked/left collators. Insertion and deletions
 	/// are made in a FIFO manner.
 	#[pallet::storage]
 	pub type PendingExCandidates<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
 
-	/// Blocks produced in the current session. First value is actual total, and second is those
-	/// that have not been produced by invulnerables.
+	/// Blocks produced in the current session. First value the total,
+	/// and second is blocks produced by candidates only (not invulnerables).
 	#[pallet::storage]
 	pub type TotalBlocks<T: Config> =
 		StorageMap<_, Blake2_128Concat, SessionIndex, (u32, u32), ValueQuery>;
@@ -481,10 +483,10 @@ pub mod pallet {
 		}
 
 		/// Rewards are delivered at the beginning of each block. The underlined assumption is that
-		/// the number of collators to be rewarded is much lower than the number of blocks in
+		/// the number of collators to be rewarded is lower than the number of blocks in
 		/// a given session.
 		///
-		/// Please note that only one collator and its stakers are rewarded per block, until all
+		/// Only one collator and its stakers are rewarded per block, until all
 		/// collators (and their stakers) are rewarded for the previous session.
 		fn on_initialize(_n: BlockNumberFor<T>) -> Weight {
 			let mut weight = T::DbWeight::get().reads_writes(1, 0);
@@ -504,14 +506,13 @@ pub mod pallet {
 			weight
 		}
 
-		/// Traverses pending ex-candidates and rewards their stakers.
+		/// Traverses pending ex-candidates (left or kicked) and refunds their stakers.
 		///
-		/// Note only at most one ex-candidate will be processed per block.
+		/// Only at most one ex-candidate will be processed per block.
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut weight = T::DbWeight::get().reads_writes(1, 0);
-			let worst_case_weight = weight.saturating_add(T::WeightInfo::refund_stakers(
-				T::MaxStakers::get(),
-			));
+			let worst_case_weight =
+				weight.saturating_add(T::WeightInfo::refund_stakers(T::MaxStakers::get()));
 			if worst_case_weight.any_gt(remaining_weight) {
 				return Weight::zero();
 			}
@@ -649,6 +650,7 @@ pub mod pallet {
 
 		/// Register this account as a collator candidate. The account must (a) already have
 		/// registered session keys and (b) be able to reserve the `CandidacyBond`.
+		/// The `CandidacyBond` amount is automatically reserved from the balance of the caller.
 		///
 		/// This call is not available to `Invulnerable` collators.
 		#[pallet::call_index(3)]
@@ -679,7 +681,7 @@ pub mod pallet {
 		}
 
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
-		/// candidate after this moment.
+		/// candidate and its stakers after this moment.
 		///
 		/// This call will fail if the total number of candidates would drop below
 		/// `MinEligibleCollators`.
@@ -823,7 +825,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Adds stake to a candidate.
+		/// Allows a user to stake on a collator candidate.
 		///
 		/// The call will fail if:
 		///     - `origin` does not have the at least `MinStake` deposited in the candidate.
@@ -843,15 +845,17 @@ pub mod pallet {
 			.into())
 		}
 
-		/// Removes stake from an account.
+		/// Removes stake from a collator candidate.
 		///
-		/// If the account is a candidate the caller will get the funds after a delay. Otherwise,
+		/// If the candidate is an active collator, the caller will get the funds after a delay. Otherwise,
 		/// funds will be returned immediately.
 		///
-		/// The candidate will have its position in the [`CandidateList`] conveniently modified, and
-		/// if the amount of stake is below the [`CandidacyBond`] it will be kicked when the session ends.
+		/// The candidate will have its position in the [`CandidateList`] updated.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(), T::MaxStakedCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::unstake_from(
+			T::MaxCandidates::get(),
+			T::MaxStakedCandidates::get()
+		))]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
@@ -870,10 +874,9 @@ pub mod pallet {
 			.into())
 		}
 
-		/// Removes all stake from all candidates.
+		/// Removes all stake of a user from all candidates.
 		///
-		/// If the account was once a candidate, but it has not been unstaked, funds will be
-		/// retrieved immediately.
+		/// The delay in amount refunded is based on whether the candidates are active collators or not.
 		#[pallet::call_index(10)]
 		#[pallet::weight(T::WeightInfo::unstake_all(
 			T::MaxCandidates::get(),
@@ -914,7 +917,7 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::claim(operations)).into())
 		}
 
-		/// Sets the percentage of rewards that should be autocompounded in the same candidate.
+		/// Sets the percentage of rewards that should be auto-compounded.
 		#[pallet::call_index(12)]
 		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
 		pub fn set_autocompound_percentage(
@@ -934,7 +937,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Sets the percentage of rewards that collators will have for producing blocks.
+		/// Sets the percentage of rewards that collators will take for producing blocks.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(13)]
@@ -969,8 +972,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Sets minimum amount that can be staked. The new amount must be lower than or equal to
-		/// the candidacy bond.
+		/// Sets minimum amount that can be staked on a candidate.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(15)]
@@ -987,8 +989,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Sets minimum amount that can be staked. The new amount must be lower than or equal to
-		/// the candidacy bond.
+		/// Stops the extra rewards.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(16)]
@@ -1028,7 +1029,7 @@ pub mod pallet {
 			T::PotId::get().into_account_truncating()
 		}
 
-		/// Get a unique, inaccessible account ID from the `PotId`.
+		/// Get a unique, inaccessible account ID from the `ExtraRewardPotId`.
 		pub fn extra_reward_account_id() -> T::AccountId {
 			T::ExtraRewardPotId::get().into_account_truncating()
 		}
@@ -1060,7 +1061,7 @@ pub mod pallet {
 		/// Registers a given account as candidate.
 		///
 		/// The account has to reserve the candidacy bond. If the account was previously a candidate
-		/// the retained stake will be reincluded.
+		/// the retained stake will be re-included.
 		///
 		/// Returns the registered candidate.
 		pub fn do_register_as_candidate(
@@ -1186,7 +1187,7 @@ pub mod pallet {
 			Ok(final_position)
 		}
 
-		/// Relocate a candidate after modifying its stake.
+		/// Relocate a candidate after modifying its stake, sorting update.
 		///
 		/// Returns the final position of the candidate.
 		fn reassign_candidate_position(position: usize) -> Result<usize, DispatchError> {
@@ -1215,11 +1216,8 @@ pub mod pallet {
 
 		/// Unstakes all funds deposited in a given `candidate`.
 		///
-		/// If the target is not a candidate or if the operation does not carry a penalty the deposit
+		/// If the target is not a candidate or if the operation does not carry a delay, the deposit
 		/// is immediately returned. Otherwise, a delay is applied.
-		///
-		/// If the candidate reduces its stake below the [`CandidacyBond`] it will be kicked when
-		/// the session ends.
 		///
 		/// Returns the amount unstaked and the number of unstaking requests the user originally had.
 		fn do_unstake(
@@ -1291,7 +1289,7 @@ pub mod pallet {
 
 		/// Removes a candidate, identified by its index, if it exists and refunds the stake.
 		///
-		/// Returns the candidate info before its removal.
+		/// Returns the candidate info.
 		fn try_remove_candidate_at_position(
 			idx: usize,
 			remove_last_authored: bool,
@@ -1343,7 +1341,7 @@ pub mod pallet {
 
 		/// Removes a candidate, identified by its account, if it exists and refunds the stake.
 		///
-		/// Returns the candidate info before its removal.
+		/// Returns the candidate info.
 		fn try_remove_candidate_from_account(
 			who: &T::AccountId,
 			remove_last_authored: bool,
@@ -1353,12 +1351,12 @@ pub mod pallet {
 			Self::try_remove_candidate_at_position(idx, remove_last_authored, has_penalty)
 		}
 
-		/// Distributes the rewards associated for a given collator, obtained during the previous session.
+		/// Distributes the rewards associated with a given collator, obtained during the previous session.
 		/// This includes specific rewards for the collator plus rewards for the stakers.
 		///
 		/// The collator must be a candidate in order to receive the rewards.
 		///
-		/// Returns the amount of rewarded stakers.
+		/// Returns the number of rewarded stakers.
 		fn do_reward_collator(
 			collator: &T::AccountId,
 			blocks: u32,
@@ -1455,8 +1453,8 @@ pub mod pallet {
 			collators
 		}
 
-		/// Kicks out candidates that did not produce a block in the kick threshold and refunds
-		/// all their stake.
+		/// Kicks out candidates that did not produce a block in the kick threshold, and refunds
+		/// the stakers. The candidate is refunded after a delay.
 		///
 		/// Return value is the number of candidates left in the list.
 		pub fn kick_stale_candidates() -> u32 {
@@ -1606,7 +1604,7 @@ pub mod pallet {
 		}
 	}
 
-	/// Play the role of the session manager.
+	/// Impl of the session manager.
 	impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
 		fn new_session(index: SessionIndex) -> Option<Vec<T::AccountId>> {
 			log::info!(
