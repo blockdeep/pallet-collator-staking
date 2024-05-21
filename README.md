@@ -18,6 +18,7 @@ This pallet is compatible with [polkadot version 1.11.0](https://github.com/pari
 This pallet maintains two separate lists of accounts subject to produce blocks:
 
 * `Invulnerables`: accounts that are always selected to become collators. They can only be removed by the pallet's authority.
+**Invulnerables do not receive staking rewards, yet blocks produced by them count for rewards**.
 * `Candidates`: accounts that compete to be part of the collator set by getting enough delegated stake.
 
 ### Rewards
@@ -25,7 +26,7 @@ The main idea is that candidates are incentivized to compete to become collators
 These rewards are composed of:
 
 * An optional per-block flat amount coming from a different pot (for example, Treasury).
-* Fees and tips collected during all blocks produced during the session.
+* Fees and tips collected during all blocks produced in the current session.
 
 Bear in mind that rewards are generated out of existing funds on the blockchain, and **by no means an inflationary mechanism is utilized**.
 
@@ -506,9 +507,7 @@ impl pallet_collator_staking::Config for Runtime {
 Add the pallet to the `construct_runtime` macro call:
 ```rust
 construct_runtime!(
-    pub enum Runtime where
-        // --snip--
-    {
+    pub struct Runtime {
         // --snip---
         CollatorStaking: pallet_collator_staking,
         // --snip---
@@ -529,5 +528,22 @@ mod benches {
         [pallet_collator_staking, CollatorStaking]
         // --snip---
    );
+}
+```
+
+Register the pallet as a handler in `pallet-authorship` to receive notifications for block production and authorship.
+```rust
+impl pallet_authorship::Config for Runtime {
+    // --snip--
+	type EventHandler = (CollatorStaking,);
+}
+```
+
+Set the pallet as `pallet-session`'s manager:
+```rust
+impl pallet_session::Config for Runtime {
+	// --snip--
+    type SessionManager = CollatorStaking;
+    // --snip--
 }
 ```
