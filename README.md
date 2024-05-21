@@ -64,6 +64,7 @@ This pallet uses the following hooks:
 | `UpdateOrigin`           | Origin that can dictate updating parameters of this pallet.                                          |
 | `PotId`                  | Account Identifier from which the internal pot is generated.                                         |
 | `ExtraRewardPotId`       | Account Identifier from which the extra reward pot is generated.                                     |
+| `ExtraRewardReceiver`    | Account that will receive all funds in the extra reward pot when those are stopped.                  |
 | `MinEligibleCollators`   | Minimum number eligible collators including Invulnerables.                                           |
 | `MaxInvulnerables`       | Maximum number of invulnerables.                                                                     |
 | `KickThreshold`          | Candidates will be removed from active collator set, if block is not produced within this threshold. |
