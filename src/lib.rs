@@ -120,7 +120,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		// Collator will be  removed from active collator set, if block is not produced within this threshold.
+		/// Candidates will be  removed from active collator set, if block is not produced within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
@@ -436,8 +436,6 @@ pub mod pallet {
 		CollatorNotRegistered,
 		/// Could not insert in the candidate list.
 		InsertToCandidateListFailed,
-		/// Deposit amount is too low to take the target's slot in the candidate list.
-		InsufficientDeposit,
 		/// Amount not sufficient to be staked.
 		InsufficientStake,
 		/// DesiredCandidates is out of bounds.
@@ -632,10 +630,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Set the candidacy bond amount.
-		///
-		/// If the candidacy bond is increased by this call, all current candidates which have a
-		/// deposit lower than the new bond will be kicked once the current session ends.
+		/// Set the candidacy bond amount, which represents the required amount to reserve for an
+		/// account to become a candidate. The candidacy bond does not count as stake.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(2)]
@@ -701,7 +697,7 @@ pub mod pallet {
 		}
 
 		/// Add a new account `who` to the list of `Invulnerables` collators. `who` must have
-		/// registered session keys. If `who` is a candidate, they will be removed.
+		/// registered session keys. If `who` is a candidate, it will be removed.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(5)]
@@ -779,12 +775,13 @@ pub mod pallet {
 		}
 
 		/// The caller `origin` replaces a candidate `target` in the collator candidate list by
-		/// reserving `deposit`. The amount `deposit` reserved by the caller must be greater than
-		/// the existing bond of the target it is trying to replace.
+		/// reserving the [`CandidacyBond`] and adding stake to itself. The stake added by the caller
+		/// must be greater than the existing stake of the target it is trying to replace.
 		///
 		/// This call will fail if the caller is already a collator candidate or invulnerable, the
 		/// caller does not have registered session keys, the target is not a collator candidate,
-		/// and/or the `deposit` amount cannot be reserved.
+		/// the list of candidates is not full,
+		/// and/or the candidacy bond or stake cannot be reserved.
 		#[pallet::call_index(7)]
 		#[pallet::weight(T::WeightInfo::take_candidate_slot())]
 		pub fn take_candidate_slot(
@@ -810,7 +807,7 @@ pub mod pallet {
 
 			// Remove old candidate
 			let target_info = Self::try_remove_candidate_from_account(&target, true, false)?;
-			ensure!(stake > target_info.stake, Error::<T>::InsufficientDeposit);
+			ensure!(stake > target_info.stake, Error::<T>::InsufficientStake);
 
 			// Register the new candidate
 			let candidate = Self::do_register_as_candidate(&who)?;
@@ -1115,25 +1112,26 @@ pub mod pallet {
 		pub fn do_claim(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut claimed: BalanceOf<T> = 0u32.into();
 			let mut pos = 0;
-			UnstakingRequests::<T>::try_mutate(who, |requests| {
-				let curr_block = Self::current_block_number();
-				for request in requests.iter() {
-					if request.block > curr_block {
-						break;
+			UnstakingRequests::<T>::mutate_exists(who, |maybe_requests| {
+				if let Some(requests) = maybe_requests {
+					let curr_block = Self::current_block_number();
+					for request in requests.iter() {
+						if request.block > curr_block {
+							break;
+						}
+						pos += 1;
+						claimed.saturating_accrue(request.amount);
 					}
-					pos += 1;
-					T::Currency::release(&HoldReason::Staking.into(), who, request.amount, Exact)?;
-					claimed.saturating_accrue(request.amount);
+					requests.drain(..pos);
+					return if requests.is_empty() { None } else { Some(()) };
 				}
-				requests.drain(..pos);
-				if !claimed.is_zero() {
-					Self::deposit_event(Event::StakeClaimed {
-						staker: who.clone(),
-						amount: claimed,
-					});
-				}
-				Ok(pos as u32)
-			})
+				None
+			});
+			if !claimed.is_zero() {
+				T::Currency::release(&HoldReason::Staking.into(), who, claimed, Exact)?;
+				Self::deposit_event(Event::StakeClaimed { staker: who.clone(), amount: claimed });
+			}
+			Ok(pos as u32)
 		}
 
 		/// Adds stake into a given candidate by providing its position in [`CandidateList`].
