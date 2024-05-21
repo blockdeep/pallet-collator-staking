@@ -798,7 +798,7 @@ fn cannot_take_candidate_slot_if_insufficient_deposit() {
 		assert_eq!(Balances::balance(&23), 100);
 		assert_noop!(
 			CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(23), 5u64.into(), 3),
-			Error::<Test>::InsufficientDeposit,
+			Error::<Test>::InsufficientStake,
 		);
 
 		assert_eq!(Balances::balance(&3), 30);
@@ -826,7 +826,7 @@ fn cannot_take_candidate_slot_if_deposit_less_than_target() {
 
 		assert_noop!(
 			CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(23), 20u64.into(), 3),
-			Error::<Test>::InsufficientDeposit,
+			Error::<Test>::InsufficientStake,
 		);
 
 		assert_eq!(Balances::balance(&3), 30);
