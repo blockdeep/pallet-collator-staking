@@ -1958,7 +1958,10 @@ fn set_extra_reward() {
 
 		// Revert the changes
 		assert_ok!(CollatorStaking::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get()),));
-		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardRemoved {}));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardRemoved {
+			amount_left: 0,
+			receiver: Some(40),
+		}));
 		assert_eq!(ExtraReward::<Test>::get(), 0);
 	});
 }
@@ -2327,7 +2330,10 @@ fn stop_extra_reward() {
 		assert_ok!(CollatorStaking::set_extra_reward(RuntimeOrigin::signed(RootAccount::get()), 2));
 		assert_ok!(CollatorStaking::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get())));
 
-		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardRemoved {}));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::ExtraRewardRemoved {
+			amount_left: 100,
+			receiver: Some(40),
+		}));
 		assert_eq!(ExtraReward::<Test>::get(), 0);
 	});
 }

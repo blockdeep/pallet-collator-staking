@@ -14,6 +14,7 @@
 use core::marker::PhantomData;
 use frame_support::traits::TypedGet;
 pub use pallet::*;
+use sp_runtime::traits::Get;
 
 #[cfg(test)]
 mod mock;
@@ -26,6 +27,14 @@ mod benchmarking;
 pub mod weights;
 
 const LOG_TARGET: &str = "runtime::collator-staking";
+
+/// This will keep the funds in the extra reward pot when rewards are stopped.
+pub struct ExtraRewardNoAction<T>(PhantomData<T>);
+impl<T: frame_system::Config> Get<Option<T::AccountId>> for ExtraRewardNoAction<T> {
+	fn get() -> Option<T::AccountId> {
+		None
+	}
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -103,6 +112,9 @@ pub mod pallet {
 		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called;
 		/// and this pot should be funded using [`top_up_extra_rewards`] extrinsic.
 		type ExtraRewardPotId: Get<PalletId>;
+
+		/// Determines what to do with funds in the extra rewards pot when stopping these rewards.
+		type ExtraRewardReceiver: Get<Option<Self::AccountId>>;
 
 		/// Maximum number of candidates that we should have.
 		///
@@ -405,7 +417,7 @@ pub mod pallet {
 		/// The extra reward was set.
 		ExtraRewardSet { amount: BalanceOf<T> },
 		/// The extra reward was removed.
-		ExtraRewardRemoved {},
+		ExtraRewardRemoved { amount_left: BalanceOf<T>, receiver: Option<T::AccountId> },
 		/// The minimum amount to stake was changed.
 		NewMinStake { min_stake: BalanceOf<T> },
 		/// A session just ended.
@@ -998,7 +1010,21 @@ pub mod pallet {
 			ensure!(!extra_reward.is_zero(), Error::<T>::ExtraRewardAlreadyDisabled);
 
 			ExtraReward::<T>::kill();
-			Self::deposit_event(Event::ExtraRewardRemoved {});
+
+			let pot = Self::extra_reward_account_id();
+			let balance = T::Currency::balance(&pot);
+			let receiver = T::ExtraRewardReceiver::get();
+			if !balance.is_zero() {
+				if let Some(ref receiver) = receiver {
+					if let Err(error) = T::Currency::transfer(&pot, &receiver, balance, Expendable)
+					{
+						// We should not cancel the operation if we cannot transfer funds from the pot,
+						// as it is more important to stop the rewards.
+						log::warn!("Failure transferring extra reward pot remaining balance to the destination account {:?}: {:?}", receiver, error);
+					}
+				}
+			}
+			Self::deposit_event(Event::ExtraRewardRemoved { amount_left: balance, receiver });
 			Ok(())
 		}
 

@@ -196,6 +196,13 @@ impl<T> sp_runtime::traits::Convert<AccountId, Option<AccountId>> for IdentityCo
 	}
 }
 
+pub struct SendFundsToAccount40;
+impl Get<Option<AccountId>> for SendFundsToAccount40 {
+	fn get() -> Option<AccountId> {
+		Some(40)
+	}
+}
+
 impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
@@ -203,6 +210,7 @@ impl Config for Test {
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
 	type ExtraRewardPotId = ExtraRewardPotId;
+	type ExtraRewardReceiver = SendFundsToAccount40;
 	type MaxCandidates = ConstU32<20>;
 	type MinEligibleCollators = ConstU32<1>;
 	type MaxInvulnerables = ConstU32<20>;
