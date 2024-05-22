@@ -48,14 +48,14 @@ When a user or candidate wishes to unstake, there is a delay: the staker will ha
 
 Users can also select the percentage of rewards that will be auto-compounded. If the selected percentage is greater than zero, part of the rewards will be re-invested as stake in the collator when receiving rewards per block.
 
-## Hooks
+### Hooks
 
 This pallet uses the following hooks:
 
 * `on_initialize`: Rewards distribution happens in on_initialize. After the session starts one collator per block will be rewarded, along with its stakers. This should be considered when setting max stakers per collator to not consume too much block weight when distributing rewards.
 * `on_idle`: Return of funds to stakers when a candidate leaves. This is a best-effort process, based on whether the block has sufficient unused space left.
 
-### Configuration
+### Runtime Configuration
 
 | Parameter                | Description                                                                                          |
 |--------------------------|------------------------------------------------------------------------------------------------------|
@@ -94,7 +94,7 @@ This pallet is coupled with [pallet-session](https://github.com/paritytech/polka
 
 This pallet is dependent on [pallet-authorship](https://github.com/paritytech/polkadot-sdk/tree/master/substrate/frame/authorship) by subscribing to block authorship so that it can assign rewards to collators and their stakers accordingly.
 
-## Compatibility
+### Compatibility
 
 This pallet is compatible with [polkadot version 1.11.0](https://github.com/paritytech/polkadot-sdk/releases/tag/polkadot-v1.11.0) or higher.
 
