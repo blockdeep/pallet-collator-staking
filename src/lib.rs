@@ -12,9 +12,12 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::marker::PhantomData;
+
+use codec::Codec;
 use frame_support::traits::TypedGet;
-pub use pallet::*;
 use sp_runtime::traits::Get;
+
+pub use pallet::*;
 
 #[cfg(test)]
 mod mock;
@@ -38,8 +41,6 @@ impl<T: frame_system::Config> Get<Option<T::AccountId>> for ExtraRewardNoAction<
 
 #[frame_support::pallet]
 pub mod pallet {
-	use super::LOG_TARGET;
-	pub use crate::weights::WeightInfo;
 	use frame_support::{
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
@@ -61,6 +62,10 @@ pub mod pallet {
 	use sp_staking::SessionIndex;
 	use sp_std::collections::btree_map::BTreeMap;
 	use sp_std::vec::Vec;
+
+	pub use crate::weights::WeightInfo;
+
+	use super::LOG_TARGET;
 
 	/// The in-code storage version.
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -105,21 +110,25 @@ pub mod pallet {
 		/// Account Identifier from which the internal pot is generated.
 		///
 		/// To initiate rewards, an ED needs to be transferred to the pot address.
+		#[pallet::constant]
 		type PotId: Get<PalletId>;
 
 		/// Account Identifier from which the extra reward pot is generated.
 		///
 		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called;
 		/// and this pot should be funded using [`top_up_extra_rewards`] extrinsic.
+		#[pallet::constant]
 		type ExtraRewardPotId: Get<PalletId>;
 
 		/// Determines what to do with funds in the extra rewards pot when stopping these rewards.
+		#[pallet::constant]
 		type ExtraRewardReceiver: Get<Option<Self::AccountId>>;
 
 		/// Maximum number of candidates that we should have.
 		///
 		/// This does not take into account the invulnerables.
 		/// This must be more than or equal to `DesiredCandidates`.
+		#[pallet::constant]
 		type MaxCandidates: Get<u32>;
 
 		/// Minimum number eligible collators including Invulnerables.
@@ -1016,8 +1025,7 @@ pub mod pallet {
 			let receiver = T::ExtraRewardReceiver::get();
 			if !balance.is_zero() {
 				if let Some(ref receiver) = receiver {
-					if let Err(error) = T::Currency::transfer(&pot, &receiver, balance, Expendable)
-					{
+					if let Err(error) = T::Currency::transfer(&pot, receiver, balance, Expendable) {
 						// We should not cancel the operation if we cannot transfer funds from the pot,
 						// as it is more important to stop the rewards.
 						log::warn!("Failure transferring extra reward pot remaining balance to the destination account {:?}: {:?}", receiver, error);
@@ -1717,5 +1725,18 @@ where
 	type Type = <R as frame_system::Config>::AccountId;
 	fn get() -> Self::Type {
 		Pallet::<R>::account_id()
+	}
+}
+
+sp_api::decl_runtime_apis! {
+	/// This runtime api allows people to query the two pot addresses.
+	pub trait CollatorStakingApi<AccountId>
+	where AccountId: Codec
+	{
+		/// Queries the main pot account
+		fn main_pot_account() -> AccountId;
+
+		/// Queries the extra reward pot account.
+		fn extra_reward_pot_account() -> AccountId;
 	}
 }
