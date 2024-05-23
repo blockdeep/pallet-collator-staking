@@ -15,7 +15,6 @@ use core::marker::PhantomData;
 
 use codec::Codec;
 use frame_support::traits::TypedGet;
-use sp_runtime::traits::Get;
 
 pub use pallet::*;
 
@@ -30,14 +29,6 @@ mod benchmarking;
 pub mod weights;
 
 const LOG_TARGET: &str = "runtime::collator-staking";
-
-/// This will keep the funds in the extra reward pot when rewards are stopped.
-pub struct ExtraRewardNoAction<T>(PhantomData<T>);
-impl<T: frame_system::Config> Get<Option<T::AccountId>> for ExtraRewardNoAction<T> {
-	fn get() -> Option<T::AccountId> {
-		None
-	}
-}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -292,8 +283,7 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Tracks the refund of stake for stakers of kicked/left collators. Insertion and deletions
-	/// are made in a FIFO manner.
+	/// Tracks the refund of stake for stakers of kicked/left collators.
 	#[pallet::storage]
 	pub type PendingExCandidates<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
@@ -535,6 +525,7 @@ pub mod pallet {
 			if worst_case_weight.any_gt(remaining_weight) {
 				return Weight::zero();
 			}
+
 			if let Some((account, is_excandidate)) = PendingExCandidates::<T>::iter().drain().next()
 			{
 				weight.saturating_accrue(T::DbWeight::get().reads_writes(0, 1));
@@ -1411,62 +1402,65 @@ pub mod pallet {
 					return (0, 0);
 				}
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
-				let collator_info = &CandidateList::<T>::get()[pos];
 				let total_rewards = Rewards::<T>::get(session);
 				let rewards_all: BalanceOf<T> =
 					total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
 				let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 
-				// Reward collator. Note these rewards are not autocompounded.
-				if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
-					log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
-				}
+				if let Some(collator_info) = CandidateList::<T>::get().get(pos) {
+					// Reward collator. Note these rewards are not autocompounded.
+					if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
+						log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
+					}
 
-				// Again, we cannot divide by zero.
-				if collator_info.stake.is_zero() {
-					log::debug!(
-						"Candidate {:?} has no stakers. Skipping rewards for stakers...",
-						collator
-					);
-					return (0, 0);
-				}
+					// Again, we cannot divide by zero.
+					if collator_info.stake.is_zero() {
+						log::debug!(
+							"Candidate {:?} has no stakers. Skipping rewards for stakers...",
+							collator
+						);
+						return (0, 0);
+					}
 
-				// Reward stakers
-				let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
-				Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
-					total_stakers += 1;
-					let staker_reward: BalanceOf<T> =
-						Perbill::from_rational(stake, collator_info.stake) * stakers_only_rewards;
-					if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
-						log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
-					} else {
-						// AutoCompound
-						total_compound += 1;
-						let compound_percentage = AutoCompound::<T>::get(staker.clone());
-						let compound_amount = compound_percentage.mul_floor(staker_reward);
-						if !compound_amount.is_zero() {
-							// We sort at the end, when the whole stake is included.
-							if let Err(error) =
-								Self::do_stake_at_position(&staker, compound_amount, pos, false)
-							{
-								log::warn!(
-									target: LOG_TARGET,
-									"Failure autocompounding for staker {:?} to candidate {:?}: {:?}",
-									staker,
-									collator,
-									error
-								);
+					// Reward stakers
+					let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
+					Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
+						total_stakers += 1;
+						let staker_reward: BalanceOf<T> =
+							Perbill::from_rational(stake, collator_info.stake)
+								* stakers_only_rewards;
+						if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
+							log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
+						} else {
+							// AutoCompound
+							total_compound += 1;
+							let compound_percentage = AutoCompound::<T>::get(staker.clone());
+							let compound_amount = compound_percentage.mul_floor(staker_reward);
+							if !compound_amount.is_zero() {
+								// We sort at the end, when the whole stake is included.
+								if let Err(error) =
+									Self::do_stake_at_position(&staker, compound_amount, pos, false)
+								{
+									log::warn!(
+										target: LOG_TARGET,
+										"Failure autocompounding for staker {:?} to candidate {:?}: {:?}",
+										staker,
+										collator,
+										error
+									);
+								}
 							}
 						}
+					});
+					// No need to sort again if no new investments were made.
+					if !total_compound.is_zero() {
+						let _ = Self::reassign_candidate_position(pos);
 					}
-				});
-				// No need to sort again if no new investments were made.
-				if !total_compound.is_zero() {
-					let _ = Self::reassign_candidate_position(pos);
+				} else {
+					log::warn!("Collator {:?} is no longer a candidate", collator);
 				}
-			} else {
-				log::warn!("Collator {:?} is no longer a candidate", collator);
 			}
+
 			(total_stakers, total_compound)
 		}
 
@@ -1547,8 +1541,7 @@ pub mod pallet {
 		/// Returns a tuple with the number of rewards given and the number of auto compounds.
 		pub(crate) fn reward_one_collator(session: SessionIndex) -> (u32, u32) {
 			if let Some((collator, blocks)) = ProducedBlocks::<T>::drain_prefix(session).next() {
-				let (rewards, compounds) = Self::do_reward_collator(&collator, blocks, session);
-				(rewards, compounds)
+				Self::do_reward_collator(&collator, blocks, session)
 			} else {
 				(0, 0)
 			}
@@ -1576,6 +1569,7 @@ pub mod pallet {
 					}
 				})
 				.count() as u32;
+			// `MaxStakers` ensures this is a bounded operation.
 			let _ = Stake::<T>::clear_prefix(account, u32::MAX, None);
 			count
 		}
