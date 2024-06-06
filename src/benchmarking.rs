@@ -420,12 +420,12 @@ mod benchmarks {
 
 		let candidate = CandidateList::<T>::get()[0].who.clone();
 		whitelist_account!(candidate);
-		let stake_before = Stake::<T>::get(&candidate, &candidate);
+		let stake_before = Stake::<T>::get(&candidate, &candidate).stake;
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone(), amount);
 
-		assert_eq!(Stake::<T>::get(&candidate, &candidate), stake_before + amount);
+		assert_eq!(Stake::<T>::get(&candidate, &candidate).stake, stake_before + amount);
 		assert_eq!(&CandidateList::<T>::get()[(c - 1) as usize].who, &candidate);
 	}
 
@@ -464,7 +464,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone());
 
-		assert_eq!(Stake::<T>::get(&candidate, &candidate), 0u32.into());
+		assert_eq!(Stake::<T>::get(&candidate, &candidate).stake, 0u32.into());
 		assert_eq!(&CandidateList::<T>::get()[0].who, &candidate);
 	}
 
@@ -493,16 +493,16 @@ mod benchmarks {
 				amount,
 			)
 			.unwrap();
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
-			assert_eq!(Stake::<T>::get(&cand.who, &caller), amount);
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who).stake, 0u32.into());
+			assert_eq!(Stake::<T>::get(&cand.who, &caller).stake, amount);
 		});
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()));
 
 		CandidateList::<T>::get().iter().for_each(|cand| {
-			assert_eq!(Stake::<T>::get(&cand.who, &cand.who), 0u32.into());
-			assert_eq!(Stake::<T>::get(&cand.who, &caller), 0u32.into());
+			assert_eq!(Stake::<T>::get(&cand.who, &cand.who).stake, 0u32.into());
+			assert_eq!(Stake::<T>::get(&cand.who, &caller).stake, 0u32.into());
 			assert_eq!(cand.stake, 0u32.into());
 		});
 	}
@@ -694,9 +694,9 @@ mod benchmarks {
 		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
 
 		CollatorStaking::<T>::leave_intent(RawOrigin::Signed(collator.clone()).into()).unwrap();
-		assert_eq!(Stake::<T>::get(&collator, &collator), 0u32.into());
+		assert_eq!(Stake::<T>::get(&collator, &collator).stake, 0u32.into());
 		assert_eq!(Stake::<T>::iter_prefix(&collator).count(), s as usize);
-		assert!(Stake::<T>::iter_prefix(&collator).all(|(_, amount)| { amount == amount_staked }));
+		assert!(Stake::<T>::iter_prefix(&collator).all(|(_, info)| { info.stake == amount_staked }));
 
 		#[block]
 		{
@@ -704,7 +704,7 @@ mod benchmarks {
 		}
 
 		for staker in stakers {
-			assert_eq!(Stake::<T>::get(&collator, &staker), 0u32.into());
+			assert_eq!(Stake::<T>::get(&collator, &staker).stake, 0u32.into());
 		}
 	}
 
