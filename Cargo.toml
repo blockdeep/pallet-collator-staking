@@ -6,7 +6,7 @@ homepage = "https://blockdeep.io"
 license = "Apache-2.0"
 name = "pallet-collator-staking"
 repository = "https://github.com/blockdeep/pallet-collator-staking"
-version = "1.11.0"
+version = "1.12.0"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
