@@ -26,6 +26,16 @@ fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
 	assert_eq!(event, &system_event);
 }
 
+fn assert_has_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
+	let events = frame_system::Pallet::<T>::events();
+	let system_event: <T as frame_system::Config>::RuntimeEvent = generic_event.into();
+
+	assert!(
+		events.iter().any(|record| record.event == system_event),
+		"expected event {system_event:?} not found in events {events:?}"
+	);
+}
+
 fn create_funded_user<T: Config>(
 	string: &'static str,
 	n: u32,
@@ -100,6 +110,7 @@ fn min_invulnerables<T: Config>() -> u32 {
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, Mutate, MutateHold};
+	use sp_runtime::Perbill;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -636,6 +647,8 @@ mod benchmarks {
 		register_candidates::<T>(c);
 
 		let autocompound = Percent::from_parts(a as u8) * s;
+		let mut accounts = vec![];
+		let mut autocompound_accounts = vec![];
 		for n in 0..s {
 			let acc = create_funded_user::<T>("staker", n, 1000);
 			CollatorStaking::<T>::stake(
@@ -650,20 +663,67 @@ mod benchmarks {
 					Percent::from_parts(50),
 				)
 				.unwrap();
+				autocompound_accounts.push(acc.clone());
 			}
+			accounts.push(acc);
 		}
-		<CollatorStaking<T> as SessionManager<_>>::start_session(0);
+		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
 		for _ in 0..10 {
 			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
 		}
-		frame_system::Pallet::<T>::set_block_number(10u32.into());
-		T::Currency::mint_into(&CollatorStaking::<T>::account_id(), amount).unwrap();
-		<CollatorStaking<T> as SessionManager<_>>::end_session(0);
-		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
+		frame_system::Pallet::<T>::set_block_number(20u32.into());
+		let total_rewards = amount * s.into();
+		T::Currency::mint_into(
+			&CollatorStaking::<T>::account_id(),
+			total_rewards + T::Currency::minimum_balance(),
+		)
+		.unwrap();
+		<CollatorStaking<T> as SessionManager<_>>::end_session(1);
+		assert_last_event::<T>(
+			Event::<T>::SessionEnded { index: 1, rewards: total_rewards }.into(),
+		);
+		<CollatorStaking<T> as SessionManager<_>>::start_session(2);
 
 		#[block]
 		{
-			CollatorStaking::<T>::reward_one_collator(0);
+			CollatorStaking::<T>::reward_one_collator(1);
+		}
+
+		let collator_reward = CollatorRewardPercentage::<T>::get().mul_floor(total_rewards);
+		assert_has_event::<T>(
+			Event::<T>::StakingRewardReceived {
+				staker: collator.clone(),
+				amount: collator_reward,
+				session: 1,
+			}
+			.into(),
+		);
+
+		if s > 0 {
+			let stakers_reward = total_rewards - collator_reward;
+			let expected_reward =
+				Perbill::from_rational(amount, amount * s.into()).mul_floor(stakers_reward);
+			for acc in accounts {
+				assert_has_event::<T>(
+					Event::<T>::StakingRewardReceived {
+						staker: acc.clone(),
+						amount: expected_reward,
+						session: 1,
+					}
+					.into(),
+				);
+			}
+
+			for acc in autocompound_accounts {
+				assert_has_event::<T>(
+					Event::<T>::StakeAdded {
+						staker: acc.clone(),
+						candidate: collator.clone(),
+						amount: expected_reward / 2u32.into(),
+					}
+					.into(),
+				);
+			}
 		}
 	}
 
