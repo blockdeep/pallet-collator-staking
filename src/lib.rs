@@ -200,6 +200,25 @@ pub mod pallet {
 		pub amount: Balance,
 	}
 
+	/// Information about stake.
+	#[derive(
+		Default,
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
+	)]
+	pub struct StakeInfo<Balance> {
+		/// Session when the user first staked on a given candidate.
+		pub session: SessionIndex,
+		/// The amount staked.
+		pub stake: Balance,
+	}
+
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
@@ -253,7 +272,7 @@ pub mod pallet {
 		T::AccountId,
 		Blake2_128Concat,
 		T::AccountId,
-		BalanceOf<T>,
+		StakeInfo<BalanceOf<T>>,
 		ValueQuery,
 	>;
 
@@ -408,7 +427,7 @@ pub mod pallet {
 		/// A staker removed stake from a candidate
 		StakeRemoved { staker: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
-		StakingRewardReceived { staker: T::AccountId, amount: BalanceOf<T> },
+		StakingRewardReceived { staker: T::AccountId, amount: BalanceOf<T>, session: SessionIndex },
 		/// AutoCompound percentage was set.
 		AutoCompoundPercentageSet { staker: T::AccountId, percentage: Percent },
 		/// Collator reward percentage was set.
@@ -899,8 +918,8 @@ pub mod pallet {
 				.map(|(pos, c)| (c.who.clone(), pos))
 				.collect();
 			let mut operations = 0;
-			for (candidate, staker, stake) in Stake::<T>::iter() {
-				if staker == who && !stake.is_zero() {
+			for (candidate, staker, info) in Stake::<T>::iter() {
+				if staker == who && !info.stake.is_zero() {
 					let (is_candidate, maybe_position) = match candidate_map.get(&candidate) {
 						None => (false, None),
 						Some(pos) => (true, Some(*pos)),
@@ -1093,13 +1112,15 @@ pub mod pallet {
 
 			// In case the staker already had non-claimed stake we calculate it now.
 			let mut stakers = 0;
-			let already_staked: BalanceOf<T> =
-				Stake::<T>::iter_prefix_values(who).fold(Zero::zero(), |acc, s| {
-					if !s.is_zero() {
+			let already_staked: BalanceOf<T> = Stake::<T>::iter_prefix_values(who).fold(
+				Zero::zero(),
+				|acc, StakeInfo { stake, .. }| {
+					if !stake.is_zero() {
 						stakers += 1;
 					}
-					acc.saturating_add(s)
-				});
+					acc.saturating_add(stake)
+				},
+			);
 
 			// First authored block is current block plus kick threshold to handle session delay
 			let candidate = CandidateList::<T>::try_mutate(
@@ -1178,22 +1199,23 @@ pub mod pallet {
 			);
 			CandidateList::<T>::try_mutate(|candidates| -> DispatchResult {
 				let candidate = &mut candidates[position];
-				Stake::<T>::try_mutate(candidate.who.clone(), staker, |stake| -> DispatchResult {
-					let final_staker_stake = stake.saturating_add(amount);
+				Stake::<T>::try_mutate(candidate.who.clone(), staker, |info| -> DispatchResult {
+					let final_staker_stake = info.stake.saturating_add(amount);
 					ensure!(
 						final_staker_stake >= MinStake::<T>::get(),
 						Error::<T>::InsufficientStake
 					);
-					if stake.is_zero() {
+					if info.stake.is_zero() {
 						ensure!(
 							candidate.stakers < T::MaxStakers::get(),
 							Error::<T>::TooManyStakers
 						);
 						StakeCount::<T>::mutate(staker, |count| count.saturating_inc());
 						candidate.stakers.saturating_inc();
+						info.session = CurrentSession::<T>::get();
 					}
 					T::Currency::hold(&HoldReason::Staking.into(), staker, amount)?;
-					*stake = final_staker_stake;
+					info.stake = final_staker_stake;
 					candidate.stake.saturating_accrue(amount);
 
 					Self::deposit_event(Event::StakeAdded {
@@ -1250,7 +1272,7 @@ pub mod pallet {
 			maybe_position: Option<usize>,
 			sort: bool,
 		) -> Result<(BalanceOf<T>, u32), DispatchError> {
-			let stake = Stake::<T>::take(candidate, staker);
+			let stake = Stake::<T>::take(candidate, staker).stake;
 			let mut unstaking_requests = 0;
 			ensure!(!stake.is_zero(), Error::<T>::NothingToUnstake);
 
@@ -1324,7 +1346,7 @@ pub mod pallet {
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(candidate.who.clone())
 					};
-					let stake = Stake::<T>::get(&candidate.who, &candidate.who);
+					let stake = Stake::<T>::get(&candidate.who, &candidate.who).stake;
 					if !stake.is_zero() {
 						Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, false)?;
 					}
@@ -1401,15 +1423,17 @@ pub mod pallet {
 					log::warn!("Cannot reward collator {:?} for producing more blocks than rewardable ones", collator);
 					return (0, 0);
 				}
-				let collator_percentage = CollatorRewardPercentage::<T>::get();
-				let total_rewards = Rewards::<T>::get(session);
-				let rewards_all: BalanceOf<T> =
-					total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
-				let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 
 				if let Some(collator_info) = CandidateList::<T>::get().get(pos) {
+					let total_rewards = Rewards::<T>::get(session);
+					let rewards_all: BalanceOf<T> =
+						total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
+					let collator_percentage = CollatorRewardPercentage::<T>::get();
+					let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 					// Reward collator. Note these rewards are not autocompounded.
-					if let Err(error) = Self::do_reward_single(collator, collator_only_reward) {
+					if let Err(error) =
+						Self::do_reward_single(collator, collator_only_reward, session)
+					{
 						log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
 					}
 
@@ -1424,12 +1448,18 @@ pub mod pallet {
 
 					// Reward stakers
 					let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
-					Stake::<T>::iter_prefix(collator).for_each(|(staker, stake)| {
+					Stake::<T>::iter_prefix(collator).for_each(|(staker, info)| {
+						if info.session >= session {
+							// This staker joined during the session rewards are being distributed for.
+							// No rewards for the staker for this session.
+							return;
+						}
 						total_stakers += 1;
 						let staker_reward: BalanceOf<T> =
-							Perbill::from_rational(stake, collator_info.stake)
-								* stakers_only_rewards;
-						if let Err(error) = Self::do_reward_single(&staker, staker_reward) {
+							Perbill::from_rational(info.stake, collator_info.stake)
+								.mul_floor(stakers_only_rewards);
+						if let Err(error) = Self::do_reward_single(&staker, staker_reward, session)
+						{
 							log::warn!(target: LOG_TARGET, "Failure rewarding staker {:?}: {:?}", staker, error);
 						} else {
 							// AutoCompound
@@ -1464,11 +1494,16 @@ pub mod pallet {
 			(total_stakers, total_compound)
 		}
 
-		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
+		fn do_reward_single(
+			who: &T::AccountId,
+			reward: BalanceOf<T>,
+			session: SessionIndex,
+		) -> DispatchResult {
 			T::Currency::transfer(&Self::account_id(), who, reward, Preserve)?;
 			Self::deposit_event(Event::StakingRewardReceived {
 				staker: who.clone(),
 				amount: reward,
+				session,
 			});
 			Ok(())
 		}
@@ -1552,8 +1587,8 @@ pub mod pallet {
 		/// Returns the amount of refunded stakers.
 		pub(crate) fn refund_stakers(account: &T::AccountId) -> u32 {
 			let count = Stake::<T>::iter_prefix(account)
-				.filter_map(|(staker, amount)| {
-					if !amount.is_zero() {
+				.filter_map(|(staker, StakeInfo { stake, .. })| {
+					if !stake.is_zero() {
 						if let Err(e) = Self::do_unstake(&staker, account, false, None, false) {
 							// This should never occur.
 							log::warn!(
