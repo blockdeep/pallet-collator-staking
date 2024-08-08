@@ -264,7 +264,7 @@ fn remove_invulnerable_works() {
 }
 
 #[test]
-fn candidate_to_invulnerable_works() {
+fn candidate_to_invulnerable_should_fail() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 		assert_eq!(DesiredCandidates::<Test>::get(), 2);
@@ -287,35 +287,10 @@ fn candidate_to_invulnerable_works() {
 		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 10));
 		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
 
-		assert_ok!(CollatorStaking::add_invulnerable(RuntimeOrigin::signed(RootAccount::get()), 3));
-		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::CandidateRemoved {
-			account_id: 3,
-		}));
-		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::InvulnerableAdded {
-			account_id: 3,
-		}));
-		assert!(Invulnerables::<Test>::get().to_vec().contains(&3));
-		assert_eq!(Stake::<Test>::get(3, 3), StakeInfo { stake: 0, session: 0 });
-		assert_eq!(Balances::balance(&3), 100);
-		assert_eq!(CandidateList::<Test>::get().iter().count(), 1);
-
-		assert_ok!(CollatorStaking::add_invulnerable(RuntimeOrigin::signed(RootAccount::get()), 4));
-		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::CandidateRemoved {
-			account_id: 4,
-		}));
-		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::InvulnerableAdded {
-			account_id: 4,
-		}));
-		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
-			staker: 4,
-			candidate: 4,
-			amount: 10,
-		}));
-		assert!(Invulnerables::<Test>::get().to_vec().contains(&4));
-		assert_eq!(Stake::<Test>::get(4, 4), StakeInfo { stake: 0, session: 0 });
-		assert_eq!(Balances::balance(&4), 100);
-
-		assert_eq!(CandidateList::<Test>::get().iter().count(), 0);
+		assert_noop!(
+			CollatorStaking::add_invulnerable(RuntimeOrigin::signed(RootAccount::get()), 3),
+			Error::<Test>::AlreadyCandidate
+		);
 	});
 }
 
@@ -860,11 +835,7 @@ fn take_candidate_slot_works() {
 		register_keys(23);
 
 		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
-		assert_ok!(CollatorStaking::take_candidate_slot(
-			RuntimeOrigin::signed(23),
-			50u64,
-			4
-		));
+		assert_ok!(CollatorStaking::take_candidate_slot(RuntimeOrigin::signed(23), 50u64, 4));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
 			staker: 23,
 			candidate: 23,
@@ -1310,7 +1281,7 @@ fn should_not_kick_mechanism_too_few() {
 }
 
 #[test]
-fn should_kick_invulnerables_from_candidates_on_session_change() {
+fn should_not_allow_to_set_invulnerables_if_already_candidates() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
@@ -1318,30 +1289,13 @@ fn should_kick_invulnerables_from_candidates_on_session_change() {
 		register_candidates(3..=4);
 		assert_eq!(Balances::balance(&3), 90);
 		assert_eq!(Balances::balance(&4), 90);
-		assert_ok!(CollatorStaking::set_invulnerables(
-			RuntimeOrigin::signed(RootAccount::get()),
-			vec![1, 2, 3]
-		));
-
-		// tuple of (id, deposit).
-		let collator_3 = CandidateInfo { who: 3, stake: 0, stakers: 0, deposit: 10 };
-		let collator_4 = CandidateInfo { who: 4, stake: 0, stakers: 0, deposit: 10 };
-
-		let actual_candidates = CandidateList::<Test>::get().iter().cloned().collect::<Vec<_>>();
-		assert_eq!(actual_candidates, vec![collator_4.clone(), collator_3]);
-		assert_eq!(Invulnerables::<Test>::get(), vec![1, 2, 3]);
-
-		// session change
-		initialize_to_block(10);
-		// 3 is removed from candidates
-		assert_eq!(
-			CandidateList::<Test>::get().iter().cloned().collect::<Vec<_>>(),
-			vec![collator_4]
+		assert_noop!(
+			CollatorStaking::set_invulnerables(
+				RuntimeOrigin::signed(RootAccount::get()),
+				vec![1, 2, 3]
+			),
+			Error::<Test>::AlreadyCandidate
 		);
-		// but not from invulnerables
-		assert_eq!(Invulnerables::<Test>::get(), vec![1, 2, 3]);
-		// and it got its deposit back
-		assert_eq!(Balances::balance(&3), 100);
 	});
 }
 

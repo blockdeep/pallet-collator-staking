@@ -616,6 +616,8 @@ pub mod pallet {
 
 			// check if the invulnerables have associated validator keys before they are set
 			for account_id in &new {
+				// If at least one of the invulnerables is already a collator abort the operation.
+				ensure!(Self::get_candidate(&account_id).is_err(), Error::<T>::AlreadyCandidate);
 				// don't let one unprepared collator ruin things for everyone.
 				let validator_key = T::CollatorIdOf::convert(account_id.clone());
 				match validator_key {
@@ -761,6 +763,9 @@ pub mod pallet {
 				Error::<T>::CollatorNotRegistered
 			);
 
+			// If the account is already a candidate this operation cannot be performed.
+			ensure!(Self::get_candidate(&who).is_err(), Error::<T>::AlreadyCandidate);
+
 			Invulnerables::<T>::try_mutate(|invulnerables| -> DispatchResult {
 				match invulnerables.binary_search(&who) {
 					Ok(_) => return Err(Error::<T>::AlreadyInvulnerable)?,
@@ -770,10 +775,6 @@ pub mod pallet {
 				}
 				Ok(())
 			})?;
-
-			// Error just means `who` wasn't a candidate, which is the state we want anyway. Don't
-			// remove their last authored block, as they are still a collator.
-			let _ = Self::try_remove_candidate_from_account(&who, false, false);
 
 			Self::deposit_event(Event::InvulnerableAdded { account_id: who });
 
@@ -823,7 +824,7 @@ pub mod pallet {
 		/// This call will fail if the caller is already a collator candidate or invulnerable, the
 		/// caller does not have registered session keys, the target is not a collator candidate,
 		/// the list of candidates is not full,
-		/// and/or the candidacy bond or stake cannot be reserved.
+		/// the candidacy bond cannot be reserved or stake cannot be frozen.
 		#[pallet::call_index(7)]
 		#[pallet::weight(T::WeightInfo::take_candidate_slot())]
 		pub fn take_candidate_slot(
@@ -1581,17 +1582,9 @@ pub mod pallet {
                 .filter_map(|candidate| {
                     let last_block = LastAuthoredBlock::<T>::get(candidate.who.clone());
                     let since_last = now.saturating_sub(last_block);
-
-                    let is_invulnerable = Self::is_invulnerable(&candidate.who);
                     let is_lazy = since_last >= kick_threshold;
 
-                    if is_invulnerable {
-                        // If they are invulnerable there is no reason for them to be in `CandidateList` also.
-                        // We don't even care about the min collators here, because an Account
-                        // should not be a collator twice.
-                        let _ = Self::try_remove_candidate_from_account(&candidate.who, false, false);
-                        None
-                    } else if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit.saturating_add(candidate.stake) >= candidacy_bond) {
+                    if Self::eligible_collators() <= min_collators || (!is_lazy && candidate.deposit.saturating_add(candidate.stake) >= candidacy_bond) {
                         // Either this is a good collator (not lazy) or we are at the minimum
                         // that the system needs. They get to stay, as long as they have sufficient deposit plus stake.
                         Some(candidate)

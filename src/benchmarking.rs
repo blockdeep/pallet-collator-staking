@@ -108,7 +108,7 @@ fn min_invulnerables<T: Config>() -> u32 {
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
 	use super::*;
-	use frame_support::traits::fungible::{Inspect, Mutate, MutateHold};
+	use frame_support::traits::fungible::{Inspect, Mutate};
 	use sp_runtime::Perbill;
 
 	#[benchmark]
@@ -135,7 +135,6 @@ mod benchmarks {
 	#[benchmark]
 	fn add_invulnerable(
 		b: Linear<1, { T::MaxInvulnerables::get() - 1 }>,
-		c: Linear<1, { T::MaxCandidates::get() - 1 }>,
 	) -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
@@ -143,38 +142,11 @@ mod benchmarks {
 		// need to fill up candidates
 		CandidacyBond::<T>::put(T::Currency::minimum_balance());
 		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(c);
-		// get accounts and keys for the `c` candidates
-		let mut candidates = (0..c).map(|cc| validator::<T>(cc)).collect::<Vec<_>>();
+		DesiredCandidates::<T>::put(0);
 		// add one more to the list. should not be in `b` (invulnerables) because it's the account
 		// we will _add_ to invulnerables. we want it to be in `candidates` because we need the
 		// weight associated with removing it.
-		let (new_invulnerable, new_invulnerable_keys) = validator::<T>(b.max(c) + 1);
-		candidates.push((new_invulnerable.clone(), new_invulnerable_keys));
-		// set their keys ...
-		for (who, keys) in candidates.clone() {
-			pallet_session::Pallet::<T>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new())?;
-		}
-		// ... and register them.
-		for (who, _) in candidates.iter() {
-			let deposit = CandidacyBond::<T>::get();
-			T::Currency::mint_into(who, deposit * 1000_u32.into())?;
-			CandidateList::<T>::try_mutate(|list| {
-				list.try_push(CandidateInfo {
-					who: who.clone(),
-					stake: 0u32.into(),
-					deposit,
-					stakers: 1,
-				})
-				.unwrap();
-				Ok::<(), BenchmarkError>(())
-			})?;
-			T::Currency::hold(&HoldReason::CandidacyBond.into(), who, deposit)?;
-			LastAuthoredBlock::<T>::insert(
-				who.clone(),
-				frame_system::Pallet::<T>::block_number() + T::KickThreshold::get(),
-			);
-		}
+		let (new_invulnerable, _) = validator::<T>(b + 1);
 
 		// now we need to fill up invulnerables
 		let mut invulnerables = register_validators::<T>(b);
