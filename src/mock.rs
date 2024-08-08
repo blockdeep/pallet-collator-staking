@@ -77,17 +77,17 @@ parameter_types! {
 impl pallet_balances::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeHoldReason = RuntimeHoldReason;
-	type RuntimeFreezeReason = RuntimeFreezeReason;
+	type RuntimeFreezeReason = ();
 	type WeightInfo = ();
 	type Balance = u64;
 	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
 	type ReserveIdentifier = [u8; 8];
-	type FreezeIdentifier = ();
+	type FreezeIdentifier = RuntimeFreezeReason;
 	type MaxLocks = ();
 	type MaxReserves = MaxReserves;
-	type MaxFreezes = ConstU32<0>;
+	type MaxFreezes = ConstU32<10>;
 }
 
 pub struct Author4;
@@ -208,6 +208,7 @@ impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
 	type RuntimeHoldReason = RuntimeHoldReason;
+	type RuntimeFreezeReason = RuntimeFreezeReason;
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
 	type ExtraRewardPotId = ExtraRewardPotId;

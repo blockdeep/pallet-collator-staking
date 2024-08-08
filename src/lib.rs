@@ -36,7 +36,8 @@ pub mod pallet {
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
 		traits::{
-			fungible::{Inspect, Mutate, MutateHold},
+			fungible::{Inspect, InspectFreeze, Mutate, MutateFreeze, MutateHold},
+			tokens::Fortitude::Polite,
 			tokens::Precision::Exact,
 			tokens::Preservation::{Expendable, Preserve},
 			EnsureOrigin, ValidatorRegistration,
@@ -89,11 +90,16 @@ pub mod pallet {
 
 		/// The currency mechanism.
 		type Currency: Inspect<Self::AccountId>
+			+ InspectFreeze<Self::AccountId>
 			+ Mutate<Self::AccountId>
-			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>;
+			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
+			+ MutateFreeze<Self::AccountId, Id = Self::RuntimeFreezeReason>;
 
 		/// Overarching hold reason.
 		type RuntimeHoldReason: From<HoldReason>;
+
+		/// Overarching hold reason.
+		type RuntimeFreezeReason: From<FreezeReason>;
 
 		/// Origin that can dictate updating parameters of this pallet.
 		type UpdateOrigin: EnsureOrigin<Self::RuntimeOrigin>;
@@ -170,7 +176,12 @@ pub mod pallet {
 	/// A reason for the pallet placing a hold on funds.
 	#[pallet::composite_enum]
 	pub enum HoldReason {
-		/// Funds are held for candidacy bonds and staking.
+		CandidacyBond,
+	}
+
+	/// A reason for the pallet to freeze funds.
+	#[pallet::composite_enum]
+	pub enum FreezeReason {
 		Staking,
 	}
 
@@ -194,9 +205,9 @@ pub mod pallet {
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub struct UnstakeRequest<BlockNumber, Balance> {
-		/// Block when stake can be unreserved.
+		/// Block when stake can be unlocked.
 		pub block: BlockNumber,
-		/// Stake to be unreserved.
+		/// Stake to be unlocked.
 		pub amount: Balance,
 	}
 
@@ -1031,7 +1042,7 @@ pub mod pallet {
 			ExtraReward::<T>::kill();
 
 			let pot = Self::extra_reward_account_id();
-			let balance = T::Currency::balance(&pot);
+			let balance = T::Currency::reducible_balance(&pot, Expendable, Polite);
 			let receiver = T::ExtraRewardReceiver::get();
 			if !balance.is_zero() {
 				if let Some(ref receiver) = receiver {
@@ -1139,7 +1150,7 @@ pub mod pallet {
 						deposit: bond,
 						stakers,
 					};
-					T::Currency::hold(&HoldReason::Staking.into(), who, bond)?;
+					T::Currency::hold(&HoldReason::CandidacyBond.into(), who, bond)?;
 					candidates
 						.try_insert(0, info.clone())
 						.map_err(|_| Error::<T>::InsertToCandidateListFailed)?;
@@ -1174,7 +1185,12 @@ pub mod pallet {
 				None
 			});
 			if !claimed.is_zero() {
-				T::Currency::release(&HoldReason::Staking.into(), who, claimed, Exact)?;
+				let frozen_balance = Self::get_balance_frozen(who);
+				T::Currency::set_freeze(
+					&FreezeReason::Staking.into(),
+					who,
+					frozen_balance.saturating_sub(claimed),
+				)?;
 				Self::deposit_event(Event::StakeClaimed { staker: who.clone(), amount: claimed });
 			}
 			Ok(pos as u32)
@@ -1214,7 +1230,12 @@ pub mod pallet {
 						candidate.stakers.saturating_inc();
 						info.session = CurrentSession::<T>::get();
 					}
-					T::Currency::hold(&HoldReason::Staking.into(), staker, amount)?;
+					let frozen_balance = Self::get_balance_frozen(staker);
+					T::Currency::set_freeze(
+						&FreezeReason::Staking.into(),
+						staker,
+						frozen_balance.saturating_add(amount),
+					)?;
 					info.stake = final_staker_stake;
 					candidate.stake.saturating_accrue(amount);
 
@@ -1277,16 +1298,16 @@ pub mod pallet {
 			ensure!(!stake.is_zero(), Error::<T>::NothingToUnstake);
 
 			if !has_penalty {
-				T::Currency::release(&HoldReason::Staking.into(), staker, stake, Exact)?;
+				let frozen_balance = Self::get_balance_frozen(staker);
+				T::Currency::set_freeze(
+					&FreezeReason::Staking.into(),
+					staker,
+					frozen_balance.saturating_sub(stake),
+				)?;
 			} else {
-				let delay = if staker == candidate {
-					T::CollatorUnstakingDelay::get()
-				} else {
-					T::UserUnstakingDelay::get()
-				};
 				UnstakingRequests::<T>::try_mutate(staker, |requests| -> DispatchResult {
 					unstaking_requests = requests.len();
-					let block = Self::current_block_number() + delay;
+					let block = Self::current_block_number() + T::UserUnstakingDelay::get();
 					let pos = requests
 						.binary_search_by_key(&block, |r| r.block)
 						.unwrap_or_else(|pos| pos);
@@ -1351,8 +1372,22 @@ pub mod pallet {
 						Self::do_unstake(&candidate.who, &candidate.who, has_penalty, None, false)?;
 					}
 
-					// Return the bond too.
+					// We firstly optimistically release the candidacy bond.
+					T::Currency::release(
+						&HoldReason::CandidacyBond.into(),
+						&candidate.who,
+						candidate.deposit,
+						Exact,
+					)?;
+					// If it has a penalty then we lock the funds we just unreserved and add them
+					// to the unstaking queue.
 					if has_penalty {
+						let frozen_balance = Self::get_balance_frozen(&candidate.who);
+						T::Currency::set_freeze(
+							&FreezeReason::Staking.into(),
+							&candidate.who,
+							frozen_balance.saturating_add(candidate.deposit),
+						)?;
 						UnstakingRequests::<T>::try_mutate(
 							&candidate.who,
 							|requests| -> DispatchResult {
@@ -1365,13 +1400,6 @@ pub mod pallet {
 									.map_err(|_| Error::<T>::TooManyUnstakingRequests)?;
 								Ok(())
 							},
-						)?;
-					} else {
-						T::Currency::release(
-							&HoldReason::Staking.into(),
-							&candidate.who,
-							candidate.deposit,
-							Exact,
 						)?;
 					}
 
@@ -1499,18 +1527,25 @@ pub mod pallet {
 			reward: BalanceOf<T>,
 			session: SessionIndex,
 		) -> DispatchResult {
-			T::Currency::transfer(&Self::account_id(), who, reward, Preserve)?;
-			Self::deposit_event(Event::StakingRewardReceived {
-				staker: who.clone(),
-				amount: reward,
-				session,
-			});
+			if !reward.is_zero() {
+				T::Currency::transfer(&Self::account_id(), who, reward, Preserve)?;
+				Self::deposit_event(Event::StakingRewardReceived {
+					staker: who.clone(),
+					amount: reward,
+					session,
+				});
+			}
 			Ok(())
 		}
 
 		/// Gets the current block number
 		pub fn current_block_number() -> BlockNumberFor<T> {
 			frame_system::Pallet::<T>::block_number()
+		}
+
+		/// Gets the balance frozen by this pallet.
+		pub fn get_balance_frozen(account: &T::AccountId) -> BalanceOf<T> {
+			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
 		}
 
 		/// Assemble the current set of candidates and invulnerables into the next collator set.
@@ -1737,8 +1772,7 @@ pub mod pallet {
 			}
 
 			// Rewards are the total amount in the pot minus the existential deposit.
-			let total_rewards =
-				T::Currency::balance(&pot_account).saturating_sub(T::Currency::minimum_balance());
+			let total_rewards = T::Currency::reducible_balance(&pot_account, Preserve, Polite);
 			Rewards::<T>::insert(index, total_rewards);
 			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 		}
