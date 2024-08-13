@@ -207,7 +207,6 @@ impl Get<Option<AccountId>> for SendFundsToAccount40 {
 impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type RuntimeHoldReason = RuntimeHoldReason;
 	type RuntimeFreezeReason = RuntimeFreezeReason;
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
@@ -222,8 +221,8 @@ impl Config for Test {
 	type CollatorRegistration = IsRegistered;
 	type MaxStakedCandidates = ConstU32<16>;
 	type MaxStakers = ConstU32<25>;
-	type CollatorUnstakingDelay = ConstU64<5>;
-	type UserUnstakingDelay = ConstU64<2>;
+	type BondUnlockDelay = ConstU64<5>;
+	type StakeUnlockDelay = ConstU64<2>;
 	type WeightInfo = ();
 }
 
