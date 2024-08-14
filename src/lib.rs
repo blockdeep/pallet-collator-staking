@@ -442,7 +442,6 @@ pub mod pallet {
 		/// An unstake request was created.
 		ReleaseRequestCreated {
 			staker: T::AccountId,
-			candidate: T::AccountId,
 			amount: BalanceOf<T>,
 			block: BlockNumberFor<T>,
 		},
@@ -465,9 +464,7 @@ pub mod pallet {
 		/// The extra reward pot account was funded.
 		ExtraRewardPotFunded { pot: T::AccountId, amount: BalanceOf<T> },
 		/// The staking locked amount got extended.
-		LockExtended { total: BalanceOf<T> },
-		/// The staking locked amount got decreased.
-		LockDecreased { total: BalanceOf<T> },
+		LockExtended { amount: BalanceOf<T> },
 		/// A candidate's candidacy bond got updated.
 		CandidacyBondUpdated { candidate: T::AccountId, new_bond: BalanceOf<T> },
 	}
@@ -730,7 +727,7 @@ pub mod pallet {
 			);
 			let length = Candidates::<T>::count();
 			// Do remove their last authored block.
-			Self::try_remove_candidate(&who, true, true)?;
+			Self::try_remove_candidate(&who, true)?;
 
 			Ok(Some(T::WeightInfo::leave_intent(length.saturating_sub(1))).into())
 		}
@@ -1006,7 +1003,7 @@ pub mod pallet {
 			let total = Self::get_staked_balance(&who).saturating_add(amount);
 			T::Currency::set_freeze(&FreezeReason::Staking.into(), &who, total)?;
 
-			Self::deposit_event(Event::<T>::LockExtended { total });
+			Self::deposit_event(Event::<T>::LockExtended { amount });
 
 			Ok(())
 		}
@@ -1045,7 +1042,7 @@ pub mod pallet {
 			ensure!(Self::get_candidate(&who).is_ok(), Error::<T>::NotCandidate);
 
 			let available_balance =
-				Self::get_releasing_balance(&who).saturating_add(Self::get_staked_balance(&who));
+				Self::get_free_balance(&who).saturating_add(Self::get_bond(&who));
 			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
 
 			T::Currency::extend_freeze(&FreezeReason::CandidacyBond.into(), &who, amount)?;
@@ -1273,7 +1270,6 @@ pub mod pallet {
 		fn try_remove_candidate(
 			who: &T::AccountId,
 			remove_last_authored: bool,
-			has_penalty: bool,
 		) -> Result<CandidateInfo<BalanceOf<T>>, DispatchError> {
 			Candidates::<T>::try_mutate_exists(
 				who,
@@ -1288,7 +1284,7 @@ pub mod pallet {
 					}
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(who.clone())
-					};
+					}
 
 					// We firstly optimistically release the candidacy bond.
 					let amount = Self::get_bond(who);
@@ -1297,11 +1293,8 @@ pub mod pallet {
 						who,
 						Zero::zero(),
 					)?;
-					// If it has a penalty then we lock the funds we just unlocked and add them
-					// to the release queue.
-					if has_penalty {
-						Self::add_to_release_queue(who, amount, T::BondUnlockDelay::get())?;
-					}
+					// And now we lock it again to be released.
+					Self::add_to_release_queue(who, amount, T::BondUnlockDelay::get())?;
 
 					Self::deposit_event(Event::CandidateRemoved { account_id: who.clone() });
 					*maybe_candidate = None;
@@ -1322,15 +1315,18 @@ pub mod pallet {
 				account,
 				releasing_balance.saturating_add(amount),
 			)?;
+			let block = Self::current_block_number() + delay;
 			ReleaseQueues::<T>::try_mutate(account, |requests| -> DispatchResult {
 				requests
-					.try_push(ReleaseRequest {
-						block: Self::current_block_number() + delay,
-						amount,
-					})
+					.try_push(ReleaseRequest { block, amount })
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
 				Ok(())
 			})?;
+			Self::deposit_event(Event::ReleaseRequestCreated {
+				staker: account.clone(),
+				amount,
+				block,
+			});
 			Ok(())
 		}
 
@@ -1516,7 +1512,7 @@ pub mod pallet {
                         Some(info)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
-                        let _ = Self::try_remove_candidate(&who, true, true);
+                        let _ = Self::try_remove_candidate(&who, true);
                         None
                     }
                 })
