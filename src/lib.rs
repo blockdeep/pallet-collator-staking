@@ -1007,15 +1007,7 @@ pub mod pallet {
 		pub fn lock(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			let available_balance = Self::get_free_balance(&who);
-			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
-
-			let total = Self::get_staked_balance(&who).saturating_add(amount);
-			T::Currency::set_freeze(&FreezeReason::Staking.into(), &who, total)?;
-
-			Self::deposit_event(Event::<T>::LockExtended { amount });
-
-			Ok(())
+			Self::do_lock(&who, amount)
 		}
 
 		/// Unlocks funds used for staking and queues them to be claimed.
@@ -1411,7 +1403,10 @@ pub mod pallet {
 							let compound_percentage = AutoCompound::<T>::get(staker.clone());
 							let compound_amount = compound_percentage.mul_floor(staker_reward);
 							if !compound_amount.is_zero() {
-								// We sort at the end, when the whole stake is included.
+								// We must always be able to lock here, since we just received funds.
+								// In any case if it fails, the user might still be able to stake further,
+								// provided he has locked enough balance.
+								let _ = Self::do_lock(&staker, compound_amount);
 								if let Err(error) =
 									Self::do_stake(&staker, collator, compound_amount)
 								{
@@ -1432,6 +1427,17 @@ pub mod pallet {
 			}
 
 			(total_stakers, total_compound)
+		}
+
+		fn do_lock(account: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
+			let available_balance = Self::get_free_balance(&account);
+			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
+
+			let total = Self::get_staked_balance(&account).saturating_add(amount);
+			T::Currency::set_freeze(&FreezeReason::Staking.into(), &account, total)?;
+
+			Self::deposit_event(Event::<T>::LockExtended { amount });
+			Ok(())
 		}
 
 		fn do_reward_single(
