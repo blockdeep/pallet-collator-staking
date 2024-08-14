@@ -2270,6 +2270,7 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 			MinCandidacyBond::<Test>::get()
 		));
 		lock_for_staking(2..=5);
+		assert_eq!(CollatorStaking::get_staked_balance(&3), 90);
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(2),
 			vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
@@ -2392,6 +2393,8 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 			candidate: 4,
 			amount: 6,
 		}));
+		// Staker 3 autocompounded 6 in the previous round.
+		assert_eq!(CollatorStaking::get_staked_balance(&3), 96);
 
 		// Check after adding the stake via autocompound the candidate list is sorted.
 		assert_eq!(
