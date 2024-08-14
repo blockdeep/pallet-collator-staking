@@ -102,10 +102,7 @@ fn min_candidates<T: Config>() -> u32 {
 
 fn min_invulnerables<T: Config>() -> u32 {
 	let min_collators = T::MinEligibleCollators::get();
-	let candidates_length = CandidateList::<T>::decode_len()
-		.unwrap_or_default()
-		.try_into()
-		.unwrap_or_default();
+	let candidates_length = Candidates::<T>::count();
 	min_collators.saturating_sub(candidates_length)
 }
 
@@ -219,15 +216,10 @@ mod benchmarks {
 	// worse case is when we have all the max-candidate slots filled except one, and we fill that
 	// one.
 	#[benchmark]
-	fn register_as_candidate(
-		c: Linear<1, { T::MaxCandidates::get() - 1 }>,
-	) -> Result<(), BenchmarkError> {
+	fn register_as_candidate() -> Result<(), BenchmarkError> {
 		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
 		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(c + 1);
-
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
+		DesiredCandidates::<T>::put(1);
 
 		let caller: T::AccountId = whitelisted_caller();
 		let bond: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
@@ -235,7 +227,7 @@ mod benchmarks {
 
 		pallet_session::Pallet::<T>::set_keys(
 			RawOrigin::Signed(caller.clone()).into(),
-			keys::<T>(c + 1),
+			keys::<T>(1),
 			Vec::new(),
 		)?;
 
@@ -248,17 +240,16 @@ mod benchmarks {
 		Ok(())
 	}
 
-	// worse case is the last candidate leaving.
 	#[benchmark]
-	fn leave_intent(c: Linear<{ min_candidates::<T>() + 1 }, { T::MaxCandidates::get() }>) {
+	fn leave_intent() {
 		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
 		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(c);
+		DesiredCandidates::<T>::put(1);
 
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
+		register_validators::<T>(1);
+		register_candidates::<T>(1);
 
-		let leaving = CandidateList::<T>::get().iter().last().unwrap().who.clone();
+		let leaving = Candidates::<T>::iter().next().unwrap().0.clone();
 		v2::whitelist!(leaving);
 
 		#[extrinsic_call]
@@ -299,10 +290,7 @@ mod benchmarks {
 
 		let new_block: BlockNumberFor<T> = T::KickThreshold::get();
 		let zero_block: BlockNumberFor<T> = 0u32.into();
-		let candidates: Vec<T::AccountId> = CandidateList::<T>::get()
-			.iter()
-			.map(|candidate_info| candidate_info.who.clone())
-			.collect();
+		let candidates: Vec<T::AccountId> = Candidates::<T>::iter_keys().collect();
 
 		let non_removals = c.saturating_sub(r);
 
@@ -321,14 +309,11 @@ mod benchmarks {
 		}
 
 		let min_candidates = min_candidates::<T>();
-		let pre_length = CandidateList::<T>::decode_len().unwrap_or_default();
+		let pre_length = Candidates::<T>::count();
 
 		frame_system::Pallet::<T>::set_block_number(new_block);
 
-		let current_length: u32 = CandidateList::<T>::decode_len()
-			.unwrap_or_default()
-			.try_into()
-			.unwrap_or_default();
+		let current_length = Candidates::<T>::count();
 		assert!(c == current_length);
 		#[block]
 		{
@@ -339,119 +324,112 @@ mod benchmarks {
 			// candidates > removals and remaining candidates > min candidates
 			// => remaining candidates should be shorter than before removal, i.e. some were
 			//    actually removed.
-			assert!(CandidateList::<T>::decode_len().unwrap_or_default() < pre_length);
+			assert!(Candidates::<T>::count() < pre_length);
 		} else if c > r && non_removals < min_candidates {
 			// candidates > removals and remaining candidates would be less than min candidates
 			// => remaining candidates should equal min candidates, i.e. some were removed up to
 			//    the minimum, but then anymore were "forced" to stay in candidates.
-			let current_length: u32 = CandidateList::<T>::decode_len()
-				.unwrap_or_default()
-				.try_into()
-				.unwrap_or_default();
+			let current_length: u32 = Candidates::<T>::count();
 			assert_eq!(min_candidates, current_length);
 		} else {
 			// removals >= candidates, non removals must == 0
 			// can't remove more than exist
-			assert_eq!(CandidateList::<T>::decode_len().unwrap_or_default(), pre_length);
+			assert_eq!(Candidates::<T>::count(), pre_length);
 		}
 	}
 
-	// worst case is promoting from first position to last one.
 	#[benchmark]
-	fn stake(c: Linear<1, { T::MaxCandidates::get() }>) {
+	fn stake() {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
+		register_validators::<T>(1);
+		register_candidates::<T>(1);
 
-		let candidate = CandidateList::<T>::get()[0].who.clone();
+		let candidate = Candidates::<T>::iter().next().unwrap().0.clone();
 		whitelist_account!(candidate);
+		CollatorStaking::<T>::lock(
+			RawOrigin::Signed(candidate.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&candidate),
+		)
+		.unwrap();
 		let stake_before = CandidateStake::<T>::get(&candidate, &candidate).stake;
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone(), amount);
 
 		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, stake_before + amount);
-		assert_eq!(&CandidateList::<T>::get()[(c - 1) as usize].who, &candidate);
 	}
 
 	// worst case is promoting from last position to first one
 	#[benchmark]
-	fn unstake_from(
-		c: Linear<1, { T::MaxCandidates::get() }>,
-		u: Linear<0, { T::MaxStakedCandidates::get() - 1 }>,
-	) {
+	fn unstake_from() {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
+		register_validators::<T>(1);
+		register_candidates::<T>(1);
+		let candidate = Candidates::<T>::iter_keys().next().unwrap().clone();
+		CollatorStaking::<T>::lock(
+			RawOrigin::Signed(candidate.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&candidate),
+		)
+		.unwrap();
+		CollatorStaking::<T>::stake(
+			RawOrigin::Signed(candidate.clone()).into(),
+			candidate.clone(),
+			amount,
+		)
+		.unwrap();
+		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, amount);
 
-		CandidateList::<T>::get().iter().for_each(|cand| {
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(cand.who.clone()).into(),
-				cand.who.clone(),
-				amount,
-			)
-			.unwrap();
-		});
-
-		let requests = (0..u)
-			// worst case is inserting at the beginning
-			.map(|_| ReleaseRequest { block: 1000u32.into(), amount })
-			.collect::<Vec<_>>();
-
-		let candidate = CandidateList::<T>::get()[(c - 1) as usize].who.clone();
 		whitelist_account!(candidate);
-		ReleaseQueues::<T>::set(&candidate, requests.try_into().unwrap());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(candidate.clone()), candidate.clone());
 
 		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, 0u32.into());
-		assert_eq!(&CandidateList::<T>::get()[0].who, &candidate);
 	}
 
 	// worst case is having stake in as many collators as possible
 	#[benchmark]
-	fn unstake_all(
-		c: Linear<{ T::MaxStakedCandidates::get() }, { T::MaxCandidates::get() }>,
-		s: Linear<1, { T::MaxStakedCandidates::get() }>,
-	) {
+	fn unstake_all(s: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
+		register_validators::<T>(s);
+		register_candidates::<T>(s);
 
-		let caller = whitelisted_caller();
-		T::Currency::mint_into(&caller, amount * 2u32.into() * c.into()).unwrap();
-		CandidateList::<T>::get().iter().take(s as usize).for_each(|cand| {
-			assert_eq!(cand.stake, 0u32.into());
+		let caller: T::AccountId = whitelisted_caller();
+		let balance = amount * 2u32.into() * s.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
+		CollatorStaking::<T>::lock(
+			RawOrigin::Signed(caller.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&caller),
+		)
+		.unwrap();
+		Candidates::<T>::iter_keys().for_each(|who| {
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
-				cand.who.clone(),
+				who.clone(),
 				amount,
 			)
 			.unwrap();
-			assert_eq!(CandidateStake::<T>::get(&cand.who, &cand.who).stake, 0u32.into());
-			assert_eq!(CandidateStake::<T>::get(&cand.who, &caller).stake, amount);
+			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, amount);
 		});
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()));
 
-		CandidateList::<T>::get().iter().for_each(|cand| {
-			assert_eq!(CandidateStake::<T>::get(&cand.who, &cand.who).stake, 0u32.into());
-			assert_eq!(CandidateStake::<T>::get(&cand.who, &caller).stake, 0u32.into());
-			assert_eq!(cand.stake, 0u32.into());
+		Candidates::<T>::iter().for_each(|(who, info)| {
+			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, 0u32.into());
+			assert_eq!(info.stake, 0u32.into());
 		});
 	}
 
@@ -459,24 +437,22 @@ mod benchmarks {
 	fn claim(c: Linear<0, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
-		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
-
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
 
 		let caller = whitelisted_caller();
 		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into()).unwrap();
-		CandidateList::<T>::get().iter().for_each(|cand| {
-			CollatorStaking::<T>::stake(
+		CollatorStaking::<T>::lock(
+			RawOrigin::Signed(caller.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&caller),
+		)
+		.unwrap();
+		for _ in 0..c {
+			CollatorStaking::<T>::unlock(
 				RawOrigin::Signed(caller.clone()).into(),
-				cand.who.clone(),
-				amount,
+				Some(1u32.into()),
 			)
 			.unwrap();
-		});
-
-		CollatorStaking::<T>::unstake_all(RawOrigin::Signed(caller.clone()).into()).unwrap();
+		}
 		assert_eq!(c as usize, ReleaseQueues::<T>::get(&caller).len());
 		frame_system::Pallet::<T>::set_block_number(100u32.into());
 
@@ -568,25 +544,26 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn reward_one_collator(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		s: Linear<0, { T::MaxStakers::get() }>,
-		a: Linear<0, 100>,
-	) {
+	fn reward_one_collator(s: Linear<0, { T::MaxStakers::get() }>, a: Linear<0, 100>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
 
-		let collator = register_validators::<T>(c)[0].clone();
-		register_candidates::<T>(c);
+		let collator = register_validators::<T>(1)[0].clone();
+		register_candidates::<T>(1);
 
 		let autocompound = Percent::from_parts(a as u8) * s;
 		let mut accounts = vec![];
 		let mut autocompound_accounts = vec![];
 		for n in 0..s {
 			let acc = create_funded_user::<T>("staker", n, 1000);
+			CollatorStaking::<T>::lock(
+				RawOrigin::Signed(acc.clone()).into(),
+				CollatorStaking::<T>::get_free_balance(&acc),
+			)
+			.unwrap();
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(acc.clone()).into(),
 				collator.clone(),
