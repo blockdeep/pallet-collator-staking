@@ -3,7 +3,7 @@ use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidateInfo, CandidateStakeInfo, Candidates,
 	CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error, Event, ExtraReward,
 	FreezeReason, Invulnerables, LastAuthoredBlock, MaxDesiredCandidates, MinCandidacyBond,
-	MinStake, ProducedBlocks, ReleaseQueues, TotalBlocks, UserStake, UserStakeInfo,
+	MinStake, ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
 };
 use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
@@ -302,9 +302,18 @@ fn candidate_to_invulnerable_should_fail() {
 		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &4), 10);
 
 		lock(3..=5);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 10));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 10));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 
 		assert_noop!(
 			CollatorStaking::add_invulnerable(RuntimeOrigin::signed(RootAccount::get()), 3),
@@ -492,7 +501,10 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
 			bond_amount: 20,
 		}));
 		assert_eq!(MinCandidacyBond::<Test>::get(), 20);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 20 }].try_into().unwrap()
+		));
 		let new_candidate_5 = CandidateInfo { stake: 20, stakers: 1 };
 		assert_eq!(
 			candidate_list(),
@@ -693,10 +705,22 @@ fn candidate_list_works() {
 		register_candidates(3..=5);
 		lock(3..=5);
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 20));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 30));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 25));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 30));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 20 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 30 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 25 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 30 }].try_into().unwrap()
+		));
 
 		let candidate_3 = CandidateInfo { stake: 30, stakers: 1 };
 		let candidate_4 = CandidateInfo { stake: 25, stakers: 1 };
@@ -822,8 +846,14 @@ fn session_management_max_candidates() {
 
 		register_candidates(3..=5);
 		lock(3..=4);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 50));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 60));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 50 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 60 }].try_into().unwrap()
+		));
 
 		// session won't see this.
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -861,8 +891,14 @@ fn session_management_increase_bid_with_list_update() {
 
 		register_candidates(3..=5);
 		lock(3..=5);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 50));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 60 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 50 }].try_into().unwrap()
+		));
 
 		// session won't see this.
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -900,7 +936,10 @@ fn session_management_candidate_list_eager_sort() {
 
 		register_candidates(3..=5);
 		lock(5..=5);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 60 }].try_into().unwrap()
+		));
 
 		// session won't see this.
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -939,14 +978,23 @@ fn session_management_reciprocal_outbidding() {
 		register_candidates(3..=5);
 		lock(3..=5);
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 60 }].try_into().unwrap()
+		));
 
 		initialize_to_block(5);
 
 		// candidates 3 and 4 saw they were outbid and preemptively bid more
 		// than 5 in the next block.
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 80));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 70));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 80 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 70 }].try_into().unwrap()
+		));
 
 		// session won't see this.
 		assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
@@ -985,12 +1033,21 @@ fn session_management_decrease_bid_after_auction() {
 		register_candidates(3..=5);
 		lock(3..=5);
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 60));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 60 }].try_into().unwrap()
+		));
 
 		initialize_to_block(5);
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 80));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 70));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 80 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 70 }].try_into().unwrap()
+		));
 
 		initialize_to_block(5);
 
@@ -1199,12 +1256,18 @@ fn cannot_stake_if_not_candidate() {
 		lock(4..=4);
 		// invulnerable
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(4), 1, 1),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 1, stake: 1 }].try_into().unwrap()
+			),
 			Error::<Test>::NotCandidate
 		);
 		// not registered as candidate
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(4), 5, 15),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 5, stake: 15 }].try_into().unwrap()
+			),
 			Error::<Test>::NotCandidate
 		);
 	});
@@ -1218,15 +1281,24 @@ fn cannot_stake_if_under_minstake() {
 		register_candidates(3..=3);
 		lock(4..=4);
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(4), 3, 1),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 3, stake: 1 }].try_into().unwrap()
+			),
 			Error::<Test>::InsufficientStake
 		);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 3, 2));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 3, stake: 2 }].try_into().unwrap()
+		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 100);
 		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 2, session: 0 });
 
 		// After adding MinStake it should work
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 3, 1));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 3, stake: 1 }].try_into().unwrap()
+		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 100);
 		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 3, session: 0 });
 	});
@@ -1251,7 +1323,10 @@ fn stake() {
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 0);
 		assert_eq!(UserStake::<Test>::get(4), UserStakeInfo { count: 0, stake: 0 });
 		lock(4..=4);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 3, 20));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 100);
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
 			staker: 4,
@@ -1262,6 +1337,69 @@ fn stake() {
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(Candidates::<Test>::iter_values().next().unwrap().stake, 20);
 		assert_eq!(UserStake::<Test>::get(4), UserStakeInfo { count: 1, stake: 20 });
+	});
+}
+
+#[test]
+fn stake_many_at_once() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		register_candidates(3..=4);
+		lock(3..=3);
+
+		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
+		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
+		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 0, session: 0 });
+		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 20 }, StakeTarget { candidate: 4, stake: 20 },]
+				.try_into()
+				.unwrap()
+		));
+		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+			staker: 3,
+			candidate: 4,
+			amount: 20,
+		}));
+		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+			staker: 3,
+			candidate: 3,
+			amount: 20,
+		}));
+		assert_eq!(CandidateStake::<Test>::get(4, 3), CandidateStakeInfo { stake: 20, session: 0 });
+		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 20, session: 0 });
+		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 2, stake: 40 });
+	});
+}
+
+#[test]
+fn stake_many_over_limits_should_fail() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		register_candidates(3..=4);
+		lock(3..=3);
+
+		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
+		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
+		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 0, session: 0 });
+		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+
+		assert_noop!(
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![
+					StakeTarget { candidate: 3, stake: 20 },
+					StakeTarget { candidate: 4, stake: 90 },
+				]
+				.try_into()
+				.unwrap()
+			),
+			Error::<Test>::InsufficientLockedBalance
+		);
 	});
 }
 
@@ -1285,7 +1423,10 @@ fn stake_and_reassign_position() {
 				(4, CandidateInfo { stake: 0, stakers: 0 }),
 			]
 		);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 12));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 12 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1294,7 +1435,10 @@ fn stake_and_reassign_position() {
 			]
 		);
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 15));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 4, stake: 15 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1312,7 +1456,10 @@ fn stake_and_reassign_position() {
 				(4, CandidateInfo { stake: 15, stakers: 1 }),
 			]
 		);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 13));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 13 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1321,7 +1468,10 @@ fn stake_and_reassign_position() {
 				(4, CandidateInfo { stake: 15, stakers: 1 }),
 			]
 		);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 5, 7));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 5, stake: 7 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1343,11 +1493,17 @@ fn cannot_stake_too_many_staked_candidates() {
 		register_candidates(3..=19);
 		lock(1..=1);
 		for i in 3..=18 {
-			assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(1), i, 2));
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(1),
+				vec![StakeTarget { candidate: i, stake: 2 }].try_into().unwrap()
+			));
 		}
 		assert_eq!(UserStake::<Test>::get(1), UserStakeInfo { count: 16, stake: 32 });
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(1), 19, 2),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(1),
+				vec![StakeTarget { candidate: 19, stake: 2 }].try_into().unwrap()
+			),
 			Error::<Test>::TooManyStakedCandidates
 		);
 	});
@@ -1364,13 +1520,19 @@ fn cannot_stake_too_many_stakers() {
 		for i in 4..=28 {
 			fund_account(i);
 			lock(i..=i);
-			assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(i), 3, 2));
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(i),
+				vec![StakeTarget { candidate: 3, stake: 2 }].try_into().unwrap()
+			));
 		}
 		assert_eq!(candidate_list()[0].1.stakers, 25);
 		fund_account(29);
 		lock(29..=29);
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(29), 3, 2),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(29),
+				vec![StakeTarget { candidate: 3, stake: 2 }].try_into().unwrap()
+			),
 			Error::<Test>::TooManyStakers
 		);
 	});
@@ -1381,7 +1543,10 @@ fn cannot_stake_invulnerable() {
 	new_test_ext().execute_with(|| {
 		lock(3..=3);
 		assert_noop!(
-			CollatorStaking::stake(RuntimeOrigin::signed(3), 1, 2),
+			CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 1, stake: 2 }].try_into().unwrap()
+			),
 			Error::<Test>::NotCandidate
 		);
 	});
@@ -1395,8 +1560,14 @@ fn unstake_from_candidate() {
 		register_candidates(3..=4);
 		lock(5..=5);
 		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1444,11 +1615,17 @@ fn unstake_self() {
 		lock(3..=3);
 		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 3, 20));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 1, stake: 20 });
 
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 2, stake: 30 });
 
@@ -1495,8 +1672,14 @@ fn cannot_unstake_from_ex_candidate() {
 		register_candidates(3..=4);
 		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
 		lock(5..=5);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1530,8 +1713,14 @@ fn unstake_all() {
 		lock(5..=5);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 20));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![
@@ -1763,7 +1952,10 @@ fn should_reward_collator() {
 			MinCandidacyBond::<Test>::get()
 		));
 		lock(4..=4);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		assert_eq!(ExtraReward::<Test>::get(), 0);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 		Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance()).unwrap();
@@ -1855,7 +2047,10 @@ fn should_reward_collator_with_extra_rewards() {
 			MinCandidacyBond::<Test>::get()
 		));
 		lock(4..=4);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		ExtraReward::<Test>::put(1);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 		Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance()).unwrap();
@@ -1953,7 +2148,10 @@ fn should_reward_collator_with_extra_rewards_and_no_funds() {
 			MinCandidacyBond::<Test>::get()
 		));
 		lock(4..=4);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(4), 4, 10));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+		));
 		// This account has no funds
 		ExtraReward::<Test>::put(1);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
@@ -2057,9 +2255,18 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 			MinCandidacyBond::<Test>::get()
 		));
 		lock(2..=5);
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(2), 4, 40));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(3), 4, 50));
-		assert_ok!(CollatorStaking::stake(RuntimeOrigin::signed(5), 3, 91));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(2),
+			vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(3),
+			vec![StakeTarget { candidate: 4, stake: 50 }].try_into().unwrap()
+		));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(5),
+			vec![StakeTarget { candidate: 3, stake: 91 }].try_into().unwrap()
+		));
 		assert_eq!(
 			candidate_list(),
 			vec![

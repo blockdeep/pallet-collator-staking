@@ -339,28 +339,35 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn stake() {
+	fn stake(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
-		register_validators::<T>(1);
-		register_candidates::<T>(1);
+		register_validators::<T>(c);
+		register_candidates::<T>(c);
 
-		let candidate = Candidates::<T>::iter().next().unwrap().0.clone();
-		whitelist_account!(candidate);
+		let caller: T::AccountId = whitelisted_caller();
+		T::Currency::mint_into(&caller, T::Currency::minimum_balance() * 2u32.into() * c.into())
+			.unwrap();
 		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(candidate.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&candidate),
+			RawOrigin::Signed(caller.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&caller),
 		)
 		.unwrap();
-		let stake_before = CandidateStake::<T>::get(&candidate, &candidate).stake;
+		let targets = Candidates::<T>::iter_keys()
+			.map(|candidate| StakeTarget { candidate, stake: amount })
+			.collect::<Vec<_>>()
+			.try_into()
+			.unwrap();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(candidate.clone()), candidate.clone(), amount);
+		_(RawOrigin::Signed(caller.clone()), targets);
 
-		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, stake_before + amount);
+		for candidate in Candidates::<T>::iter_keys() {
+			assert_eq!(CandidateStake::<T>::get(&candidate, &caller).stake, amount);
+		}
 	}
 
 	// worst case is promoting from last position to first one
@@ -381,8 +388,9 @@ mod benchmarks {
 		.unwrap();
 		CollatorStaking::<T>::stake(
 			RawOrigin::Signed(candidate.clone()).into(),
-			candidate.clone(),
-			amount,
+			vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+				.try_into()
+				.unwrap(),
 		)
 		.unwrap();
 		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, amount);
@@ -417,8 +425,7 @@ mod benchmarks {
 		Candidates::<T>::iter_keys().for_each(|who| {
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(caller.clone()).into(),
-				who.clone(),
-				amount,
+				vec![StakeTarget { candidate: who.clone(), stake: amount }].try_into().unwrap(),
 			)
 			.unwrap();
 			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, amount);
@@ -566,8 +573,9 @@ mod benchmarks {
 			.unwrap();
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(acc.clone()).into(),
-				collator.clone(),
-				amount,
+				vec![StakeTarget { candidate: collator.clone(), stake: amount }]
+					.try_into()
+					.unwrap(),
 			)
 			.unwrap();
 			if n <= autocompound {

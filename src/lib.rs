@@ -197,6 +197,14 @@ pub mod pallet {
 		pub amount: Balance,
 	}
 
+	#[derive(
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+	)]
+	pub struct StakeTarget<AccountId, Balance> {
+		pub candidate: AccountId,
+		pub stake: Balance,
+	}
+
 	/// Information about a candidate's stake.
 	#[derive(
 		Default,
@@ -516,6 +524,8 @@ pub mod pallet {
 		InsufficientLockedBalance,
 		/// Cannot unlock such amount.
 		CannotUnlock,
+		/// User must stake at least on one candidate.
+		TooFewCandidates,
 	}
 
 	#[pallet::hooks]
@@ -799,20 +809,26 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Allows a user to stake on a collator candidate.
+		/// Allows a user to stake on a set of collator candidates.
 		///
 		/// The call will fail if:
 		///     - `origin` does not have the at least `MinStake` deposited in the candidate.
-		///     - `candidate` is not in the [`Candidates`].
+		///     - one of the `targets` is not in the [`Candidates`] map.
+		///     - the user does not have sufficient locked balance to stake.
+		///     - zero targets are passed.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::stake(T::MaxCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::stake(T::MaxStakedCandidates::get()))]
 		pub fn stake(
 			origin: OriginFor<T>,
-			candidate: T::AccountId,
-			stake: BalanceOf<T>,
+			targets: BoundedVec<StakeTarget<T::AccountId, BalanceOf<T>>, T::MaxStakedCandidates>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::do_stake(&who, &candidate, stake)?;
+			let len = targets.len() as u32;
+			ensure!(len > 0, Error::<T>::TooFewCandidates);
+
+			for StakeTarget { candidate, stake } in targets {
+				Self::do_stake(&who, &candidate, stake)?;
+			}
 			Ok(Some(T::WeightInfo::stake(Candidates::<T>::count())).into())
 		}
 
