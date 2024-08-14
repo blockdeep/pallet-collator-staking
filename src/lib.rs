@@ -695,7 +695,6 @@ pub mod pallet {
 
 			// ensure we are below limit.
 			let length = Candidates::<T>::count();
-			ensure!(length < T::MaxCandidates::get(), Error::<T>::TooManyCandidates);
 			ensure!(!Self::is_invulnerable(&who), Error::<T>::AlreadyInvulnerable);
 
 			let validator_key =
@@ -705,11 +704,22 @@ pub mod pallet {
 				Error::<T>::CollatorNotRegistered
 			);
 
+			if length == T::MaxCandidates::get() {
+				// We have too many candidates, so we have to remove the one with the lowest
+				// candidacy bond.
+				let (candidate, worst_bond) = Self::get_worst_candidate()?;
+				ensure!(bond > worst_bond, Error::<T>::InvalidCandidacyBond);
+				Self::try_remove_candidate(&candidate, true)?;
+			}
+
 			Self::do_register_as_candidate(&who, bond)?;
 			// Safe to do unchecked add here because we ensure above that `length <
 			// T::MaxCandidates::get()`, and since `T::MaxCandidates` is `u32` it can be at most
 			// `u32::MAX`, therefore `length + 1` cannot overflow.
-			Ok(Some(T::WeightInfo::register_as_candidate(length + 1)).into())
+			Ok(Some(T::WeightInfo::register_as_candidate(
+				(length + 1).min(T::MaxCandidates::get()),
+			))
+			.into())
 		}
 
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
@@ -1530,6 +1540,16 @@ pub mod pallet {
 			} else {
 				(0, 0)
 			}
+		}
+
+		/// Identifies the candidate with the lowest candidacy bond and removes it.
+		fn get_worst_candidate() -> Result<(T::AccountId, BalanceOf<T>), DispatchError> {
+			let mut all_candidates = Candidates::<T>::iter()
+				.map(|(candidate, _)| (candidate.clone(), Self::get_bond(&candidate)))
+				.collect::<Vec<_>>();
+			all_candidates.sort_by(|(_, bond1), (_, bond2)| bond2.cmp(bond1));
+			let candidate = all_candidates.last().ok_or(Error::<T>::TooManyCandidates)?;
+			Ok(candidate.clone())
 		}
 
 		/// Ensure the correctness of the state of this pallet.

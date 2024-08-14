@@ -519,24 +519,24 @@ fn set_candidacy_bond_with_many_candidates_same_deposit() {
 fn cannot_register_candidate_if_too_many() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
-		DesiredCandidates::<Test>::put(1);
+		assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
 
 		// MaxCandidates: u32 = 20
 		// Aside from 3, 4, and 5, create enough accounts to have 21 potential
 		// candidates.
-		for acc in 6..=23 {
+		for acc in 3..=22 {
 			fund_account(acc);
 			register_keys(acc);
+			let bond = if acc > 3 { 20 } else { 10 };
+			assert_ok!(CollatorStaking::register_as_candidate(RuntimeOrigin::signed(acc), bond));
 		}
-		register_candidates(3..=22);
-
-		assert_noop!(
-			CollatorStaking::register_as_candidate(
-				RuntimeOrigin::signed(23),
-				MinCandidacyBond::<Test>::get()
-			),
-			Error::<Test>::TooManyCandidates,
-		);
+		assert_eq!(Candidates::<Test>::count(), 20);
+		fund_account(23);
+		register_keys(23);
+		assert_ok!(CollatorStaking::register_as_candidate(RuntimeOrigin::signed(23), 11));
+		assert!(Candidates::<Test>::get(23).is_some());
+		// Account 6 had only 10 as candidacy bond, not 20 like the rest.
+		assert!(Candidates::<Test>::get(3).is_none());
 	})
 }
 
