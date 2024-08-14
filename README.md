@@ -57,25 +57,26 @@ This pallet uses the following hooks:
 
 ### Runtime Configuration
 
-| Parameter                | Description                                                                                          |
-|--------------------------|------------------------------------------------------------------------------------------------------|
-| `RuntimeEvent`           | The overarching event type.                                                                          |
-| `Currency`               | The currency mechanism.                                                                              |
-| `UpdateOrigin`           | Origin that can dictate updating parameters of this pallet.                                          |
-| `PotId`                  | Account Identifier from which the internal pot is generated.                                         |
-| `ExtraRewardPotId`       | Account Identifier from which the extra reward pot is generated.                                     |
-| `ExtraRewardReceiver`    | Account that will receive all funds in the extra reward pot when those are stopped.                  |
-| `MinEligibleCollators`   | Minimum number eligible collators including Invulnerables.                                           |
-| `MaxInvulnerables`       | Maximum number of invulnerables.                                                                     |
-| `KickThreshold`          | Candidates will be removed from active collator set, if block is not produced within this threshold. |
-| `CollatorId`             | A stable ID for a collator.                                                                          |
-| `CollatorIdOf`           | A conversion from account ID to collator ID.                                                         |
-| `CollatorRegistration`   | Validate a collator is registered.                                                                   |
-| `MaxStakedCandidates`    | Maximum candidates a staker can stake on.                                                            |
-| `MaxStakers`             | Maximum stakers per candidate.                                                                       |
-| `CollatorUnstakingDelay` | Number of blocks to wait before returning the bond by a collator.                                    |
-| `UserUnstakingDelay`     | Number of blocks to wait before returning the stake by a user.                                       |
-| `WeightInfo`             | Information on runtime weights.                                                                      |
+| Parameter              | Description                                                                                          |
+|------------------------|------------------------------------------------------------------------------------------------------|
+| `RuntimeEvent`         | The overarching event type.                                                                          |
+| `Currency`             | The currency mechanism.                                                                              |
+| `RuntimeFreezeReason`  | The overarching freeze reason.                                                                       |
+| `UpdateOrigin`         | Origin that can dictate updating parameters of this pallet.                                          |
+| `PotId`                | Account Identifier from which the internal pot is generated.                                         |
+| `ExtraRewardPotId`     | Account Identifier from which the extra reward pot is generated.                                     |
+| `ExtraRewardReceiver`  | Account that will receive all funds in the extra reward pot when those are stopped.                  |
+| `MinEligibleCollators` | Minimum number eligible collators including Invulnerables.                                           |
+| `MaxInvulnerables`     | Maximum number of invulnerables.                                                                     |
+| `KickThreshold`        | Candidates will be removed from active collator set, if block is not produced within this threshold. |
+| `CollatorId`           | A stable ID for a collator.                                                                          |
+| `CollatorIdOf`         | A conversion from account ID to collator ID.                                                         |
+| `CollatorRegistration` | Validate a collator is registered.                                                                   |
+| `MaxStakedCandidates`  | Maximum candidates a staker can stake on.                                                            |
+| `MaxStakers`           | Maximum stakers per candidate.                                                                       |
+| `BondUnlockDelay`      | Number of blocks to wait before unlocking the bond by a collator.                                    |
+| `StakeUnlockDelay`     | Number of blocks to wait before unlocking the stake by a user.                                       |
+| `WeightInfo`           | Information on runtime weights.                                                                      |
 
 ### Setup Considerations
 
