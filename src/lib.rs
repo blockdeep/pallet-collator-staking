@@ -549,7 +549,6 @@ pub mod pallet {
 					Self::reward_one_collator(current_session - 1);
 				if !rewarded_stakers.is_zero() {
 					weight = weight.saturating_add(T::WeightInfo::reward_one_collator(
-						Candidates::<T>::count(),
 						rewarded_stakers,
 						compounded_stakers * 100 / rewarded_stakers,
 					));
@@ -668,7 +667,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::set_candidacy_bond())]
+		#[pallet::weight(T::WeightInfo::set_min_candidacy_bond())]
 		pub fn set_min_candidacy_bond(origin: OriginFor<T>, bond: BalanceOf<T>) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			MinCandidacyBond::<T>::put(bond);
@@ -682,7 +681,7 @@ pub mod pallet {
 		///
 		/// This call is not available to `Invulnerable` collators.
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::register_as_candidate(T::MaxCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::register_as_candidate())]
 		pub fn register_as_candidate(
 			origin: OriginFor<T>,
 			bond: BalanceOf<T>,
@@ -712,10 +711,8 @@ pub mod pallet {
 			// Safe to do unchecked add here because we ensure above that `length <
 			// T::MaxCandidates::get()`, and since `T::MaxCandidates` is `u32` it can be at most
 			// `u32::MAX`, therefore `length + 1` cannot overflow.
-			Ok(Some(T::WeightInfo::register_as_candidate(
-				(length + 1).min(T::MaxCandidates::get()),
-			))
-			.into())
+			// TODO add weight for replacement if list is full.
+			Ok(Some(T::WeightInfo::register_as_candidate()).into())
 		}
 
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
@@ -724,18 +721,17 @@ pub mod pallet {
 		/// This call will fail if the total number of candidates would drop below
 		/// `MinEligibleCollators`.
 		#[pallet::call_index(4)]
-		#[pallet::weight(T::WeightInfo::leave_intent(T::MaxCandidates::get()))]
-		pub fn leave_intent(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+		#[pallet::weight(T::WeightInfo::leave_intent())]
+		pub fn leave_intent(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			ensure!(
 				Self::eligible_collators() > T::MinEligibleCollators::get(),
 				Error::<T>::TooFewEligibleCollators
 			);
-			let length = Candidates::<T>::count();
 			// Do remove their last authored block.
 			Self::try_remove_candidate(&who, true)?;
 
-			Ok(Some(T::WeightInfo::leave_intent(length.saturating_sub(1))).into())
+			Ok(())
 		}
 
 		/// Add a new account `who` to the list of `Invulnerables` collators. `who` must have
@@ -745,7 +741,6 @@ pub mod pallet {
 		#[pallet::call_index(5)]
 		#[pallet::weight(T::WeightInfo::add_invulnerable(
         T::MaxInvulnerables::get().saturating_sub(1),
-        T::MaxCandidates::get()
         ))]
 		pub fn add_invulnerable(
 			origin: OriginFor<T>,
@@ -781,7 +776,6 @@ pub mod pallet {
 					.unwrap_or_default()
 					.try_into()
 					.unwrap_or(T::MaxInvulnerables::get().saturating_sub(1)),
-				Candidates::<T>::count(),
 			);
 
 			Ok(Some(weight_used).into())
@@ -842,22 +836,16 @@ pub mod pallet {
 		///
 		/// The candidate will have its position in the [`Candidates`] updated.
 		#[pallet::call_index(8)]
-		#[pallet::weight(T::WeightInfo::unstake_from(T::MaxCandidates::get(),))]
-		pub fn unstake_from(
-			origin: OriginFor<T>,
-			candidate: T::AccountId,
-		) -> DispatchResultWithPostInfo {
+		#[pallet::weight(T::WeightInfo::unstake_from())]
+		pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let _ = Self::do_unstake(&who, &candidate)?;
-			Ok(Some(T::WeightInfo::unstake_from(Candidates::<T>::count())).into())
+			Ok(())
 		}
 
 		/// Removes all stake of a user from all candidates.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_all(
-			T::MaxCandidates::get(),
-			T::MaxStakedCandidates::get()
-		))]
+		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let mut operations = 0;
@@ -867,7 +855,7 @@ pub mod pallet {
 					operations += 1;
 				}
 			}
-			Ok(Some(T::WeightInfo::unstake_all(Candidates::<T>::count(), operations)).into())
+			Ok(Some(T::WeightInfo::unstake_all(operations)).into())
 		}
 
 		/// Claims all pending [`ReleaseRequest`] for a given account.
@@ -999,7 +987,7 @@ pub mod pallet {
 
 		/// Locks free funds to be used for staking.
 		#[pallet::call_index(17)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::lock())]
 		pub fn lock(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -1008,7 +996,7 @@ pub mod pallet {
 
 		/// Unlocks funds used for staking and queues them to be claimed.
 		#[pallet::call_index(18)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::unlock())]
 		pub fn unlock(origin: OriginFor<T>, maybe_amount: Option<BalanceOf<T>>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
@@ -1033,7 +1021,7 @@ pub mod pallet {
 
 		/// Updates the candidacy bond for this candidate.
 		#[pallet::call_index(19)]
-		#[pallet::weight({0})]
+		#[pallet::weight(T::WeightInfo::update_candidacy_bond())]
 		pub fn update_candidacy_bond(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			ensure!(amount >= MinCandidacyBond::<T>::get(), Error::<T>::InvalidCandidacyBond);
@@ -1625,14 +1613,7 @@ pub mod pallet {
 
 	/// Impl of the session manager.
 	impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
-		fn new_session(index: SessionIndex) -> Option<Vec<T::AccountId>> {
-			log::info!(
-				target: LOG_TARGET,
-				"assembling new collators for new session {} at #{:?}",
-				index,
-				Self::current_block_number(),
-			);
-
+		fn new_session(_: SessionIndex) -> Option<Vec<T::AccountId>> {
 			// The `expect` below is safe because the list is a `BoundedVec` with a max size of
 			// `T::MaxCandidates`, which is a `u32`. When `decode_len` returns `Some(len)`, `len`
 			// must be valid and at most `u32::MAX`, which must always be able to convert to `u32`.

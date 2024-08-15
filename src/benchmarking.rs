@@ -147,7 +147,7 @@ mod benchmarks {
 		// add one more to the list. should not be in `b` (invulnerables) because it's the account
 		// we will _add_ to invulnerables. we want it to be in `candidates` because we need the
 		// weight associated with removing it.
-		let (new_invulnerable, _) = validator::<T>(b + 1);
+		let (new_invulnerable, keys) = validator::<T>(b + 1);
 
 		// now we need to fill up invulnerables
 		let mut invulnerables = register_validators::<T>(b);
@@ -155,6 +155,12 @@ mod benchmarks {
 		let invulnerables: frame_support::BoundedVec<_, T::MaxInvulnerables> =
 			frame_support::BoundedVec::try_from(invulnerables).unwrap();
 		Invulnerables::<T>::put(invulnerables);
+		pallet_session::Pallet::<T>::set_keys(
+			RawOrigin::Signed(new_invulnerable.clone()).into(),
+			keys,
+			Vec::new(),
+		)
+		.unwrap();
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, new_invulnerable.clone());
@@ -653,9 +659,11 @@ mod benchmarks {
 	#[benchmark]
 	fn update_candidacy_bond() {
 		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
-		let caller: T::AccountId = whitelisted_caller();
+		let caller = register_validators::<T>(1)[0].clone();
+		whitelist_account!(caller);
 		let balance = MinCandidacyBond::<T>::get() * 2u32.into();
 		T::Currency::mint_into(&caller, balance).unwrap();
+
 		CollatorStaking::<T>::register_as_candidate(
 			RawOrigin::Signed(caller.clone()).into(),
 			MinCandidacyBond::<T>::get(),
