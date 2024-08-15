@@ -1657,7 +1657,7 @@ fn unstake_self() {
 }
 
 #[test]
-fn cannot_unstake_from_ex_candidate() {
+fn unstake_from_ex_candidate() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
@@ -1682,17 +1682,15 @@ fn cannot_unstake_from_ex_candidate() {
 		assert_eq!(CandidateStake::<Test>::get(3, 5), CandidateStakeInfo { stake: 20, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(4, 5), CandidateStakeInfo { stake: 10, session: 0 });
 
-		// unstake from ex-candidate
+		// unstake from ex-candidate.
 		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
 		assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 		assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 10, stakers: 1 })]);
 
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 1, stake: 10 });
+		// the stake should be the same.
+		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
-		assert_noop!(
-			CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
-			Error::<Test>::NotCandidate
-		);
+		assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 	});
 }
 
@@ -1725,7 +1723,8 @@ fn unstake_all() {
 		assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 		assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 10, stakers: 1 })]);
 
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 1, stake: 10 });
+		// the stake should be untouched.
+		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 		assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {

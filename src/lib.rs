@@ -851,8 +851,12 @@ pub mod pallet {
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let mut operations = 0;
-			for account in Candidates::<T>::iter_keys() {
-				let stake = Self::do_unstake(&who, &account)?;
+			// TODO this is a super heavy operation that should be optimized.
+			for (candidate, staker, _) in CandidateStake::<T>::iter() {
+				if staker != who {
+					continue;
+				}
+				let stake = Self::do_unstake(&who, &candidate)?;
 				if !stake.is_zero() {
 					operations += 1;
 				}
@@ -1092,7 +1096,15 @@ pub mod pallet {
 						who.clone(),
 						Self::current_block_number() + T::KickThreshold::get(),
 					);
-					let info = CandidateInfo { stake: 0u32.into(), stakers: 0 };
+					// In case we are dealing with an ex-candidate that re-joins, count the current
+					// stake and stakers.
+					let mut stake: BalanceOf<T> = Zero::zero();
+					let mut stakers = 0;
+					for (_, info) in CandidateStake::<T>::iter_prefix(who) {
+						stake.saturating_accrue(info.stake);
+						stakers.saturating_inc();
+					}
+					let info = CandidateInfo { stake, stakers };
 					*maybe_candidate_info = Some(info.clone());
 					T::Currency::set_freeze(&FreezeReason::CandidacyBond.into(), who, bond)?;
 					Ok(info)
@@ -1200,11 +1212,10 @@ pub mod pallet {
 			staker: &T::AccountId,
 			candidate: &T::AccountId,
 		) -> Result<BalanceOf<T>, DispatchError> {
-			ensure!(Candidates::<T>::get(candidate).is_some(), Error::<T>::NotCandidate);
 			let stake = Self::remove_stake(candidate, staker);
 
 			if !stake.is_zero() {
-				Candidates::<T>::mutate(candidate, |maybe_info| {
+				Candidates::<T>::mutate_exists(candidate, |maybe_info| {
 					if let Some(info) = maybe_info {
 						info.stake.saturating_reduce(stake);
 						info.stakers.saturating_dec();
@@ -1263,13 +1274,6 @@ pub mod pallet {
 				who,
 				|maybe_candidate| -> Result<CandidateInfo<BalanceOf<T>>, DispatchError> {
 					let candidate = maybe_candidate.clone().ok_or(Error::<T>::NotCandidate)?;
-					// This is an expensive operation.
-					let stakers = CandidateStake::<T>::iter_prefix(who)
-						.map(|(staker, _)| staker)
-						.collect::<Vec<_>>();
-					for staker in stakers {
-						Self::remove_stake(who, &staker);
-					}
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(who.clone())
 					}
