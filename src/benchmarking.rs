@@ -238,11 +238,37 @@ mod benchmarks {
 		)?;
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), T::Currency::minimum_balance());
+		_(RawOrigin::Signed(caller.clone()), bond);
 
-		assert_last_event::<T>(
-			Event::CandidateAdded { account_id: caller, deposit: bond / 2u32.into() }.into(),
-		);
+		assert_last_event::<T>(Event::CandidateAdded { account_id: caller, deposit: bond }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn remove_worst_candidate() -> Result<(), BenchmarkError> {
+		let min_bond = T::Currency::minimum_balance();
+		MinCandidacyBond::<T>::put(min_bond);
+
+		// Fill the candidates.
+		let candidates = <T as Config>::MaxCandidates::get();
+		let validators = register_validators::<T>(candidates);
+		let worst_validator = validators[0].clone();
+		register_candidates::<T>(candidates);
+		for i in 1..candidates {
+			CollatorStaking::<T>::update_candidacy_bond(
+				RawOrigin::Signed(validators[i as usize].clone()).into(),
+				min_bond * 2u32.into(),
+			)?;
+		}
+
+		#[block]
+		{
+			CollatorStaking::<T>::remove_worst_candidate(
+				T::Currency::minimum_balance() * 3u32.into(),
+			)?;
+		}
+
+		assert_last_event::<T>(Event::CandidateRemoved { account_id: worst_validator }.into());
 		Ok(())
 	}
 

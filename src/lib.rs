@@ -699,12 +699,12 @@ pub mod pallet {
 				Error::<T>::CollatorNotRegistered
 			);
 
-			if length == T::MaxCandidates::get() {
+			let mut weight = T::WeightInfo::register_as_candidate();
+			if length >= T::MaxCandidates::get() {
 				// We have too many candidates, so we have to remove the one with the lowest
 				// candidacy bond.
-				let (candidate, worst_bond) = Self::get_worst_candidate()?;
-				ensure!(bond > worst_bond, Error::<T>::InvalidCandidacyBond);
-				Self::try_remove_candidate(&candidate, true)?;
+				Self::remove_worst_candidate(bond)?;
+				weight.saturating_accrue(T::WeightInfo::remove_worst_candidate());
 			}
 
 			Self::do_register_as_candidate(&who, bond)?;
@@ -712,7 +712,7 @@ pub mod pallet {
 			// T::MaxCandidates::get()`, and since `T::MaxCandidates` is `u32` it can be at most
 			// `u32::MAX`, therefore `length + 1` cannot overflow.
 			// TODO add weight for replacement if list is full.
-			Ok(Some(T::WeightInfo::register_as_candidate()).into())
+			Ok(Some(weight).into())
 		}
 
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
@@ -735,7 +735,7 @@ pub mod pallet {
 		}
 
 		/// Add a new account `who` to the list of `Invulnerables` collators. `who` must have
-		/// registered session keys. If `who` is a candidate, it will be removed.
+		/// registered session keys. If `who` is a candidate, the operation will be aborted.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(5)]
@@ -1532,7 +1532,7 @@ pub mod pallet {
 			}
 		}
 
-		/// Identifies the candidate with the lowest candidacy bond and removes it.
+		/// Returns the candidate with the lowest candidacy bond.
 		fn get_worst_candidate() -> Result<(T::AccountId, BalanceOf<T>), DispatchError> {
 			let mut all_candidates = Candidates::<T>::iter()
 				.map(|(candidate, _)| (candidate.clone(), Self::get_bond(&candidate)))
@@ -1540,6 +1540,15 @@ pub mod pallet {
 			all_candidates.sort_by(|(_, bond1), (_, bond2)| bond2.cmp(bond1));
 			let candidate = all_candidates.last().ok_or(Error::<T>::TooManyCandidates)?;
 			Ok(candidate.clone())
+		}
+
+		/// Removes the candidate with the lowest bond, as long as it is lower than `bond`.
+		pub(crate) fn remove_worst_candidate(
+			bond: BalanceOf<T>,
+		) -> Result<CandidateInfo<BalanceOf<T>>, DispatchError> {
+			let (candidate, worst_bond) = Self::get_worst_candidate()?;
+			ensure!(bond > worst_bond, Error::<T>::InvalidCandidacyBond);
+			Self::try_remove_candidate(&candidate, true)
 		}
 
 		/// Ensure the correctness of the state of this pallet.
