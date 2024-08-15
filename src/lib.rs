@@ -703,8 +703,10 @@ pub mod pallet {
 			if length >= T::MaxCandidates::get() {
 				// We have too many candidates, so we have to remove the one with the lowest
 				// candidacy bond.
-				Self::remove_worst_candidate(bond)?;
-				weight.saturating_accrue(T::WeightInfo::remove_worst_candidate());
+				let removed_candidate = Self::remove_worst_candidate(bond)?;
+				weight.saturating_accrue(T::WeightInfo::remove_worst_candidate(
+					removed_candidate.stakers,
+				));
 			}
 
 			Self::do_register_as_candidate(&who, bond)?;

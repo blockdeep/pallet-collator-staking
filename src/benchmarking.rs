@@ -245,7 +245,9 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn remove_worst_candidate() -> Result<(), BenchmarkError> {
+	fn remove_worst_candidate(
+		s: Linear<0, { T::MaxStakers::get() }>,
+	) -> Result<(), BenchmarkError> {
 		let min_bond = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(min_bond);
 
@@ -259,6 +261,26 @@ mod benchmarks {
 				RawOrigin::Signed(validators[i as usize].clone()).into(),
 				min_bond * 2u32.into(),
 			)?;
+		}
+
+		// add stakers to the worst candidate
+		for n in 0..s {
+			let acc = create_funded_user::<T>("staker", n, 1000000);
+			CollatorStaking::<T>::lock(
+				RawOrigin::Signed(acc.clone()).into(),
+				CollatorStaking::<T>::get_free_balance(&acc),
+			)
+			.unwrap();
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(acc.clone()).into(),
+				vec![StakeTarget {
+					candidate: worst_validator.clone(),
+					stake: MinStake::<T>::get(),
+				}]
+				.try_into()
+				.unwrap(),
+			)
+			.unwrap();
 		}
 
 		#[block]
