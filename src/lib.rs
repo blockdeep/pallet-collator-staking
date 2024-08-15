@@ -365,7 +365,7 @@ pub mod pallet {
 	#[derive(DefaultNoBound)]
 	pub struct GenesisConfig<T: Config> {
 		pub invulnerables: Vec<T::AccountId>,
-		pub candidacy_bond: BalanceOf<T>,
+		pub min_candidacy_bond: BalanceOf<T>,
 		pub min_stake: BalanceOf<T>,
 		pub desired_candidates: u32,
 		pub collator_reward_percentage: Percent,
@@ -375,10 +375,6 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
-			assert!(
-				self.min_stake <= self.candidacy_bond,
-				"min_stake is higher than candidacy_bond",
-			);
 			let duplicate_invulnerables = self
 				.invulnerables
 				.iter()
@@ -400,7 +396,7 @@ pub mod pallet {
 			bounded_invulnerables.sort();
 
 			DesiredCandidates::<T>::put(self.desired_candidates);
-			MinCandidacyBond::<T>::put(self.candidacy_bond);
+			MinCandidacyBond::<T>::put(self.min_candidacy_bond);
 			MinStake::<T>::put(self.min_stake);
 			Invulnerables::<T>::put(bounded_invulnerables);
 			CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);

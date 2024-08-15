@@ -238,7 +238,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		.collect::<Vec<_>>();
 	let collator_staking = collator_staking::GenesisConfig::<Test> {
 		desired_candidates: 2,
-		candidacy_bond: 10,
+		min_candidacy_bond: 10,
 		min_stake: 2,
 		invulnerables,
 		collator_reward_percentage: Percent::from_parts(20),

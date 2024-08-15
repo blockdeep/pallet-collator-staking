@@ -109,7 +109,7 @@ fn min_invulnerables<T: Config>() -> u32 {
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
 	use super::*;
-	use frame_support::traits::fungible::{Inspect, Mutate};
+	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
 	use sp_runtime::Perbill;
 
 	#[benchmark]
@@ -648,6 +648,60 @@ mod benchmarks {
 				);
 			}
 		}
+	}
+
+	#[benchmark]
+	fn update_candidacy_bond() {
+		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
+		let caller: T::AccountId = whitelisted_caller();
+		let balance = MinCandidacyBond::<T>::get() * 2u32.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
+		CollatorStaking::<T>::register_as_candidate(
+			RawOrigin::Signed(caller.clone()).into(),
+			MinCandidacyBond::<T>::get(),
+		)
+		.unwrap();
+		assert_eq!(
+			T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &caller),
+			MinCandidacyBond::<T>::get()
+		);
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), balance);
+
+		assert_eq!(
+			T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &caller),
+			balance
+		);
+	}
+
+	#[benchmark]
+	fn lock() {
+		let caller: T::AccountId = whitelisted_caller();
+		let balance = T::Currency::minimum_balance() * 2u32.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), balance);
+
+		assert_eq!(T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller), balance);
+	}
+
+	#[benchmark]
+	fn unlock() {
+		let caller: T::AccountId = whitelisted_caller();
+		let balance = T::Currency::minimum_balance() * 2u32.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
+
+		CollatorStaking::<T>::lock(RawOrigin::Signed(caller.clone()).into(), balance).unwrap();
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), Some(T::Currency::minimum_balance()));
+
+		assert_eq!(
+			T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller),
+			T::Currency::minimum_balance()
+		);
 	}
 
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);

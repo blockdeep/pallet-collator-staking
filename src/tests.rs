@@ -1194,27 +1194,9 @@ fn cannot_set_genesis_value_twice() {
 
 	let collator_staking = collator_staking::GenesisConfig::<Test> {
 		desired_candidates: 2,
-		candidacy_bond: 10,
+		min_candidacy_bond: 10,
 		min_stake: 1,
 		invulnerables,
-		collator_reward_percentage: Percent::from_parts(20),
-		extra_reward: 0,
-	};
-	// collator selection must be initialized before session.
-	collator_staking.assimilate_storage(&mut t).unwrap();
-}
-
-#[test]
-#[should_panic = "min_stake is higher than candidacy_bond"]
-fn cannot_set_invalid_min_stake_in_genesis() {
-	sp_tracing::try_init_simple();
-	let mut t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
-
-	let collator_staking = collator_staking::GenesisConfig::<Test> {
-		desired_candidates: 2,
-		candidacy_bond: 10,
-		min_stake: 15,
-		invulnerables: vec![1, 2],
 		collator_reward_percentage: Percent::from_parts(20),
 		extra_reward: 0,
 	};
@@ -1230,7 +1212,7 @@ fn cannot_set_invalid_max_candidates_in_genesis() {
 
 	let collator_staking = collator_staking::GenesisConfig::<Test> {
 		desired_candidates: 50,
-		candidacy_bond: 10,
+		min_candidacy_bond: 10,
 		min_stake: 2,
 		invulnerables: vec![1, 2],
 		collator_reward_percentage: Percent::from_parts(20),
@@ -1248,7 +1230,7 @@ fn cannot_set_too_many_invulnerables_at_genesis() {
 
 	let collator_staking = collator_staking::GenesisConfig::<Test> {
 		desired_candidates: 5,
-		candidacy_bond: 10,
+		min_candidacy_bond: 10,
 		min_stake: 2,
 		invulnerables: vec![
 			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
@@ -1821,6 +1803,15 @@ fn set_autocompound_percentage() {
 		assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(50));
 		System::assert_last_event(RuntimeEvent::CollatorStaking(
 			Event::AutoCompoundPercentageSet { staker: 5, percentage: Percent::from_parts(50) },
+		));
+		// Set it back to zero.
+		assert_ok!(CollatorStaking::set_autocompound_percentage(
+			RuntimeOrigin::signed(5),
+			Percent::from_parts(0)
+		));
+		assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(
+			Event::AutoCompoundPercentageSet { staker: 5, percentage: Percent::from_parts(0) },
 		));
 	});
 }
