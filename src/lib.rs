@@ -226,21 +226,23 @@ pub mod pallet {
 
 	/// Information about a users' stake.
 	#[derive(
-		Default,
-		PartialEq,
-		Eq,
-		Clone,
-		Encode,
-		Decode,
-		RuntimeDebug,
-		scale_info::TypeInfo,
-		MaxEncodedLen,
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
-	pub struct UserStakeInfo<Balance> {
-		/// Total candidates staked.
-		pub count: u32,
+	pub struct UserStakeInfo<AccountIdSet, Balance> {
 		/// The total amount staked in all candidates.
 		pub stake: Balance,
+		/// The candidates where this user staked.
+		pub candidates: AccountIdSet,
+	}
+
+	impl<AccountIdSet, Balance> Default for UserStakeInfo<AccountIdSet, Balance>
+	where
+		AccountIdSet: Default,
+		Balance: Default,
+	{
+		fn default() -> Self {
+			Self { stake: Balance::default(), candidates: AccountIdSet::default() }
+		}
 	}
 
 	#[pallet::pallet]
@@ -306,8 +308,13 @@ pub mod pallet {
 	///
 	/// Cannot be higher than `MaxStakedCandidates`.
 	#[pallet::storage]
-	pub type UserStake<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, UserStakeInfo<BalanceOf<T>>, ValueQuery>;
+	pub type UserStake<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		UserStakeInfo<BoundedBTreeSet<T::AccountId, T::MaxStakedCandidates>, BalanceOf<T>>,
+		ValueQuery,
+	>;
 
 	/// Release requests for an account.
 	///
@@ -841,6 +848,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::unstake_from())]
 		pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			// TODO claim all rewards!
 			let _ = Self::do_unstake(&who, &candidate)?;
 			Ok(())
 		}
@@ -850,18 +858,15 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let mut operations = 0;
-			// TODO this is a super heavy operation that should be optimized.
-			for (candidate, staker, _) in CandidateStake::<T>::iter() {
-				if staker != who {
-					continue;
-				}
-				let stake = Self::do_unstake(&who, &candidate)?;
-				if !stake.is_zero() {
-					operations += 1;
-				}
+			// TODO claim all rewards!
+
+			let user_stake = UserStake::<T>::get(&who);
+			let candidates = user_stake.candidates.iter().collect::<Vec<_>>();
+			for candidate in candidates.iter() {
+				Self::do_unstake(&who, candidate)?;
 			}
-			Ok(Some(T::WeightInfo::unstake_all(operations)).into())
+
+			Ok(Some(T::WeightInfo::unstake_all(candidates.len() as u32)).into())
 		}
 
 		/// Claims all pending [`ReleaseRequest`] for a given account.
@@ -1154,9 +1159,12 @@ pub mod pallet {
 			candidate: &T::AccountId,
 			amount: BalanceOf<T>,
 		) -> Result<(), DispatchError> {
-			let UserStakeInfo { count, stake: currently_staked } = UserStake::<T>::get(staker);
+			let UserStakeInfo { stake: currently_staked, candidates } = UserStake::<T>::get(staker);
 			let frozen_balance = Self::get_staked_balance(staker);
-			ensure!(count < T::MaxStakedCandidates::get(), Error::<T>::TooManyStakedCandidates);
+			ensure!(
+				(candidates.len() as u32) < T::MaxStakedCandidates::get(),
+				Error::<T>::TooManyStakedCandidates
+			);
 			ensure!(
 				frozen_balance.saturating_sub(currently_staked) >= amount,
 				Error::<T>::InsufficientLockedBalance
@@ -1165,34 +1173,45 @@ pub mod pallet {
 			Candidates::<T>::try_mutate(candidate, |maybe_candidate_info| -> DispatchResult {
 				let mut candidate_info =
 					maybe_candidate_info.clone().ok_or(Error::<T>::NotCandidate)?;
-				CandidateStake::<T>::try_mutate(candidate, staker, |info| -> DispatchResult {
-					let final_staker_stake = info.stake.saturating_add(amount);
-					ensure!(
-						final_staker_stake >= MinStake::<T>::get(),
-						Error::<T>::InsufficientStake
-					);
-					if info.stake.is_zero() {
+				CandidateStake::<T>::try_mutate(
+					candidate,
+					staker,
+					|candidate_stake_info| -> DispatchResult {
+						let final_staker_stake = candidate_stake_info.stake.saturating_add(amount);
 						ensure!(
-							candidate_info.stakers < T::MaxStakers::get(),
-							Error::<T>::TooManyStakers
+							final_staker_stake >= MinStake::<T>::get(),
+							Error::<T>::InsufficientStake
 						);
-						UserStake::<T>::mutate(staker, |info| {
-							info.count.saturating_inc();
-							info.stake.saturating_accrue(amount);
-						});
-						candidate_info.stakers.saturating_inc();
-						info.session = CurrentSession::<T>::get();
-					}
-					info.stake = final_staker_stake;
-					candidate_info.stake.saturating_accrue(amount);
+						let is_first_time = candidate_stake_info.stake.is_zero();
+						if is_first_time {
+							ensure!(
+								candidate_info.stakers < T::MaxStakers::get(),
+								Error::<T>::TooManyStakers
+							);
+							candidate_info.stakers.saturating_inc();
+							candidate_stake_info.session = CurrentSession::<T>::get();
+						}
+						candidate_stake_info.stake = final_staker_stake;
+						candidate_info.stake.saturating_accrue(amount);
+						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
+							if is_first_time {
+								user_stake_info
+									.candidates
+									.try_insert(candidate.clone())
+									.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
+							}
+							user_stake_info.stake.saturating_accrue(amount);
+							Ok(())
+						})?;
 
-					Self::deposit_event(Event::StakeAdded {
-						staker: staker.clone(),
-						candidate: candidate.clone(),
-						amount,
-					});
-					Ok(())
-				})?;
+						Self::deposit_event(Event::StakeAdded {
+							staker: staker.clone(),
+							candidate: candidate.clone(),
+							amount,
+						});
+						Ok(())
+					},
+				)?;
 				*maybe_candidate_info = Some(candidate_info);
 				Ok(())
 			})
@@ -1236,15 +1255,13 @@ pub mod pallet {
 					stake = candidate_stake_info.stake;
 					UserStake::<T>::mutate_exists(staker, |maybe_user_stake_info| {
 						if let Some(user_stake_info) = maybe_user_stake_info {
-							match user_stake_info.count {
+							match user_stake_info.candidates.len() {
 								0..=1 => *maybe_user_stake_info = None,
 								_ => {
-									*maybe_user_stake_info = Some(UserStakeInfo {
-										count: user_stake_info.count.saturating_sub(1),
-										stake: user_stake_info
-											.stake
-											.saturating_sub(candidate_stake_info.stake),
-									});
+									user_stake_info
+										.stake
+										.saturating_reduce(candidate_stake_info.stake);
+									user_stake_info.candidates.remove(candidate);
 								},
 							}
 						} else {
@@ -1589,7 +1606,8 @@ pub mod pallet {
 
 			ensure!(
 				UserStake::<T>::iter_values()
-					.all(|UserStakeInfo { count, .. }| count < T::MaxStakedCandidates::get()),
+					.all(|UserStakeInfo { candidates, .. }| (candidates.len() as u32)
+						< T::MaxStakedCandidates::get()),
 				"Stake count must not exceed MaxStakedCandidates"
 			);
 

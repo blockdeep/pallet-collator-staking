@@ -15,11 +15,24 @@ use frame_support::{
 		fungible::{Inspect, Mutate},
 		OnInitialize,
 	},
+	BoundedBTreeSet,
 };
 use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage, Percent, TokenError};
 use std::ops::RangeInclusive;
 
 type AccountId = <Test as frame_system::Config>::AccountId;
+
+macro_rules! bbtreeset {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut set = sp_std::collections::btree_set::BTreeSet::new();
+            $(
+                set.insert($x);
+            )*
+            set.try_into().unwrap()
+        }
+    };
+}
 
 fn fund_account(acc: AccountId) {
 	Balances::mint_into(&acc, 100).unwrap();
@@ -1309,11 +1322,17 @@ fn stake() {
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		assert_eq!(Candidates::<Test>::iter_values().next().unwrap().stake, 0);
 
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 0);
-		assert_eq!(UserStake::<Test>::get(4), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(4),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		lock_for_staking(4..=4);
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(4),
@@ -1328,7 +1347,10 @@ fn stake() {
 		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 20, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(Candidates::<Test>::iter_values().next().unwrap().stake, 20);
-		assert_eq!(UserStake::<Test>::get(4), UserStakeInfo { count: 1, stake: 20 });
+		assert_eq!(
+			UserStake::<Test>::get(4),
+			UserStakeInfo { stake: 20, candidates: bbtreeset![3] }
+		);
 	});
 }
 
@@ -1343,7 +1365,10 @@ fn stake_many_at_once() {
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 0, session: 0 });
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(3),
@@ -1363,7 +1388,10 @@ fn stake_many_at_once() {
 		}));
 		assert_eq!(CandidateStake::<Test>::get(4, 3), CandidateStakeInfo { stake: 20, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 20, session: 0 });
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 2, stake: 40 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 40, candidates: bbtreeset![3, 4] }
+		);
 	});
 }
 
@@ -1378,7 +1406,10 @@ fn stake_many_over_limits_should_fail() {
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 0, session: 0 });
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 
 		assert_noop!(
 			CollatorStaking::stake(
@@ -1490,7 +1521,13 @@ fn cannot_stake_too_many_staked_candidates() {
 				vec![StakeTarget { candidate: i, stake: 2 }].try_into().unwrap()
 			));
 		}
-		assert_eq!(UserStake::<Test>::get(1), UserStakeInfo { count: 16, stake: 32 });
+		assert_eq!(
+			UserStake::<Test>::get(1),
+			UserStakeInfo {
+				stake: 32,
+				candidates: bbtreeset![3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+			}
+		);
 		assert_noop!(
 			CollatorStaking::stake(
 				RuntimeOrigin::signed(1),
@@ -1551,7 +1588,10 @@ fn unstake_from_candidate() {
 
 		register_candidates(3..=4);
 		lock_for_staking(5..=5);
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(5),
 			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
@@ -1570,7 +1610,10 @@ fn unstake_from_candidate() {
 
 		// unstake from actual candidate
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 		assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
 			staker: 5,
@@ -1585,7 +1628,10 @@ fn unstake_from_candidate() {
 				(4, CandidateInfo { stake: 10, stakers: 1 }),
 			]
 		);
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 1, stake: 10 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 10, candidates: bbtreeset![4] }
+		);
 		assert_eq!(CandidateStake::<Test>::get(3, 5), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(4, 5), CandidateStakeInfo { stake: 10, session: 0 });
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
@@ -1598,28 +1644,40 @@ fn unstake_self() {
 	new_test_ext().execute_with(|| {
 		initialize_to_block(1);
 
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		assert_eq!(Balances::balance(&3), 100);
 		assert_eq!(MinCandidacyBond::<Test>::get(), 10);
 		register_candidates(3..=4);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 
 		lock_for_staking(3..=3);
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(3),
 			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 1, stake: 20 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 20, candidates: bbtreeset![3] }
+		);
 
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(3),
 			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
 		));
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 
 		assert_eq!(
 			candidate_list(),
@@ -1643,7 +1701,10 @@ fn unstake_self() {
 				(4, CandidateInfo { stake: 10, stakers: 1 }),
 			]
 		);
-		assert_eq!(UserStake::<Test>::get(3), UserStakeInfo { count: 1, stake: 10 });
+		assert_eq!(
+			UserStake::<Test>::get(3),
+			UserStakeInfo { stake: 10, candidates: bbtreeset![4] }
+		);
 		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(4, 3), CandidateStakeInfo { stake: 10, session: 0 });
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
@@ -1662,7 +1723,10 @@ fn unstake_from_ex_candidate() {
 		initialize_to_block(1);
 
 		register_candidates(3..=4);
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		lock_for_staking(5..=5);
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(5),
@@ -1683,12 +1747,18 @@ fn unstake_from_ex_candidate() {
 		assert_eq!(CandidateStake::<Test>::get(4, 5), CandidateStakeInfo { stake: 10, session: 0 });
 
 		// unstake from ex-candidate.
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 		assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 		assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 10, stakers: 1 })]);
 
 		// the stake should be the same.
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 		assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 	});
@@ -1702,7 +1772,10 @@ fn unstake_all() {
 		register_candidates(3..=4);
 		lock_for_staking(5..=5);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		assert_ok!(CollatorStaking::stake(
 			RuntimeOrigin::signed(5),
 			vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
@@ -1719,12 +1792,18 @@ fn unstake_all() {
 			]
 		);
 
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 		assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 		assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 10, stakers: 1 })]);
 
 		// the stake should be untouched.
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 2, stake: 30 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 30, candidates: bbtreeset![3, 4] }
+		);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 		assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
@@ -1740,7 +1819,10 @@ fn unstake_all() {
 		assert_eq!(ReleaseQueues::<Test>::get(5), vec![]);
 		assert_eq!(CandidateStake::<Test>::get(3, 5), CandidateStakeInfo { stake: 0, session: 0 });
 		assert_eq!(CandidateStake::<Test>::get(4, 5), CandidateStakeInfo { stake: 0, session: 0 });
-		assert_eq!(UserStake::<Test>::get(5), UserStakeInfo { count: 0, stake: 0 });
+		assert_eq!(
+			UserStake::<Test>::get(5),
+			UserStakeInfo { stake: 0, candidates: BoundedBTreeSet::new() }
+		);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 		assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 0, stakers: 0 })]);
 	});
