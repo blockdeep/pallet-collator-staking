@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
 
-use frame_support::weights::Weight;
 use frame_support::{
 	derive_impl, ord_parameter_types, parameter_types,
 	traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
@@ -44,10 +43,6 @@ parameter_types! {
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
 impl system::Config for Test {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type Nonce = u64;
@@ -65,7 +60,6 @@ impl system::Config for Test {
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
 	type SS58Prefix = SS58Prefix;
-	type OnSetCode = ();
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
@@ -223,6 +217,7 @@ impl Config for Test {
 	type MaxStakers = ConstU32<25>;
 	type BondUnlockDelay = ConstU64<5>;
 	type StakeUnlockDelay = ConstU64<2>;
+	type MaxRewards = ConstU32<10>;
 	type WeightInfo = ();
 }
 
@@ -260,12 +255,4 @@ pub fn initialize_to_block(n: u64) {
 		System::set_block_number(i);
 		<AllPalletsWithSystem as frame_support::traits::OnInitialize<u64>>::on_initialize(i);
 	}
-}
-
-pub fn finalize_current_block() {
-	let current_block = System::block_number();
-	<AllPalletsWithSystem as frame_support::traits::OnIdle<u64>>::on_idle(
-		current_block,
-		Weight::MAX,
-	);
 }

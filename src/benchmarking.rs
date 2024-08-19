@@ -110,7 +110,6 @@ fn min_invulnerables<T: Config>() -> u32 {
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
-	use sp_runtime::Perbill;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -165,7 +164,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, new_invulnerable.clone());
 
-		assert_last_event::<T>(Event::InvulnerableAdded { account_id: new_invulnerable }.into());
+		assert_last_event::<T>(Event::InvulnerableAdded { account: new_invulnerable }.into());
 		Ok(())
 	}
 
@@ -240,14 +239,12 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), bond);
 
-		assert_last_event::<T>(Event::CandidateAdded { account_id: caller, deposit: bond }.into());
+		assert_last_event::<T>(Event::CandidateAdded { account: caller, deposit: bond }.into());
 		Ok(())
 	}
 
 	#[benchmark]
-	fn remove_worst_candidate(
-		s: Linear<0, { T::MaxStakers::get() }>,
-	) -> Result<(), BenchmarkError> {
+	fn remove_worst_candidate() -> Result<(), BenchmarkError> {
 		let min_bond = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(min_bond);
 
@@ -263,26 +260,6 @@ mod benchmarks {
 			)?;
 		}
 
-		// add stakers to the worst candidate
-		for n in 0..s {
-			let acc = create_funded_user::<T>("staker", n, 1000000);
-			CollatorStaking::<T>::lock(
-				RawOrigin::Signed(acc.clone()).into(),
-				CollatorStaking::<T>::get_free_balance(&acc),
-			)
-			.unwrap();
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(acc.clone()).into(),
-				vec![StakeTarget {
-					candidate: worst_validator.clone(),
-					stake: MinStake::<T>::get(),
-				}]
-				.try_into()
-				.unwrap(),
-			)
-			.unwrap();
-		}
-
 		#[block]
 		{
 			CollatorStaking::<T>::remove_worst_candidate(
@@ -290,7 +267,7 @@ mod benchmarks {
 			)?;
 		}
 
-		assert_last_event::<T>(Event::CandidateRemoved { account_id: worst_validator }.into());
+		assert_last_event::<T>(Event::CandidateRemoved { account: worst_validator }.into());
 		Ok(())
 	}
 
@@ -309,7 +286,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(leaving.clone()));
 
-		assert_last_event::<T>(Event::CandidateRemoved { account_id: leaving }.into());
+		assert_last_event::<T>(Event::CandidateRemoved { account: leaving }.into());
 	}
 
 	// worse case is paying a non-existing candidate account.
@@ -495,7 +472,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn claim(c: Linear<0, { T::MaxStakedCandidates::get() }>) {
+	fn release(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
@@ -521,6 +498,15 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()));
 
 		assert_eq!(0, ReleaseQueues::<T>::get(&caller).len());
+	}
+
+	#[benchmark]
+	fn claim_rewards(r: Linear<1, { T::MaxRewards::get() }>) {
+		// TODO complete this benchmark
+		let caller: T::AccountId = whitelisted_caller();
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()));
 	}
 
 	#[benchmark]
@@ -605,98 +591,66 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn reward_one_collator(s: Linear<0, { T::MaxStakers::get() }>, a: Linear<0, 100>) {
+	fn start_session() {
+		#[block]
+		{
+			<CollatorStaking<T> as SessionManager<_>>::start_session(1);
+		}
+
+		assert_eq!(TotalBlocks::<T>::get(), (0, 0));
+		assert_eq!(CurrentSession::<T>::get(), 1);
+	}
+
+	#[benchmark]
+	fn end_session(c: Linear<1, { T::MaxCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
 		MinCandidacyBond::<T>::put(amount);
 		MinStake::<T>::put(amount);
-		frame_system::Pallet::<T>::set_block_number(0u32.into());
 		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
-		let collator = register_validators::<T>(1)[0].clone();
-		register_candidates::<T>(1);
+		let candidates = register_validators::<T>(c);
+		register_candidates::<T>(c);
 
-		let autocompound = Percent::from_parts(a as u8) * s;
-		let mut accounts = vec![];
-		let mut autocompound_accounts = vec![];
-		for n in 0..s {
-			let acc = create_funded_user::<T>("staker", n, 1000);
-			CollatorStaking::<T>::lock(
-				RawOrigin::Signed(acc.clone()).into(),
-				CollatorStaking::<T>::get_free_balance(&acc),
-			)
-			.unwrap();
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(acc.clone()).into(),
-				vec![StakeTarget { candidate: collator.clone(), stake: amount }]
-					.try_into()
-					.unwrap(),
-			)
-			.unwrap();
-			if n <= autocompound {
-				CollatorStaking::<T>::set_autocompound_percentage(
-					RawOrigin::Signed(acc.clone()).into(),
-					Percent::from_parts(50),
-				)
-				.unwrap();
-				autocompound_accounts.push(acc.clone());
-			}
-			accounts.push(acc);
-		}
 		<CollatorStaking<T> as SessionManager<_>>::start_session(1);
-		for _ in 0..10 {
-			<CollatorStaking<T> as EventHandler<_, _>>::note_author(collator.clone())
+		for candidate in candidates.clone() {
+			<CollatorStaking<T> as EventHandler<_, _>>::note_author(candidate.clone())
 		}
 		frame_system::Pallet::<T>::set_block_number(20u32.into());
-		let total_rewards = amount * s.into();
+		let total_rewards = amount * c.into();
 		T::Currency::mint_into(
 			&CollatorStaking::<T>::account_id(),
 			total_rewards + T::Currency::minimum_balance(),
 		)
 		.unwrap();
-		<CollatorStaking<T> as SessionManager<_>>::end_session(1);
-		assert_last_event::<T>(
-			Event::<T>::SessionEnded { index: 1, rewards: total_rewards }.into(),
-		);
-		<CollatorStaking<T> as SessionManager<_>>::start_session(2);
+		for (n, candidate) in candidates.clone().iter().enumerate() {
+			let staker = create_funded_user::<T>("staker", n as u32, 1000);
+			CollatorStaking::<T>::lock(
+				RawOrigin::Signed(staker.clone()).into(),
+				CollatorStaking::<T>::get_free_balance(&staker),
+			)
+			.unwrap();
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(staker.clone()).into(),
+				vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+					.try_into()
+					.unwrap(),
+			)
+			.unwrap();
+		}
 
 		#[block]
 		{
-			CollatorStaking::<T>::reward_one_collator(1);
+			<CollatorStaking<T> as SessionManager<_>>::end_session(1);
 		}
 
-		let collator_reward = CollatorRewardPercentage::<T>::get().mul_floor(total_rewards);
+		let collator_reward = CollatorRewardPercentage::<T>::get().mul_floor(amount);
 		if !collator_reward.is_zero() {
-			assert_has_event::<T>(
-				Event::<T>::StakingRewardReceived {
-					staker: collator.clone(),
-					amount: collator_reward,
-					session: 1,
-				}
-				.into(),
-			);
-		}
-
-		if s > 0 {
-			let stakers_reward = total_rewards - collator_reward;
-			let expected_reward =
-				Perbill::from_rational(amount, amount * s.into()).mul_floor(stakers_reward);
-			for acc in accounts {
+			for candidate in candidates {
 				assert_has_event::<T>(
 					Event::<T>::StakingRewardReceived {
-						staker: acc.clone(),
-						amount: expected_reward,
-						session: 1,
-					}
-					.into(),
-				);
-			}
-
-			for acc in autocompound_accounts {
-				assert_has_event::<T>(
-					Event::<T>::StakeAdded {
-						staker: acc.clone(),
-						candidate: collator.clone(),
-						amount: expected_reward / 2u32.into(),
+						account: candidate.clone(),
+						amount: collator_reward,
 					}
 					.into(),
 				);
