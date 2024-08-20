@@ -2,9 +2,8 @@ use crate as collator_staking;
 use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidateInfo, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
-	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MaxDesiredCandidates,
-	MinCandidacyBond, MinStake, ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake,
-	UserStakeInfo,
+	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MinCandidacyBond, MinStake,
+	ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
 };
 use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
@@ -88,8 +87,6 @@ fn basic_setup_works() {
 		assert_eq!(<Test as Config>::BondUnlockDelay::get(), 5);
 		assert_eq!(<Test as Config>::StakeUnlockDelay::get(), 2);
 		assert_eq!(<Test as Config>::MaxStakers::get(), 25);
-		// should always be MaxInvulnerables + MaxCandidates
-		assert_eq!(MaxDesiredCandidates::<Test>::get(), 40);
 
 		assert_eq!(DesiredCandidates::<Test>::get(), 2);
 		assert_eq!(MinCandidacyBond::<Test>::get(), 10);
@@ -346,16 +343,16 @@ fn set_desired_candidates_works() {
 		// can set
 		assert_ok!(CollatorStaking::set_desired_candidates(
 			RuntimeOrigin::signed(RootAccount::get()),
-			40
+			4
 		));
 		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::NewDesiredCandidates {
-			desired_candidates: 40,
+			desired_candidates: 4,
 		}));
-		assert_eq!(DesiredCandidates::<Test>::get(), 40);
+		assert_eq!(DesiredCandidates::<Test>::get(), 4);
 
 		// rejects bad origin
 		assert_noop!(
-			CollatorStaking::set_desired_candidates(RuntimeOrigin::signed(1), 8),
+			CollatorStaking::set_desired_candidates(RuntimeOrigin::signed(1), 2),
 			BadOrigin
 		);
 		// rejects bad origin

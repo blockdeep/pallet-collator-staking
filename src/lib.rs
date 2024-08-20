@@ -90,14 +90,6 @@ pub mod pallet {
 		}
 	}
 
-	pub struct MaxDesiredCandidates<T>(PhantomData<T>);
-	impl<T: Config> TypedGet for MaxDesiredCandidates<T> {
-		type Type = u32;
-		fn get() -> Self::Type {
-			T::MaxCandidates::get().saturating_add(T::MaxInvulnerables::get())
-		}
-	}
-
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// Overarching event type.
@@ -551,10 +543,6 @@ pub mod pallet {
 		fn integrity_test() {
 			assert!(T::MinEligibleCollators::get() > 0, "chain must require at least one collator");
 			assert!(
-				MaxDesiredCandidates::<T>::get() >= T::MinEligibleCollators::get(),
-				"invulnerables and candidates must be able to satisfy collator demand"
-			);
-			assert!(
 				T::MaxCandidates::get() >= T::MaxStakedCandidates::get(),
 				"MaxCandidates must be greater than or equal to MaxStakedCandidates"
 			);
@@ -658,7 +646,8 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::set_desired_candidates())]
 		pub fn set_desired_candidates(origin: OriginFor<T>, max: u32) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
-			ensure!(max <= MaxDesiredCandidates::<T>::get(), Error::<T>::TooManyDesiredCandidates);
+			let max_value = T::MaxCandidates::get();
+			ensure!(max <= max_value, Error::<T>::TooManyDesiredCandidates);
 			DesiredCandidates::<T>::put(max);
 			Self::deposit_event(Event::NewDesiredCandidates { desired_candidates: max });
 			Ok(())
