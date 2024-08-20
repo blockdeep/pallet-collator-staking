@@ -507,6 +507,8 @@ mod benchmarks {
 		r: Linear<1, { T::MaxRewards::get() }>,
 	) {
 		let amount = T::Currency::minimum_balance();
+		MinStake::<T>::put(amount);
+		MinCandidacyBond::<T>::put(amount);
 		let staker = create_funded_user::<T>("staker", 0, 10000);
 		CollatorStaking::<T>::lock(
 			RawOrigin::Signed(staker.clone()).into(),
@@ -520,7 +522,7 @@ mod benchmarks {
 		.unwrap();
 
 		let mut reward_map = BoundedBTreeMap::new();
-		let total_candidates = T::MaxCandidates::get().max(T::MaxStakedCandidates::get());
+		let total_candidates = T::MaxCandidates::get();
 		let candidates = register_validators::<T>(total_candidates);
 		register_candidates::<T>(total_candidates);
 		for (index, candidate) in candidates.iter().enumerate() {
@@ -531,7 +533,7 @@ mod benchmarks {
 						.try_into()
 						.unwrap(),
 				)
-				.unwrap();
+				.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
 			}
 			reward_map.try_insert(candidate.clone(), (amount, amount)).unwrap();
 		}

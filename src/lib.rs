@@ -819,10 +819,12 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 			let len = targets.len() as u32;
 			ensure!(len > 0, Error::<T>::TooFewCandidates);
+
+			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
 			for StakeTarget { candidate, stake } in targets {
 				Self::do_stake(&who, &candidate, stake)?;
 			}
-			Ok(Some(T::WeightInfo::stake(Candidates::<T>::count())).into())
+			Ok(Some(T::WeightInfo::stake(len).saturating_add(claim_weight)).into())
 		}
 
 		/// Removes stake from a collator candidate.
@@ -833,12 +835,15 @@ pub mod pallet {
 		/// The candidate will have its position in the [`Candidates`] updated.
 		#[pallet::call_index(8)]
 		#[pallet::weight(T::WeightInfo::unstake_from())]
-		pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
+		pub fn unstake_from(
+			origin: OriginFor<T>,
+			candidate: T::AccountId,
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::do_claim_rewards(&who)?;
-			// TODO include weight
+			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
 			let _ = Self::do_unstake(&who, &candidate)?;
-			Ok(())
+
+			Ok(Some(T::WeightInfo::unstake_from().saturating_add(claim_weight)).into())
 		}
 
 		/// Removes all stake of a user from all candidates.
@@ -846,16 +851,15 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::do_claim_rewards(&who)?;
-			// TODO include weight
+			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
 
 			let user_stake = UserStake::<T>::get(&who);
-			let candidates = user_stake.candidates.iter().collect::<Vec<_>>();
-			for candidate in candidates.iter() {
+			let len = user_stake.candidates.len() as u32;
+			for candidate in &user_stake.candidates {
 				Self::do_unstake(&who, candidate)?;
 			}
 
-			Ok(Some(T::WeightInfo::unstake_all(candidates.len() as u32)).into())
+			Ok(Some(T::WeightInfo::unstake_all(len).saturating_add(claim_weight)).into())
 		}
 
 		/// Releases all pending [`ReleaseRequest`] for a given account.
@@ -1043,8 +1047,11 @@ pub mod pallet {
 
 		/// Claims all rewards for previous sessions.
 		#[pallet::call_index(20)]
-		#[pallet::weight({0})]
-		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::claim_rewards(
+			T::MaxStakedCandidates::get(),
+			T::MaxRewards::get()
+		))]
+		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			Self::do_claim_rewards(&who)
 		}
@@ -1100,8 +1107,10 @@ pub mod pallet {
 		}
 
 		/// Claims all rewards from previous sessions.
-		fn do_claim_rewards(who: &T::AccountId) -> DispatchResult {
-			UserStake::<T>::mutate(who, |user_stake_info| -> DispatchResult {
+		fn do_claim_rewards(who: &T::AccountId) -> DispatchResultWithPostInfo {
+			UserStake::<T>::mutate(who, |user_stake_info| -> DispatchResultWithPostInfo {
+				let mut total_sessions = 0;
+				let mut total_candidates = 0;
 				if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
 					let mut candidate_rewards = user_stake_info
 						.candidates
@@ -1114,6 +1123,8 @@ pub mod pallet {
 						})
 						.collect::<BTreeMap<_, _>>();
 					let current_session = CurrentSession::<T>::get();
+					total_sessions = current_session.saturating_sub(last_reward_session);
+					total_candidates = user_stake_info.candidates.len() as u32;
 					let mut total_rewards: BalanceOf<T> = Zero::zero();
 					let mut total_unclaimable_rewards: BalanceOf<T> = Zero::zero();
 					for session in last_reward_session..current_session {
@@ -1147,7 +1158,7 @@ pub mod pallet {
 					}
 					user_stake_info.maybe_last_reward_session = Some(current_session);
 				}
-				Ok(())
+				Ok(Some(T::WeightInfo::claim_rewards(total_candidates, total_sessions)).into())
 			})
 		}
 
@@ -1269,12 +1280,10 @@ pub mod pallet {
 						candidate_stake_info.stake = final_staker_stake;
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
-							if is_first_time {
-								user_stake_info
-									.candidates
-									.try_insert(candidate.clone())
-									.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
-							}
+							user_stake_info
+								.candidates
+								.try_insert(candidate.clone())
+								.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
 							user_stake_info.stake.saturating_accrue(amount);
 							if user_stake_info.maybe_last_reward_session.is_none() {
 								user_stake_info.maybe_last_reward_session = Some(current_session);
@@ -1417,7 +1426,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		pub(crate) fn reward_collators(session: SessionIndex) -> (u32, BalanceOf<T>) {
+		fn reward_collators(session: SessionIndex) -> (u32, BalanceOf<T>) {
 			// Firstly remove old rewards, if needed.
 			let mut released_rewards: BalanceOf<T> = Zero::zero();
 			if PerSessionRewards::<T>::count() >= T::MaxRewards::get() {
