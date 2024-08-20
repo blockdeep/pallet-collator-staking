@@ -1237,13 +1237,8 @@ pub mod pallet {
 			candidate: &T::AccountId,
 			amount: BalanceOf<T>,
 		) -> Result<(), DispatchError> {
-			let UserStakeInfo { stake: currently_staked, candidates, .. } =
-				UserStake::<T>::get(staker);
+			let UserStakeInfo { stake: currently_staked, .. } = UserStake::<T>::get(staker);
 			let frozen_balance = Self::get_staked_balance(staker);
-			ensure!(
-				(candidates.len() as u32) < T::MaxStakedCandidates::get(),
-				Error::<T>::TooManyStakedCandidates
-			);
 			ensure!(
 				frozen_balance.saturating_sub(currently_staked) >= amount,
 				Error::<T>::InsufficientLockedBalance
@@ -1501,11 +1496,11 @@ pub mod pallet {
 
 		/// Locks the provided `amount` from `account` for staking.
 		fn do_lock(account: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
-			let available_balance = Self::get_free_balance(&account);
+			let available_balance = Self::get_free_balance(account);
 			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
 
-			let total = Self::get_staked_balance(&account).saturating_add(amount);
-			T::Currency::set_freeze(&FreezeReason::Staking.into(), &account, total)?;
+			let total = Self::get_staked_balance(account).saturating_add(amount);
+			T::Currency::set_freeze(&FreezeReason::Staking.into(), account, total)?;
 
 			Self::deposit_event(Event::<T>::LockExtended { amount });
 			Ok(())

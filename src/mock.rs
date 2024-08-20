@@ -217,7 +217,7 @@ impl Config for Test {
 	type MaxStakers = ConstU32<25>;
 	type BondUnlockDelay = ConstU64<5>;
 	type StakeUnlockDelay = ConstU64<2>;
-	type MaxRewards = ConstU32<10>;
+	type MaxRewards = ConstU32<300>;
 	type WeightInfo = ();
 }
 
