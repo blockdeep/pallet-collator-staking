@@ -36,24 +36,22 @@ Rewards are distributed so that all stakeholders are incentivized to participate
 
 ### Staking
 
-Any account in the parachain can deposit a stake on a given candidate so that this way it can possess a higher deposit than solely with its own candidacy bond and hence increase its possibilities to be selected as a collator.
-
-If the candidate receives stake from users, it is incentivized to remain online and behave honestly, as this way it will have access to staking rewards, and its stakers will be incentivized to retain the stake, as they would be rewarded.
+Any account in the parachain can deposit a stake on a given candidate so that he gets access to staking rewards proportional to the blocks produced by the selected candidate.
 
 ### Un-staking
 
-When a user or candidate wishes to unstake, there is a delay: the staker will have to wait for a given number of blocks before their funds are released/unreserved. No rewards are given during this delay period.
+When a user or candidate wishes to unstake, there is a delay: the staker will have to wait for a given number of blocks before their funds are unlocked. No rewards are given during this delay period.
 
 ### Auto Compounding
 
 Users can also select the percentage of rewards that will be auto-compounded. If the selected percentage is greater than zero, part of the rewards will be re-invested as stake in the collator when receiving rewards per block.
 
-### Hooks
+### Reward delivery
 
-This pallet uses the following hooks:
-
-* `on_initialize`: Rewards distribution happens in on_initialize. After the session starts one collator per block will be rewarded, along with its stakers. This should be considered when setting max stakers per collator to not consume too much block weight when distributing rewards.
-* `on_idle`: Return of funds to stakers when a candidate leaves. This is a best-effort process, based on whether the block has sufficient unused space left.
+When a session ends, an snapshot of the generated rewards and the per-candidate stake is taken. This information is used to calculate the per-staker rewards for that session.
+Stakers will have to call the `claim_rewards` extrinsic to collect the corresponding earnings from the previous sessions. This process will be automatically triggered whenever
+the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be autocompounded if the user set an autocompound percentage
+greater than zero.
 
 ### Runtime Configuration
 
@@ -74,6 +72,7 @@ This pallet uses the following hooks:
 | `CollatorRegistration` | Validate a collator is registered.                                                                   |
 | `MaxStakedCandidates`  | Maximum candidates a staker can stake on.                                                            |
 | `MaxStakers`           | Maximum stakers per candidate.                                                                       |
+| `MaxRewards`           | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `BondUnlockDelay`      | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `StakeUnlockDelay`     | Number of blocks to wait before unlocking the stake by a user.                                       |
 | `WeightInfo`           | Information on runtime weights.                                                                      |
@@ -81,9 +80,6 @@ This pallet uses the following hooks:
 ### Setup Considerations
 
 While it is desired to set `MaxStakedCandidates` and `MaxStakers` to a reasonably high value, bear in mind this may significantly impact block weight consumption. We recommend to measure the weights and set values that in the worst case do not occupy more than a sane limit, like ~10% of the block's total weight.
-
-The number of `DesiredCandidates` must be lower than the worst-case session length, as otherwise
-not all collators (and their stakers) will receive the rewards because rewards are distributed for one collator per block.
 
 ### Dependencies
 

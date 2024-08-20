@@ -357,7 +357,7 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Blocks produced in the current session. First value the total,
+	/// Blocks produced in the current session. First value is the total,
 	/// and second is blocks produced by candidates only (not invulnerables).
 	#[pallet::storage]
 	pub type TotalBlocks<T: Config> = StorageValue<_, (u32, u32), ValueQuery>;
@@ -795,7 +795,7 @@ pub mod pallet {
 		/// Allows a user to stake on a set of collator candidates.
 		///
 		/// The call will fail if:
-		///     - `origin` does not have the at least `MinStake` deposited in the candidate.
+		///     - `origin` does not have the at least [`MinStake`] deposited in the candidate.
 		///     - one of the `targets` is not in the [`Candidates`] map.
 		///     - the user does not have sufficient locked balance to stake.
 		///     - zero targets are passed.
@@ -818,10 +818,7 @@ pub mod pallet {
 
 		/// Removes stake from a collator candidate.
 		///
-		/// If the candidate is an active collator, the caller will get the funds after a delay. Otherwise,
-		/// funds will be returned immediately.
-		///
-		/// The candidate will have its position in the [`Candidates`] updated.
+		/// The amount unstaked will remain locked.
 		#[pallet::call_index(8)]
 		#[pallet::weight(T::WeightInfo::unstake_from())]
 		pub fn unstake_from(
@@ -836,6 +833,8 @@ pub mod pallet {
 		}
 
 		/// Removes all stake of a user from all candidates.
+		///
+		/// The amount unstaked will remain locked.
 		#[pallet::call_index(9)]
 		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
@@ -852,6 +851,8 @@ pub mod pallet {
 		}
 
 		/// Releases all pending [`ReleaseRequest`] for a given account.
+		///
+		/// This will unlock all funds in [`ReleaseRequest`] that have already expired.
 		#[pallet::call_index(10)]
 		#[pallet::weight(T::WeightInfo::release(T::MaxStakedCandidates::get()))]
 		pub fn release(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
@@ -861,6 +862,8 @@ pub mod pallet {
 		}
 
 		/// Sets the percentage of rewards that should be auto-compounded.
+		///
+		/// Rewards will be autocompunded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
 		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
 		pub fn set_autocompound_percentage(
@@ -987,7 +990,9 @@ pub mod pallet {
 			Self::do_lock(&who, amount)
 		}
 
-		/// Unlocks funds used for staking and queues them to be released.
+		/// Adds staked funds to the [`ReleaseRequest`] queue.
+		///
+		/// Funds will actually be released after [`StakeUnlockDelay`].
 		#[pallet::call_index(18)]
 		#[pallet::weight(T::WeightInfo::unlock())]
 		pub fn unlock(origin: OriginFor<T>, maybe_amount: Option<BalanceOf<T>>) -> DispatchResult {
@@ -1013,6 +1018,10 @@ pub mod pallet {
 		}
 
 		/// Updates the candidacy bond for this candidate.
+		///
+		/// For this operation to succeed, the user must:
+		///   - Be a candidate.
+		///   - Have sufficient free balance to be locked.
 		#[pallet::call_index(19)]
 		#[pallet::weight(T::WeightInfo::update_candidacy_bond())]
 		pub fn update_candidacy_bond(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
