@@ -175,7 +175,7 @@ pub mod pallet {
 		/// Maximum number of rewards to keep in storage. Non-claimed rewards will not be claimable
 		/// after they have been removed.
 		#[pallet::constant]
-		type MaxRewards: Get<u32>;
+		type MaxSessionRewards: Get<u32>;
 
 		/// The weight information of this pallet.
 		type WeightInfo: WeightInfo;
@@ -1047,7 +1047,7 @@ pub mod pallet {
 		#[pallet::call_index(20)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(
 			T::MaxStakedCandidates::get(),
-			T::MaxRewards::get()
+			T::MaxSessionRewards::get()
 		))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
@@ -1165,7 +1165,7 @@ pub mod pallet {
 		/// The account has to lock the candidacy bond. If the account was previously a candidate
 		/// the retained stake will be re-included.
 		///
-		/// Returns the registered candidate.
+		/// Returns the registered candidate info.
 		pub fn do_register_as_candidate(
 			who: &T::AccountId,
 			bond: BalanceOf<T>,
@@ -1204,7 +1204,7 @@ pub mod pallet {
 			Ok(candidate)
 		}
 
-		/// Releases all pending release requests for a given user that are completed.
+		/// Releases all pending release requests for a given user that are expired.
 		///
 		/// Returns the amount of operations performed.
 		pub fn do_release(who: &T::AccountId) -> Result<u32, DispatchError> {
@@ -1302,7 +1302,7 @@ pub mod pallet {
 			})
 		}
 
-		/// Return the total number of accounts that are eligible collators (candidates and
+		/// Return the total number of accounts that are eligible collators (both candidates and
 		/// invulnerables).
 		pub fn eligible_collators() -> u32 {
 			Candidates::<T>::count()
@@ -1367,7 +1367,7 @@ pub mod pallet {
 
 		/// Attempts to remove a candidate, identified by its account, if it exists and refunds the stake.
 		///
-		/// Returns the candidate info.
+		/// Returns the candidate info prior to its removal.
 		fn try_remove_candidate(
 			who: &T::AccountId,
 			remove_last_authored: bool,
@@ -1424,11 +1424,13 @@ pub mod pallet {
 			Ok(())
 		}
 
-		fn reward_collators(session: SessionIndex) -> (u32, BalanceOf<T>) {
-			// Firstly remove old rewards, if needed.
+		/// Removes old rewards when a new session starts.
+		///
+		/// Returns the rewards that have been released.
+		fn remove_old_rewards_if_needed(session: SessionIndex) -> BalanceOf<T> {
 			let mut released_rewards: BalanceOf<T> = Zero::zero();
-			if PerSessionRewards::<T>::count() >= T::MaxRewards::get() {
-				let reward_to_remove = session.saturating_sub(T::MaxRewards::get());
+			if PerSessionRewards::<T>::count() >= T::MaxSessionRewards::get() {
+				let reward_to_remove = session.saturating_sub(T::MaxSessionRewards::get());
 				PerSessionRewards::<T>::mutate_exists(reward_to_remove, |maybe_reward| {
 					if let Some(reward) = maybe_reward {
 						released_rewards.saturating_accrue(reward.rewards);
@@ -1436,6 +1438,15 @@ pub mod pallet {
 					*maybe_reward = None;
 				});
 			}
+			released_rewards
+		}
+
+		/// Rewards all collators for a given session.
+		///
+		/// Returns a tuple with the number of rewardable collators and the total rewards for the
+		/// current session.
+		fn reward_collators(session: SessionIndex) -> (u32, BalanceOf<T>) {
+			let released_rewards = Self::remove_old_rewards_if_needed(session);
 
 			// Calculate the total rewards for this session.
 			let claimable_rewards = ClaimableRewards::<T>::get().saturating_sub(released_rewards);
@@ -1444,11 +1455,10 @@ pub mod pallet {
 					.saturating_sub(claimable_rewards);
 
 			let mut stakers_rewards: BalanceOf<T> = Zero::zero();
-			let mut rewardable_collators: u32 = Zero::zero();
+			let mut reward_map = BoundedBTreeMap::new();
 			let (_, rewardable_blocks) = TotalBlocks::<T>::get();
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
-				let mut reward_map = BoundedBTreeMap::new();
 				for (collator, blocks) in ProducedBlocks::<T>::drain() {
 					if let Ok(collator_info) = Self::get_candidate(&collator) {
 						if blocks > rewardable_blocks {
@@ -1484,19 +1494,18 @@ pub mod pallet {
 							.is_ok()
 						{
 							stakers_rewards.saturating_accrue(stakers_only_rewards);
-							rewardable_collators.saturating_inc();
 						}
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}
 				}
-
-				PerSessionRewards::<T>::insert(
-					session,
-					SessionInfo { rewards: stakers_rewards, candidates: reward_map },
-				);
 			}
 
+			let rewardable_collators: u32 = reward_map.len() as u32;
+			PerSessionRewards::<T>::insert(
+				session,
+				SessionInfo { rewards: stakers_rewards, candidates: reward_map },
+			);
 			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
 			(rewardable_collators, total_rewards)
 		}
@@ -1514,6 +1523,8 @@ pub mod pallet {
 		}
 
 		/// Rewards a single account.
+		///
+		/// If the reward is zero, this is a no-op.
 		fn do_reward_single(who: &T::AccountId, reward: BalanceOf<T>) -> DispatchResult {
 			if !reward.is_zero() {
 				T::Currency::transfer(&Self::account_id(), who, reward, Preserve)?;
@@ -1525,7 +1536,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Gets the current block number
+		/// Gets the current block number.
 		pub fn current_block_number() -> BlockNumberFor<T> {
 			frame_system::Pallet::<T>::block_number()
 		}

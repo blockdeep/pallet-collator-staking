@@ -3,7 +3,8 @@ use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidateInfo, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
 	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MinCandidacyBond, MinStake,
-	ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
+	PerSessionRewards, ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake,
+	UserStakeInfo,
 };
 use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
@@ -701,6 +702,53 @@ fn register_as_candidate_works() {
 		assert_eq!(CandidateStake::<Test>::get(4, 4), CandidateStakeInfo { stake: 0, session: 0 });
 
 		assert_eq!(Candidates::<Test>::count(), 2);
+	});
+}
+
+#[test]
+fn register_as_candidate_counts_old_stake_when_rejoining() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		// given
+		assert_eq!(DesiredCandidates::<Test>::get(), 2);
+		assert_eq!(MinCandidacyBond::<Test>::get(), 10);
+		assert_eq!(Candidates::<Test>::count(), 0);
+		assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+
+		// register the first time
+		assert_eq!(Balances::balance(&3), 100);
+		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
+		register_candidates(3..=3);
+		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+		assert_eq!(CandidateStake::<Test>::get(3, 3), CandidateStakeInfo { stake: 0, session: 0 });
+		assert_eq!(Candidates::<Test>::count(), 1);
+		assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+
+		// another user adds stake
+		fund_account(4);
+		assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(4), 60));
+		assert_ok!(CollatorStaking::stake(
+			RuntimeOrigin::signed(4),
+			vec![StakeTarget { candidate: 3, stake: 60 }].try_into().unwrap()
+		));
+		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 60, session: 0 });
+		assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 60, stakers: 1 }));
+
+		// the candidate leaves
+		assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+		// the stake remains the same
+		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 60, session: 0 });
+		assert_eq!(Candidates::<Test>::count(), 0);
+
+		// and finally rejoins and the stake should remain
+		assert_ok!(CollatorStaking::register_as_candidate(
+			RuntimeOrigin::signed(3),
+			MinCandidacyBond::<Test>::get()
+		));
+		assert_eq!(CandidateStake::<Test>::get(3, 4), CandidateStakeInfo { stake: 60, session: 0 });
+		assert_eq!(Candidates::<Test>::count(), 1);
+		assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 60, stakers: 1 }));
 	});
 }
 
@@ -2186,7 +2234,7 @@ fn should_reward_collator() {
 		assert_eq!(CurrentSession::<Test>::get(), 2);
 		assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 
-		// the block 20 just god produced, and belongs to the new session.
+		// the block 20 just got produced, and belongs to the new session.
 		assert_eq!(ProducedBlocks::<Test>::get(4), 1);
 
 		// Total rewards in session 1: 18 (8 accumulated from session 0)
@@ -2215,6 +2263,30 @@ fn should_reward_collator() {
 			account: 4,
 			amount: 15,
 		}));
+	});
+}
+
+#[test]
+fn should_remove_oldest_reward() {
+	new_test_ext().execute_with(|| {
+		initialize_to_block(1);
+
+		let max_rewards = <Test as Config>::MaxSessionRewards::get();
+		assert_eq!(max_rewards, 10);
+		register_candidates(3..=3);
+		for session in 0..max_rewards {
+			initialize_to_block(((session + 1) * 10) as u64);
+			assert_eq!(PerSessionRewards::<Test>::count(), session + 1);
+		}
+		assert_eq!(CollatorStaking::current_block_number(), 100);
+		assert_eq!(PerSessionRewards::<Test>::count(), 10);
+		assert!(PerSessionRewards::<Test>::get(0).is_some());
+
+		// now rewards for session zero should be removed
+		initialize_to_block(110);
+		assert_eq!(CollatorStaking::current_block_number(), 110);
+		assert_eq!(PerSessionRewards::<Test>::count(), 10);
+		assert!(PerSessionRewards::<Test>::get(0).is_none());
 	});
 }
 
@@ -2628,14 +2700,28 @@ fn update_candidacy_bond() {
 
 		register_candidates(3..=3);
 		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
-		assert_ok!(CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(3), 20));
-		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 20);
 
-		// cannot set it below the minimum candidacy bond
+		// Cannot set it below the minimum candidacy bond.
 		assert_noop!(
 			CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(3), 5),
 			Error::<Test>::InvalidCandidacyBond
 		);
+		// Cannot set it if not candidate.
+		assert_noop!(
+			CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(4), 15),
+			Error::<Test>::NotCandidate
+		);
+		// Cannot set it not enough free balance.
+		assert_noop!(
+			CollatorStaking::update_candidacy_bond(
+				RuntimeOrigin::signed(3),
+				Balances::balance(&3) + 10
+			),
+			Error::<Test>::InsufficientFreeBalance
+		);
+
+		assert_ok!(CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(3), 20));
+		assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 20);
 	});
 }
 

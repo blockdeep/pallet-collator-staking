@@ -504,7 +504,7 @@ mod benchmarks {
 	#[benchmark]
 	fn claim_rewards(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxRewards::get() }>,
+		r: Linear<1, { T::MaxSessionRewards::get() }>,
 	) {
 		let amount = T::Currency::minimum_balance();
 		MinStake::<T>::put(amount);

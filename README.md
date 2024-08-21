@@ -72,7 +72,7 @@ greater than zero.
 | `CollatorRegistration` | Validate a collator is registered.                                                                   |
 | `MaxStakedCandidates`  | Maximum candidates a staker can stake on.                                                            |
 | `MaxStakers`           | Maximum stakers per candidate.                                                                       |
-| `MaxRewards`           | Maximum number of per-session reward snapshots to keep in storage.                                   |
+| `MaxSessionRewards`    | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `BondUnlockDelay`      | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `StakeUnlockDelay`     | Number of blocks to wait before unlocking the stake by a user.                                       |
 | `WeightInfo`           | Information on runtime weights.                                                                      |
