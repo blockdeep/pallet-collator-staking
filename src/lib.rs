@@ -419,12 +419,12 @@ pub mod pallet {
 
 			bounded_invulnerables.sort();
 
-			DesiredCandidates::<T>::put(self.desired_candidates);
-			MinCandidacyBond::<T>::put(self.min_candidacy_bond);
-			MinStake::<T>::put(self.min_stake);
-			Invulnerables::<T>::put(bounded_invulnerables);
-			CollatorRewardPercentage::<T>::put(self.collator_reward_percentage);
-			ExtraReward::<T>::put(self.extra_reward);
+			DesiredCandidates::<T>::set(self.desired_candidates);
+			MinCandidacyBond::<T>::set(self.min_candidacy_bond);
+			MinStake::<T>::set(self.min_stake);
+			Invulnerables::<T>::set(bounded_invulnerables);
+			CollatorRewardPercentage::<T>::set(self.collator_reward_percentage);
+			ExtraReward::<T>::set(self.extra_reward);
 		}
 	}
 
@@ -629,10 +629,9 @@ pub mod pallet {
 			// Invulnerables must be sorted for removal.
 			bounded_invulnerables.sort();
 
-			Invulnerables::<T>::put(&bounded_invulnerables);
-			Self::deposit_event(Event::NewInvulnerables {
-				invulnerables: bounded_invulnerables.to_vec(),
-			});
+			let invulnerables = bounded_invulnerables.to_vec();
+			Invulnerables::<T>::set(bounded_invulnerables);
+			Self::deposit_event(Event::NewInvulnerables { invulnerables });
 
 			Ok(())
 		}
@@ -647,8 +646,8 @@ pub mod pallet {
 		pub fn set_desired_candidates(origin: OriginFor<T>, max: u32) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(max <= T::MaxCandidates::get(), Error::<T>::TooManyDesiredCandidates);
-			
-			DesiredCandidates::<T>::put(max);
+
+			DesiredCandidates::<T>::set(max);
 			Self::deposit_event(Event::NewDesiredCandidates { desired_candidates: max });
 			Ok(())
 		}
@@ -661,7 +660,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::set_min_candidacy_bond())]
 		pub fn set_min_candidacy_bond(origin: OriginFor<T>, bond: BalanceOf<T>) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
-			MinCandidacyBond::<T>::put(bond);
+			MinCandidacyBond::<T>::set(bond);
 			Self::deposit_event(Event::NewMinCandidacyBond { bond_amount: bond });
 			Ok(())
 		}
@@ -893,7 +892,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 
-			CollatorRewardPercentage::<T>::put(percent);
+			CollatorRewardPercentage::<T>::set(percent);
 			Self::deposit_event(Event::CollatorRewardPercentageSet { percentage: percent });
 			Ok(())
 		}
@@ -912,7 +911,7 @@ pub mod pallet {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(!extra_reward.is_zero(), Error::<T>::InvalidExtraReward);
 
-			ExtraReward::<T>::put(extra_reward);
+			ExtraReward::<T>::set(extra_reward);
 			Self::deposit_event(Event::ExtraRewardSet { amount: extra_reward });
 			Ok(())
 		}
@@ -929,7 +928,7 @@ pub mod pallet {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(new_min_stake <= MinCandidacyBond::<T>::get(), Error::<T>::InvalidMinStake);
 
-			MinStake::<T>::put(new_min_stake);
+			MinStake::<T>::set(new_min_stake);
 			Self::deposit_event(Event::NewMinStake { min_stake: new_min_stake });
 			Ok(())
 		}
@@ -1716,7 +1715,7 @@ pub mod pallet {
 
 	/// Keep track of number of authored blocks per authority. Uncles are counted as well since
 	/// they're a valid proof of being online.
-	/// 
+	///
 	/// If the account is a candidate, it will get rewards for producing blocks.
 	impl<T: Config + pallet_authorship::Config>
 		pallet_authorship::EventHandler<T::AccountId, BlockNumberFor<T>> for Pallet<T>
@@ -1761,8 +1760,8 @@ pub mod pallet {
 
 		fn start_session(index: SessionIndex) {
 			// Initialize counters for this session
-			TotalBlocks::<T>::put((0, 0));
-			CurrentSession::<T>::put(index);
+			TotalBlocks::<T>::set((0, 0));
+			CurrentSession::<T>::set(index);
 
 			frame_system::Pallet::<T>::register_extra_weight_unchecked(
 				T::WeightInfo::start_session(),

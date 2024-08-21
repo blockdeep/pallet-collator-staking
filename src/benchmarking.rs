@@ -141,9 +141,9 @@ mod benchmarks {
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
 
 		// need to fill up candidates
-		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
-		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(0);
+		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
+		MinStake::<T>::set(T::Currency::minimum_balance());
+		DesiredCandidates::<T>::set(0);
 		// add one more to the list. should not be in `b` (invulnerables) because it's the account
 		// we will _add_ to invulnerables. we want it to be in `candidates` because we need the
 		// weight associated with removing it.
@@ -154,7 +154,7 @@ mod benchmarks {
 		invulnerables.sort();
 		let invulnerables: frame_support::BoundedVec<_, T::MaxInvulnerables> =
 			frame_support::BoundedVec::try_from(invulnerables).unwrap();
-		Invulnerables::<T>::put(invulnerables);
+		Invulnerables::<T>::set(invulnerables);
 		pallet_session::Pallet::<T>::set_keys(
 			RawOrigin::Signed(new_invulnerable.clone()).into(),
 			keys,
@@ -179,7 +179,7 @@ mod benchmarks {
 		invulnerables.sort();
 		let invulnerables: frame_support::BoundedVec<_, T::MaxInvulnerables> =
 			frame_support::BoundedVec::try_from(invulnerables).unwrap();
-		Invulnerables::<T>::put(invulnerables);
+		Invulnerables::<T>::set(invulnerables);
 		let to_remove = Invulnerables::<T>::get().first().unwrap().clone();
 
 		#[extrinsic_call]
@@ -205,8 +205,8 @@ mod benchmarks {
 	#[benchmark]
 	fn set_min_candidacy_bond() -> Result<(), BenchmarkError> {
 		let initial_bond_amount: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
-		MinCandidacyBond::<T>::put(initial_bond_amount);
-		MinStake::<T>::put(T::Currency::minimum_balance());
+		MinCandidacyBond::<T>::set(initial_bond_amount);
+		MinStake::<T>::set(T::Currency::minimum_balance());
 
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
@@ -223,9 +223,9 @@ mod benchmarks {
 	// one.
 	#[benchmark]
 	fn register_as_candidate() -> Result<(), BenchmarkError> {
-		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
-		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(1);
+		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
+		MinStake::<T>::set(T::Currency::minimum_balance());
+		DesiredCandidates::<T>::set(1);
 
 		let caller: T::AccountId = whitelisted_caller();
 		let bond: BalanceOf<T> = T::Currency::minimum_balance() * 2u32.into();
@@ -247,7 +247,7 @@ mod benchmarks {
 	#[benchmark]
 	fn remove_worst_candidate() -> Result<(), BenchmarkError> {
 		let min_bond = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(min_bond);
+		MinCandidacyBond::<T>::set(min_bond);
 
 		// Fill the candidates.
 		let candidates = <T as Config>::MaxCandidates::get();
@@ -274,9 +274,9 @@ mod benchmarks {
 
 	#[benchmark]
 	fn leave_intent() {
-		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
-		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(1);
+		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
+		MinStake::<T>::set(T::Currency::minimum_balance());
+		DesiredCandidates::<T>::set(1);
 
 		register_validators::<T>(1);
 		register_candidates::<T>(1);
@@ -312,9 +312,9 @@ mod benchmarks {
 		r: Linear<1, { T::MaxCandidates::get() }>,
 		c: Linear<1, { T::MaxCandidates::get() }>,
 	) {
-		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
-		MinStake::<T>::put(T::Currency::minimum_balance());
-		DesiredCandidates::<T>::put(c);
+		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
+		MinStake::<T>::set(T::Currency::minimum_balance());
+		DesiredCandidates::<T>::set(c);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		register_validators::<T>(c);
@@ -373,8 +373,8 @@ mod benchmarks {
 	#[benchmark]
 	fn stake(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(amount);
-		MinStake::<T>::put(amount);
+		MinCandidacyBond::<T>::set(amount);
+		MinStake::<T>::set(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		register_validators::<T>(c);
@@ -406,8 +406,8 @@ mod benchmarks {
 	#[benchmark]
 	fn unstake_from() {
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(amount);
-		MinStake::<T>::put(amount);
+		MinCandidacyBond::<T>::set(amount);
+		MinStake::<T>::set(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		register_validators::<T>(1);
@@ -439,8 +439,8 @@ mod benchmarks {
 	#[benchmark]
 	fn unstake_all(s: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(amount);
-		MinStake::<T>::put(amount);
+		MinCandidacyBond::<T>::set(amount);
+		MinStake::<T>::set(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		register_validators::<T>(s);
@@ -475,7 +475,7 @@ mod benchmarks {
 	#[benchmark]
 	fn release(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(amount);
+		MinCandidacyBond::<T>::set(amount);
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		let caller = whitelisted_caller();
@@ -507,8 +507,8 @@ mod benchmarks {
 		r: Linear<1, { T::MaxSessionRewards::get() }>,
 	) {
 		let amount = T::Currency::minimum_balance();
-		MinStake::<T>::put(amount);
-		MinCandidacyBond::<T>::put(amount);
+		MinStake::<T>::set(amount);
+		MinCandidacyBond::<T>::set(amount);
 		let staker = create_funded_user::<T>("staker", 0, 10000);
 		CollatorStaking::<T>::lock(
 			RawOrigin::Signed(staker.clone()).into(),
@@ -628,7 +628,7 @@ mod benchmarks {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
 		let initial_reward: BalanceOf<T> = T::Currency::minimum_balance();
-		ExtraReward::<T>::put(initial_reward);
+		ExtraReward::<T>::set(initial_reward);
 		T::Currency::mint_into(&CollatorStaking::<T>::extra_reward_account_id(), initial_reward)?;
 
 		#[extrinsic_call]
@@ -668,9 +668,9 @@ mod benchmarks {
 	#[benchmark]
 	fn end_session(c: Linear<1, { T::MaxCandidates::get() }>) {
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::put(amount);
-		MinStake::<T>::put(amount);
-		CollatorRewardPercentage::<T>::put(Percent::from_parts(20));
+		MinCandidacyBond::<T>::set(amount);
+		MinStake::<T>::set(amount);
+		CollatorRewardPercentage::<T>::set(Percent::from_parts(20));
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		let candidates = register_validators::<T>(c);
@@ -724,7 +724,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn update_candidacy_bond() {
-		MinCandidacyBond::<T>::put(T::Currency::minimum_balance());
+		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
 		let caller = register_validators::<T>(1)[0].clone();
 		whitelist_account!(caller);
 		let balance = MinCandidacyBond::<T>::get() * 2u32.into();

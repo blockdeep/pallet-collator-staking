@@ -571,7 +571,7 @@ fn cannot_unregister_candidate_if_too_few() {
 		);
 
 		// reset desired candidates:
-		DesiredCandidates::<Test>::put(1);
+		DesiredCandidates::<Test>::set(1);
 		register_candidates(4..=4);
 
 		// now we can remove `2`
@@ -2302,7 +2302,7 @@ fn should_reward_collator_with_extra_rewards() {
 			RuntimeOrigin::signed(4),
 			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
 		));
-		ExtraReward::<Test>::put(1);
+		ExtraReward::<Test>::set(1);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 		Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance()).unwrap();
 		fund_account(CollatorStaking::extra_reward_account_id());
@@ -2401,7 +2401,7 @@ fn should_reward_collator_with_extra_rewards_and_no_funds() {
 			vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
 		));
 		// This account has no funds
-		ExtraReward::<Test>::put(1);
+		ExtraReward::<Test>::set(1);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 		Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance()).unwrap();
 
@@ -2525,7 +2525,7 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 
 		// Staker 3 will autocompound 40% of its earnings
 		AutoCompound::<Test>::insert(3, Percent::from_parts(40));
-		ExtraReward::<Test>::put(1);
+		ExtraReward::<Test>::set(1);
 		assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 		Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance()).unwrap();
 		fund_account(CollatorStaking::extra_reward_account_id());
