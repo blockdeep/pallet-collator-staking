@@ -7,7 +7,7 @@
 //! The Collator Staking pallet provides DPoS functionality to manage collators of a parachain.
 //! It allows stakers to stake their tokens to back collators, and receive rewards proportionately.
 //! There is no slashing in place. If a collator does not produce blocks as expected,
-//! they are removed from the collator set.
+//! it is removed from the collator set.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -646,8 +646,8 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::set_desired_candidates())]
 		pub fn set_desired_candidates(origin: OriginFor<T>, max: u32) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
-			let max_value = T::MaxCandidates::get();
-			ensure!(max <= max_value, Error::<T>::TooManyDesiredCandidates);
+			ensure!(max <= T::MaxCandidates::get(), Error::<T>::TooManyDesiredCandidates);
+			
 			DesiredCandidates::<T>::put(max);
 			Self::deposit_event(Event::NewDesiredCandidates { desired_candidates: max });
 			Ok(())
@@ -704,8 +704,7 @@ pub mod pallet {
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
 		/// candidate and its stakers after this moment.
 		///
-		/// This call will fail if the total number of candidates would drop below
-		/// `MinEligibleCollators`.
+		/// This call will fail if the total number of candidates would drop below `MinEligibleCollators`.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::leave_intent())]
 		pub fn leave_intent(origin: OriginFor<T>) -> DispatchResult {
@@ -863,7 +862,7 @@ pub mod pallet {
 
 		/// Sets the percentage of rewards that should be auto-compounded.
 		///
-		/// Rewards will be autocompunded when calling the `claim_rewards` extrinsic.
+		/// Rewards will be autocompounded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
 		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
 		pub fn set_autocompound_percentage(
@@ -981,7 +980,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Locks free funds to be used for staking.
+		/// Locks free balance from the caller to be used for staking.
 		#[pallet::call_index(17)]
 		#[pallet::weight(T::WeightInfo::lock())]
 		pub fn lock(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
@@ -1019,7 +1018,7 @@ pub mod pallet {
 
 		/// Updates the candidacy bond for this candidate.
 		///
-		/// For this operation to succeed, the user must:
+		/// For this operation to succeed, the caller must:
 		///   - Be a candidate.
 		///   - Have sufficient free balance to be locked.
 		#[pallet::call_index(19)]
@@ -1066,16 +1065,25 @@ pub mod pallet {
 			T::ExtraRewardPotId::get().into_account_truncating()
 		}
 
-		/// Checks whether a given account is a candidate and returns its position if successful.
+		/// Checks whether a given `account` is a candidate and returns its position if successful.
 		pub fn get_candidate(account: &T::AccountId) -> Result<CandidateInfoOf<T>, DispatchError> {
 			Candidates::<T>::get(account).ok_or(Error::<T>::NotCandidate.into())
 		}
 
-		/// Checks whether a given account is an invulnerable.
+		/// Checks whether a given `account` is an invulnerable.
 		pub fn is_invulnerable(account: &T::AccountId) -> bool {
 			Invulnerables::<T>::get().binary_search(account).is_ok()
 		}
 
+		/// Calculates the rewards for a given session.
+		///
+		/// The `candidate_rewards` map will be mutated to include the rewards for the collators.
+		///
+		/// Returns a tuple including:
+		///   - The total rewardable amount.
+		///   - The unclaimable rewards. These are the rewards that were generated for stakers
+		///     that joined during the session rewards are being distributed for. Stakers do not
+		///     receive rewards for the session they joined in.
 		fn calculate_rewards_for_session(
 			index: SessionIndex,
 			session_rewards: &SessionInfoOf<T>,
@@ -1105,6 +1113,8 @@ pub mod pallet {
 		}
 
 		/// Claims all rewards from previous sessions.
+		///
+		/// Returns dispatch information, including the consumed weight.
 		fn do_claim_rewards(who: &T::AccountId) -> DispatchResultWithPostInfo {
 			UserStake::<T>::mutate(who, |user_stake_info| -> DispatchResultWithPostInfo {
 				let mut total_sessions = 0;
@@ -1240,7 +1250,15 @@ pub mod pallet {
 			Ok(pos as u32)
 		}
 
-		/// Adds stake into a given candidate by providing its address.
+		/// Adds stake into a given candidate by providing its address and the amount to stake.
+		///
+		/// This operation will fail if:
+		///   - The user does not have sufficient locked balance to perform this operation.
+		///   - The candidate is not registered as such.
+		///   - The total staked amount for this staker in this candidate is lower than [`MinStake`].
+		///   - The amount of stakers for this candidate is greater than or equal to [`MaxStakers`]
+		///     and the staker did not previously have stake on this candidate.
+		///   - The staker staked on more than [`MaxStakedCandidates`] candidates.
 		fn do_stake(
 			staker: &T::AccountId,
 			candidate: &T::AccountId,
@@ -1302,14 +1320,14 @@ pub mod pallet {
 			})
 		}
 
-		/// Return the total number of accounts that are eligible collators (both candidates and
+		/// Returns the total number of accounts that are eligible collators (both candidates and
 		/// invulnerables).
 		pub fn eligible_collators() -> u32 {
 			Candidates::<T>::count()
 				.saturating_add(Invulnerables::<T>::decode_len().unwrap_or_default() as u32)
 		}
 
-		/// Unstakes all funds deposited in a given `candidate`.
+		/// Unstakes all funds deposited by `staker` in a given `candidate`.
 		///
 		/// Returns the amount unstaked.
 		fn do_unstake(
@@ -1476,7 +1494,7 @@ pub mod pallet {
 						}
 
 						// No rewards if:
-						// - The collator has no stakers
+						// - The collator has no stakers.
 						// - It is the first session. This is because stakers do not receive rewards
 						//   for the first session they stake in, so in the worst case they staked
 						//   in session zero.
@@ -1511,6 +1529,8 @@ pub mod pallet {
 		}
 
 		/// Locks the provided `amount` from `account` for staking.
+		///
+		/// The operation will fail if `account` does not have sufficient free balance.
 		fn do_lock(account: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
 			let available_balance = Self::get_free_balance(account);
 			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
@@ -1670,8 +1690,24 @@ pub mod pallet {
 			ensure!(
 				UserStake::<T>::iter_values()
 					.all(|UserStakeInfo { candidates, .. }| (candidates.len() as u32)
-						< T::MaxStakedCandidates::get()),
+						<= T::MaxStakedCandidates::get()),
 				"Stake count must not exceed MaxStakedCandidates"
+			);
+
+			ensure!(
+				Candidates::<T>::iter_values()
+					.all(|CandidateInfo { stakers, .. }| stakers <= T::MaxStakers::get()),
+				"Staker count must not exceed MaxStakers"
+			);
+
+			ensure!(
+				Candidates::<T>::count() <= T::MaxCandidates::get(),
+				"Candidate count must not exceed MaxCandidates"
+			);
+
+			ensure!(
+				PerSessionRewards::<T>::count() <= T::MaxSessionRewards::get(),
+				"Per-session reward count must not exceed MaxSessionRewards"
 			);
 
 			Ok(())
@@ -1680,6 +1716,8 @@ pub mod pallet {
 
 	/// Keep track of number of authored blocks per authority. Uncles are counted as well since
 	/// they're a valid proof of being online.
+	/// 
+	/// If the account is a candidate, it will get rewards for producing blocks.
 	impl<T: Config + pallet_authorship::Config>
 		pallet_authorship::EventHandler<T::AccountId, BlockNumberFor<T>> for Pallet<T>
 	{
@@ -1775,11 +1813,11 @@ where
 }
 
 sp_api::decl_runtime_apis! {
-	/// This runtime api allows people to query the two pot addresses.
+	/// This runtime api allows to query the two pot accounts.
 	pub trait CollatorStakingApi<AccountId>
 	where AccountId: Codec
 	{
-		/// Queries the main pot account
+		/// Queries the main pot account.
 		fn main_pot_account() -> AccountId;
 
 		/// Queries the extra reward pot account.
