@@ -1,4 +1,4 @@
-//! Benchmarking setup for pallet-collator-staking
+//! Benchmarking setup for pallet-collator-staking.
 
 use super::*;
 
