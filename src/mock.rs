@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
 
-use frame_support::weights::Weight;
 use frame_support::{
 	derive_impl, ord_parameter_types, parameter_types,
 	traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
@@ -44,10 +43,6 @@ parameter_types! {
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig as frame_system::DefaultConfig)]
 impl system::Config for Test {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type Nonce = u64;
@@ -65,7 +60,6 @@ impl system::Config for Test {
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
 	type SS58Prefix = SS58Prefix;
-	type OnSetCode = ();
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
@@ -77,17 +71,17 @@ parameter_types! {
 impl pallet_balances::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeHoldReason = RuntimeHoldReason;
-	type RuntimeFreezeReason = RuntimeFreezeReason;
+	type RuntimeFreezeReason = ();
 	type WeightInfo = ();
 	type Balance = u64;
 	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
 	type ReserveIdentifier = [u8; 8];
-	type FreezeIdentifier = ();
+	type FreezeIdentifier = RuntimeFreezeReason;
 	type MaxLocks = ();
 	type MaxReserves = MaxReserves;
-	type MaxFreezes = ConstU32<0>;
+	type MaxFreezes = ConstU32<10>;
 }
 
 pub struct Author4;
@@ -207,7 +201,7 @@ impl Get<Option<AccountId>> for SendFundsToAccount40 {
 impl Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type RuntimeHoldReason = RuntimeHoldReason;
+	type RuntimeFreezeReason = RuntimeFreezeReason;
 	type UpdateOrigin = EnsureSignedBy<RootAccount, u64>;
 	type PotId = PotId;
 	type ExtraRewardPotId = ExtraRewardPotId;
@@ -221,8 +215,9 @@ impl Config for Test {
 	type CollatorRegistration = IsRegistered;
 	type MaxStakedCandidates = ConstU32<16>;
 	type MaxStakers = ConstU32<25>;
-	type CollatorUnstakingDelay = ConstU64<5>;
-	type UserUnstakingDelay = ConstU64<2>;
+	type BondUnlockDelay = ConstU64<5>;
+	type StakeUnlockDelay = ConstU64<2>;
+	type MaxSessionRewards = ConstU32<10>;
 	type WeightInfo = ();
 }
 
@@ -238,7 +233,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		.collect::<Vec<_>>();
 	let collator_staking = collator_staking::GenesisConfig::<Test> {
 		desired_candidates: 2,
-		candidacy_bond: 10,
+		min_candidacy_bond: 10,
 		min_stake: 2,
 		invulnerables,
 		collator_reward_percentage: Percent::from_parts(20),
@@ -260,12 +255,4 @@ pub fn initialize_to_block(n: u64) {
 		System::set_block_number(i);
 		<AllPalletsWithSystem as frame_support::traits::OnInitialize<u64>>::on_initialize(i);
 	}
-}
-
-pub fn finalize_current_block() {
-	let current_block = System::block_number();
-	<AllPalletsWithSystem as frame_support::traits::OnIdle<u64>>::on_idle(
-		current_block,
-		Weight::MAX,
-	);
 }
