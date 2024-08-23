@@ -798,7 +798,11 @@ pub mod pallet {
 		///     - the user does not have sufficient locked balance to stake.
 		///     - zero targets are passed.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::stake(T::MaxStakedCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::stake(T::MaxStakedCandidates::get())
+			.saturating_add(T::WeightInfo::claim_rewards(
+								T::MaxCandidates::get(),
+								T::MaxSessionRewards::get())))
+		]
 		pub fn stake(
 			origin: OriginFor<T>,
 			targets: BoundedVec<StakeTargetOf<T>, T::MaxStakedCandidates>,
@@ -818,7 +822,11 @@ pub mod pallet {
 		///
 		/// The amount unstaked will remain locked.
 		#[pallet::call_index(8)]
-		#[pallet::weight(T::WeightInfo::unstake_from())]
+		#[pallet::weight(T::WeightInfo::unstake_from()
+			.saturating_add(T::WeightInfo::claim_rewards(
+								T::MaxCandidates::get(),
+								T::MaxSessionRewards::get())))
+		]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
@@ -834,7 +842,11 @@ pub mod pallet {
 		///
 		/// The amount unstaked will remain locked.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
+		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get())
+			.saturating_add(T::WeightInfo::claim_rewards(
+								T::MaxCandidates::get(),
+								T::MaxSessionRewards::get())))
+		]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
