@@ -70,29 +70,32 @@ fn validator<T: Config + pallet_session::Config>(
 	(create_funded_user::<T>("candidate", c, 1000), keys::<T>(c))
 }
 
+fn register_single_validator<T: Config + pallet_session::Config>(id: u32) -> T::AccountId {
+	let (who, keys) = validator::<T>(id);
+	pallet_session::Pallet::<T>::set_keys(RawOrigin::Signed(who.clone()).into(), keys, Vec::new())
+		.unwrap();
+	who
+}
+
 fn register_validators<T: Config + pallet_session::Config>(count: u32) -> Vec<T::AccountId> {
-	let validators = (0..count).map(|c| validator::<T>(c)).collect::<Vec<_>>();
+	(0..count).map(|c| register_single_validator::<T>(c)).collect::<Vec<_>>()
+}
 
-	for (who, keys) in validators.clone() {
-		pallet_session::Pallet::<T>::set_keys(RawOrigin::Signed(who).into(), keys, Vec::new())
-			.unwrap();
-	}
-
-	validators.into_iter().map(|(who, _)| who).collect()
+fn register_single_candidate<T: Config>(id: u32) {
+	let who = account("candidate", id, SEED);
+	assert!(MinCandidacyBond::<T>::get() > 0u32.into(), "Bond cannot be zero!");
+	T::Currency::mint_into(&who, MinCandidacyBond::<T>::get() * 3u32.into()).unwrap();
+	CollatorStaking::<T>::register_as_candidate(
+		RawOrigin::Signed(who).into(),
+		MinCandidacyBond::<T>::get(),
+	)
+	.unwrap();
 }
 
 fn register_candidates<T: Config>(count: u32) {
-	let candidates = (0..count).map(|c| account("candidate", c, SEED)).collect::<Vec<_>>();
-	assert!(MinCandidacyBond::<T>::get() > 0u32.into(), "Bond cannot be zero!");
-
-	for who in candidates {
-		T::Currency::mint_into(&who, MinCandidacyBond::<T>::get() * 3u32.into()).unwrap();
-		CollatorStaking::<T>::register_as_candidate(
-			RawOrigin::Signed(who).into(),
-			MinCandidacyBond::<T>::get(),
-		)
-		.unwrap();
-	}
+	(0..count).for_each(|c| {
+		register_single_candidate::<T>(c);
+	});
 }
 
 fn min_candidates<T: Config>() -> u32 {
@@ -165,7 +168,6 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
-	use sp_runtime::BoundedVec;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -429,19 +431,23 @@ mod benchmarks {
 	fn stake(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		r: Linear<1, { T::MaxSessionRewards::get() }>,
+		s: Linear<1, { T::MaxStakedCandidates::get() }>,
 	) {
-		let (caller, _, candidates) = prepare_rewards::<T>(c, r);
+		let (caller, _, mut candidates) = prepare_rewards::<T>(c, r);
 		let amount = T::Currency::minimum_balance();
-		let targets: BoundedVec<StakeTargetOf<T>, T::MaxStakedCandidates> = candidates
+		let extra_candidates = Candidates::<T>::iter_keys()
+			.filter(|candidate| !candidates.iter().any(|cand| *cand == *candidate))
+			.take(s.saturating_sub(c) as usize)
+			.collect::<Vec<_>>();
+		candidates.extend(extra_candidates);
+		let targets: Vec<StakeTargetOf<T>> = candidates
 			.into_iter()
 			.map(|candidate| StakeTarget { candidate, stake: amount })
-			.take(c as usize)
-			.collect::<Vec<_>>()
-			.try_into()
-			.unwrap();
+			.take(s as usize)
+			.collect::<Vec<_>>();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), targets.clone());
+		_(RawOrigin::Signed(caller.clone()), targets.clone().try_into().unwrap());
 
 		for target in targets {
 			assert_has_event::<T>(
