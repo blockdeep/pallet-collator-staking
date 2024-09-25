@@ -48,7 +48,7 @@ Users can also select the percentage of rewards that will be auto-compounded. If
 
 ### Reward delivery
 
-When a session ends, an snapshot of the generated rewards and the per-candidate stake is taken. This information is used to calculate the per-staker rewards for that session.
+When a session ends, a snapshot of the generated rewards and the per-candidate stake is taken. This information is used to calculate the per-staker rewards for that session.
 Stakers will have to call the `claim_rewards` extrinsic to collect the corresponding earnings from the previous sessions. This process will be automatically triggered whenever
 the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be autocompounded if the user set an autocompound percentage
 greater than zero.
