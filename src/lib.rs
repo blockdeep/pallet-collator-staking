@@ -1124,7 +1124,7 @@ pub mod pallet {
 
 		/// Claims all rewards from previous sessions.
 		///
-		/// Returns dispatch information, including the consumed weight.
+		/// Returns the number of collators the users added stake to, and the total sessions with rewards.
 		fn do_claim_rewards(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
 			UserStake::<T>::mutate(who, |user_stake_info| -> Result<(u32, u32), DispatchError> {
 				let mut total_sessions = 0;
@@ -1178,6 +1178,36 @@ pub mod pallet {
 				}
 				Ok((total_candidates, total_sessions))
 			})
+		}
+
+		/// Computes pending rewards for a given user.
+		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
+			let mut total_rewards: BalanceOf<T> = Zero::zero();
+			let user_stake_info = UserStake::<T>::get(who);
+			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
+				let mut candidate_rewards = user_stake_info
+					.candidates
+					.iter()
+					.map(|candidate| {
+						(
+							candidate.clone(),
+							(CandidateStake::<T>::get(candidate, who), Zero::zero()),
+						)
+					})
+					.collect::<BTreeMap<_, _>>();
+				let current_session = CurrentSession::<T>::get();
+				for session in last_reward_session..current_session {
+					if let Some(rewards) = PerSessionRewards::<T>::get(session) {
+						let (session_total_reward, _) = Self::calculate_rewards_for_session(
+							session,
+							&rewards,
+							&mut candidate_rewards,
+						);
+						total_rewards.saturating_accrue(session_total_reward);
+					}
+				}
+			}
+			total_rewards
 		}
 
 		/// Registers a given account as candidate.
@@ -1824,13 +1854,18 @@ where
 
 sp_api::decl_runtime_apis! {
 	/// This runtime api allows to query the two pot accounts.
-	pub trait CollatorStakingApi<AccountId>
-	where AccountId: Codec
+	pub trait CollatorStakingApi<AccountId, Balance>
+	where
+		AccountId: Codec,
+		Balance: Codec,
 	{
 		/// Queries the main pot account.
 		fn main_pot_account() -> AccountId;
 
 		/// Queries the extra reward pot account.
 		fn extra_reward_pot_account() -> AccountId;
+
+		/// Gets the total accumulated rewards.
+		fn total_rewards(account: AccountId) -> Balance;
 	}
 }
