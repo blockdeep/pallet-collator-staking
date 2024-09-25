@@ -873,14 +873,20 @@ pub mod pallet {
 
 		/// Sets the percentage of rewards that should be auto-compounded.
 		///
+		/// This operation will also claim all pending rewards.
 		/// Rewards will be autocompounded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
-		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
+		#[pallet::weight(T::WeightInfo::set_autocompound_percentage()
+			.saturating_add(T::WeightInfo::claim_rewards(
+								T::MaxCandidates::get(),
+								T::MaxSessionRewards::get())))
+		]
 		pub fn set_autocompound_percentage(
 			origin: OriginFor<T>,
 			percent: Percent,
-		) -> DispatchResult {
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
+			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
 			if percent.is_zero() {
 				AutoCompound::<T>::remove(&who);
 			} else {
@@ -890,7 +896,8 @@ pub mod pallet {
 				account: who,
 				percentage: percent,
 			});
-			Ok(())
+			Ok(Some(T::WeightInfo::set_autocompound_percentage().saturating_add(claim_weight))
+				.into())
 		}
 
 		/// Sets the percentage of rewards that collators will take for producing blocks.

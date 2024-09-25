@@ -574,9 +574,33 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn set_autocompound_percentage() {
+	fn set_autocompound_percentage(s: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let caller: T::AccountId = whitelisted_caller();
 		let percent = Percent::from_parts(50);
+
+		let amount = T::Currency::minimum_balance();
+		MinCandidacyBond::<T>::set(amount);
+		MinStake::<T>::set(amount);
+		frame_system::Pallet::<T>::set_block_number(0u32.into());
+		let balance = amount * 2u32.into() * s.into();
+		T::Currency::mint_into(&caller, balance).unwrap();
+
+		register_validators::<T>(s);
+		register_candidates::<T>(s);
+
+		CollatorStaking::<T>::lock(
+			RawOrigin::Signed(caller.clone()).into(),
+			CollatorStaking::<T>::get_free_balance(&caller),
+		)
+		.unwrap();
+		Candidates::<T>::iter_keys().for_each(|who| {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(caller.clone()).into(),
+				vec![StakeTarget { candidate: who.clone(), stake: amount }].try_into().unwrap(),
+			)
+			.unwrap();
+			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, amount);
+		});
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), percent);
