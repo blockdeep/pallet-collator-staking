@@ -510,7 +510,7 @@ mod benchmarks {
 			.unwrap();
 		}
 		assert_eq!(c as usize, ReleaseQueues::<T>::get(&caller).len());
-		frame_system::Pallet::<T>::set_block_number(100u32.into());
+		frame_system::Pallet::<T>::set_block_number(u32::MAX.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()));
