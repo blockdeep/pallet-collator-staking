@@ -8,6 +8,7 @@ use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
 use frame_support::traits::fungible::{Inspect, Mutate};
 use frame_support::traits::{EnsureOrigin, Get};
+use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
@@ -106,11 +107,65 @@ fn min_invulnerables<T: Config>() -> u32 {
 	min_collators.saturating_sub(candidates_length)
 }
 
+fn prepare_rewards<T: Config + pallet_session::Config>(
+	c: u32,
+	r: u32,
+) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
+	let amount = T::Currency::minimum_balance();
+	MinStake::<T>::set(amount);
+	MinCandidacyBond::<T>::set(amount);
+	let staker = create_funded_user::<T>("staker", 0, 10000);
+	CollatorStaking::<T>::lock(
+		RawOrigin::Signed(staker.clone()).into(),
+		CollatorStaking::<T>::get_free_balance(&staker),
+	)
+	.unwrap();
+	CollatorStaking::<T>::set_autocompound_percentage(
+		RawOrigin::Signed(staker.clone()).into(),
+		Percent::from_parts(100),
+	)
+	.unwrap();
+
+	let mut reward_map = BoundedBTreeMap::new();
+	let total_candidates = T::MaxCandidates::get();
+	let candidates = register_validators::<T>(total_candidates);
+	register_candidates::<T>(total_candidates);
+	for (index, candidate) in candidates.iter().enumerate() {
+		if index < (c as usize) {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(staker.clone()).into(),
+				vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+					.try_into()
+					.unwrap(),
+			)
+			.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
+		}
+		reward_map.try_insert(candidate.clone(), (amount, amount)).unwrap();
+	}
+
+	for session in 1..(r + 1) {
+		PerSessionRewards::<T>::insert(
+			session,
+			SessionInfo { candidates: reward_map.clone(), rewards: amount * c.into() },
+		);
+	}
+
+	let total_rewards = amount * c.into() * r.into();
+	ClaimableRewards::<T>::set(total_rewards);
+	CurrentSession::<T>::mutate(|session| *session = r + 2);
+	T::Currency::mint_into(
+		&CollatorStaking::<T>::account_id(),
+		T::Currency::minimum_balance() + total_rewards,
+	)
+	.unwrap();
+	(staker, total_rewards, candidates)
+}
+
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
-	use frame_support::BoundedBTreeMap;
+	use sp_runtime::BoundedVec;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -371,97 +426,53 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn stake(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+	fn stake(
+		c: Linear<1, { T::MaxStakedCandidates::get() }>,
+		r: Linear<1, { T::MaxSessionRewards::get() }>,
+	) {
+		let (caller, _, candidates) = prepare_rewards::<T>(c, r);
 		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::set(amount);
-		MinStake::<T>::set(amount);
-		frame_system::Pallet::<T>::set_block_number(0u32.into());
-
-		register_validators::<T>(c);
-		register_candidates::<T>(c);
-
-		let caller: T::AccountId = whitelisted_caller();
-		T::Currency::mint_into(&caller, T::Currency::minimum_balance() * 2u32.into() * c.into())
-			.unwrap();
-		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(caller.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&caller),
-		)
-		.unwrap();
-		let targets = Candidates::<T>::iter_keys()
+		let targets: BoundedVec<StakeTargetOf<T>, T::MaxStakedCandidates> = candidates
+			.into_iter()
 			.map(|candidate| StakeTarget { candidate, stake: amount })
+			.take(c as usize)
 			.collect::<Vec<_>>()
 			.try_into()
 			.unwrap();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), targets);
+		_(RawOrigin::Signed(caller.clone()), targets.clone());
 
-		for candidate in Candidates::<T>::iter_keys() {
-			assert_eq!(CandidateStake::<T>::get(&candidate, &caller).stake, amount);
+		for target in targets {
+			assert_has_event::<T>(
+				Event::StakeAdded { account: caller.clone(), candidate: target.candidate, amount }
+					.into(),
+			);
 		}
 	}
 
 	// worst case is promoting from last position to first one
 	#[benchmark]
-	fn unstake_from() {
-		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::set(amount);
-		MinStake::<T>::set(amount);
-		frame_system::Pallet::<T>::set_block_number(0u32.into());
-
-		register_validators::<T>(1);
-		register_candidates::<T>(1);
-		let candidate = Candidates::<T>::iter_keys().next().unwrap().clone();
-		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(candidate.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&candidate),
-		)
-		.unwrap();
-		CollatorStaking::<T>::stake(
-			RawOrigin::Signed(candidate.clone()).into(),
-			vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
-				.try_into()
-				.unwrap(),
-		)
-		.unwrap();
-		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, amount);
-
-		whitelist_account!(candidate);
+	fn unstake_from(
+		c: Linear<1, { T::MaxStakedCandidates::get() }>,
+		r: Linear<1, { T::MaxSessionRewards::get() }>,
+	) {
+		let (caller, _, candidates) = prepare_rewards::<T>(c, r);
+		let candidate = candidates[0].clone();
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(candidate.clone()), candidate.clone());
+		_(RawOrigin::Signed(caller.clone()), candidate.clone());
 
-		assert_eq!(CandidateStake::<T>::get(&candidate, &candidate).stake, 0u32.into());
+		assert_eq!(CandidateStake::<T>::get(&caller, &candidate).stake, 0u32.into());
 	}
 
 	// worst case is having stake in as many collators as possible
 	#[benchmark]
-	fn unstake_all(s: Linear<1, { T::MaxStakedCandidates::get() }>) {
-		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::set(amount);
-		MinStake::<T>::set(amount);
-		frame_system::Pallet::<T>::set_block_number(0u32.into());
-
-		register_validators::<T>(s);
-		register_candidates::<T>(s);
-
-		let caller: T::AccountId = whitelisted_caller();
-		let balance = amount * 2u32.into() * s.into();
-		T::Currency::mint_into(&caller, balance).unwrap();
-		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(caller.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&caller),
-		)
-		.unwrap();
-		Candidates::<T>::iter_keys().for_each(|who| {
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(caller.clone()).into(),
-				vec![StakeTarget { candidate: who.clone(), stake: amount }].try_into().unwrap(),
-			)
-			.unwrap();
-			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, amount);
-		});
+	fn unstake_all(
+		c: Linear<1, { T::MaxStakedCandidates::get() }>,
+		r: Linear<1, { T::MaxSessionRewards::get() }>,
+	) {
+		let (caller, _, _) = prepare_rewards::<T>(c, r);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()));
@@ -506,53 +517,7 @@ mod benchmarks {
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		r: Linear<1, { T::MaxSessionRewards::get() }>,
 	) {
-		let amount = T::Currency::minimum_balance();
-		MinStake::<T>::set(amount);
-		MinCandidacyBond::<T>::set(amount);
-		let staker = create_funded_user::<T>("staker", 0, 10000);
-		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(staker.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&staker),
-		)
-		.unwrap();
-		CollatorStaking::<T>::set_autocompound_percentage(
-			RawOrigin::Signed(staker.clone()).into(),
-			Percent::from_parts(100),
-		)
-		.unwrap();
-
-		let mut reward_map = BoundedBTreeMap::new();
-		let total_candidates = T::MaxCandidates::get();
-		let candidates = register_validators::<T>(total_candidates);
-		register_candidates::<T>(total_candidates);
-		for (index, candidate) in candidates.iter().enumerate() {
-			if index < (c as usize) {
-				CollatorStaking::<T>::stake(
-					RawOrigin::Signed(staker.clone()).into(),
-					vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
-						.try_into()
-						.unwrap(),
-				)
-				.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
-			}
-			reward_map.try_insert(candidate.clone(), (amount, amount)).unwrap();
-		}
-
-		for session in 1..(r + 1) {
-			PerSessionRewards::<T>::insert(
-				session,
-				SessionInfo { candidates: reward_map.clone(), rewards: amount * c.into() },
-			);
-		}
-
-		let total_rewards = amount * c.into() * r.into();
-		ClaimableRewards::<T>::set(total_rewards);
-		CurrentSession::<T>::mutate(|session| *session = r + 2);
-		T::Currency::mint_into(
-			&CollatorStaking::<T>::account_id(),
-			T::Currency::minimum_balance() + total_rewards,
-		)
-		.unwrap();
+		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
@@ -574,33 +539,12 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn set_autocompound_percentage(s: Linear<1, { T::MaxStakedCandidates::get() }>) {
-		let caller: T::AccountId = whitelisted_caller();
+	fn set_autocompound_percentage(
+		c: Linear<1, { T::MaxStakedCandidates::get() }>,
+		r: Linear<1, { T::MaxSessionRewards::get() }>,
+	) {
+		let (caller, _, _) = prepare_rewards::<T>(c, r);
 		let percent = Percent::from_parts(50);
-
-		let amount = T::Currency::minimum_balance();
-		MinCandidacyBond::<T>::set(amount);
-		MinStake::<T>::set(amount);
-		frame_system::Pallet::<T>::set_block_number(0u32.into());
-		let balance = amount * 2u32.into() * s.into();
-		T::Currency::mint_into(&caller, balance).unwrap();
-
-		register_validators::<T>(s);
-		register_candidates::<T>(s);
-
-		CollatorStaking::<T>::lock(
-			RawOrigin::Signed(caller.clone()).into(),
-			CollatorStaking::<T>::get_free_balance(&caller),
-		)
-		.unwrap();
-		Candidates::<T>::iter_keys().for_each(|who| {
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(caller.clone()).into(),
-				vec![StakeTarget { candidate: who.clone(), stake: amount }].try_into().unwrap(),
-			)
-			.unwrap();
-			assert_eq!(CandidateStake::<T>::get(&who, &caller).stake, amount);
-		});
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), percent);
