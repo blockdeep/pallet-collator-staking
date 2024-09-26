@@ -2256,6 +2256,7 @@ fn should_reward_collator() {
 				})
 			)
 		}));
+		assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 		assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(4)));
 		assert_eq!(ClaimableRewards::<Test>::get(), 0);
 		// Now we can see the reward.
@@ -2379,6 +2380,7 @@ fn should_reward_collator_with_extra_rewards() {
 			amount: 7,
 		}));
 		// Reward for staker when claiming.
+		assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 28);
 		assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(4)));
 		assert_eq!(ClaimableRewards::<Test>::get(), 0);
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
@@ -2479,6 +2481,7 @@ fn should_reward_collator_with_extra_rewards_and_no_funds() {
 			amount: 3,
 		}));
 		// Reward for staker.
+		assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 		assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(4)));
 		assert_eq!(ClaimableRewards::<Test>::get(), 0);
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
@@ -2604,12 +2607,14 @@ fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 			account: 4,
 			amount: 7,
 		}));
+		assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&2), 12);
 		assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(2)));
 		assert_eq!(ClaimableRewards::<Test>::get(), 16); // this remains to staker 3.
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 			account: 2,
 			amount: 12,
 		}));
+		assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 15);
 		assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(3)));
 		assert_eq!(ClaimableRewards::<Test>::get(), 1); // rounding issue
 		System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {

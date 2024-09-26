@@ -798,11 +798,7 @@ pub mod pallet {
 		///     - the user does not have sufficient locked balance to stake.
 		///     - zero targets are passed.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::stake(T::MaxStakedCandidates::get())
-			.saturating_add(T::WeightInfo::claim_rewards(
-								T::MaxCandidates::get(),
-								T::MaxSessionRewards::get())))
-		]
+		#[pallet::weight(T::WeightInfo::stake(T::MaxCandidates::get(), T::MaxSessionRewards::get(), targets.len() as u32))]
 		pub fn stake(
 			origin: OriginFor<T>,
 			targets: BoundedVec<StakeTargetOf<T>, T::MaxStakedCandidates>,
@@ -811,53 +807,50 @@ pub mod pallet {
 			let len = targets.len() as u32;
 			ensure!(len > 0, Error::<T>::TooFewCandidates);
 
-			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
+			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 			for StakeTarget { candidate, stake } in targets {
 				Self::do_stake(&who, &candidate, stake)?;
 			}
-			Ok(Some(T::WeightInfo::stake(len).saturating_add(claim_weight)).into())
+			Ok(Some(T::WeightInfo::stake(candidates, rewards, len)).into())
 		}
 
 		/// Removes stake from a collator candidate.
 		///
 		/// The amount unstaked will remain locked.
 		#[pallet::call_index(8)]
-		#[pallet::weight(T::WeightInfo::unstake_from()
-			.saturating_add(T::WeightInfo::claim_rewards(
-								T::MaxCandidates::get(),
-								T::MaxSessionRewards::get())))
-		]
+		#[pallet::weight(T::WeightInfo::unstake_from(
+			T::MaxCandidates::get(),
+			T::MaxSessionRewards::get()
+		))]
 		pub fn unstake_from(
 			origin: OriginFor<T>,
 			candidate: T::AccountId,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
+			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 			let _ = Self::do_unstake(&who, &candidate)?;
 
-			Ok(Some(T::WeightInfo::unstake_from().saturating_add(claim_weight)).into())
+			Ok(Some(T::WeightInfo::unstake_from(candidates, rewards)).into())
 		}
 
 		/// Removes all stake of a user from all candidates.
 		///
 		/// The amount unstaked will remain locked.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get())
-			.saturating_add(T::WeightInfo::claim_rewards(
-								T::MaxCandidates::get(),
-								T::MaxSessionRewards::get())))
-		]
+		#[pallet::weight(T::WeightInfo::unstake_all(
+			T::MaxCandidates::get(),
+			T::MaxSessionRewards::get()
+		))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let claim_weight = Self::do_claim_rewards(&who)?.actual_weight.unwrap_or_default();
+			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 
 			let user_stake = UserStake::<T>::get(&who);
-			let len = user_stake.candidates.len() as u32;
 			for candidate in &user_stake.candidates {
 				Self::do_unstake(&who, candidate)?;
 			}
 
-			Ok(Some(T::WeightInfo::unstake_all(len).saturating_add(claim_weight)).into())
+			Ok(Some(T::WeightInfo::unstake_all(candidates, rewards)).into())
 		}
 
 		/// Releases all pending [`ReleaseRequest`] for a given account.
@@ -873,14 +866,19 @@ pub mod pallet {
 
 		/// Sets the percentage of rewards that should be auto-compounded.
 		///
+		/// This operation will also claim all pending rewards.
 		/// Rewards will be autocompounded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
-		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
+		#[pallet::weight(T::WeightInfo::set_autocompound_percentage(
+			T::MaxCandidates::get(),
+			T::MaxSessionRewards::get()
+		))]
 		pub fn set_autocompound_percentage(
 			origin: OriginFor<T>,
 			percent: Percent,
-		) -> DispatchResult {
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
+			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 			if percent.is_zero() {
 				AutoCompound::<T>::remove(&who);
 			} else {
@@ -890,7 +888,7 @@ pub mod pallet {
 				account: who,
 				percentage: percent,
 			});
-			Ok(())
+			Ok(Some(T::WeightInfo::set_autocompound_percentage(candidates, rewards)).into())
 		}
 
 		/// Sets the percentage of rewards that collators will take for producing blocks.
@@ -1061,7 +1059,8 @@ pub mod pallet {
 		))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			Self::do_claim_rewards(&who)
+			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
+			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
 		}
 	}
 
@@ -1125,9 +1124,9 @@ pub mod pallet {
 
 		/// Claims all rewards from previous sessions.
 		///
-		/// Returns dispatch information, including the consumed weight.
-		fn do_claim_rewards(who: &T::AccountId) -> DispatchResultWithPostInfo {
-			UserStake::<T>::mutate(who, |user_stake_info| -> DispatchResultWithPostInfo {
+		/// Returns the number of collators the users added stake to, and the total sessions with rewards.
+		fn do_claim_rewards(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
+			UserStake::<T>::mutate(who, |user_stake_info| -> Result<(u32, u32), DispatchError> {
 				let mut total_sessions = 0;
 				let mut total_candidates = 0;
 				if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
@@ -1177,8 +1176,38 @@ pub mod pallet {
 					}
 					user_stake_info.maybe_last_reward_session = Some(current_session);
 				}
-				Ok(Some(T::WeightInfo::claim_rewards(total_candidates, total_sessions)).into())
+				Ok((total_candidates, total_sessions))
 			})
+		}
+
+		/// Computes pending rewards for a given user.
+		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
+			let mut total_rewards: BalanceOf<T> = Zero::zero();
+			let user_stake_info = UserStake::<T>::get(who);
+			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
+				let mut candidate_rewards = user_stake_info
+					.candidates
+					.iter()
+					.map(|candidate| {
+						(
+							candidate.clone(),
+							(CandidateStake::<T>::get(candidate, who), Zero::zero()),
+						)
+					})
+					.collect::<BTreeMap<_, _>>();
+				let current_session = CurrentSession::<T>::get();
+				for session in last_reward_session..current_session {
+					if let Some(rewards) = PerSessionRewards::<T>::get(session) {
+						let (session_total_reward, _) = Self::calculate_rewards_for_session(
+							session,
+							&rewards,
+							&mut candidate_rewards,
+						);
+						total_rewards.saturating_accrue(session_total_reward);
+					}
+				}
+			}
+			total_rewards
 		}
 
 		/// Registers a given account as candidate.
@@ -1825,13 +1854,18 @@ where
 
 sp_api::decl_runtime_apis! {
 	/// This runtime api allows to query the two pot accounts.
-	pub trait CollatorStakingApi<AccountId>
-	where AccountId: Codec
+	pub trait CollatorStakingApi<AccountId, Balance>
+	where
+		AccountId: Codec,
+		Balance: Codec,
 	{
 		/// Queries the main pot account.
 		fn main_pot_account() -> AccountId;
 
 		/// Queries the extra reward pot account.
 		fn extra_reward_pot_account() -> AccountId;
+
+		/// Gets the total accumulated rewards.
+		fn total_rewards(account: AccountId) -> Balance;
 	}
 }
