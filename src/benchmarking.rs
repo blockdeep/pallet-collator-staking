@@ -110,6 +110,20 @@ fn min_invulnerables<T: Config>() -> u32 {
 	min_collators.saturating_sub(candidates_length)
 }
 
+fn prepare_staker<T: Config>() -> T::AccountId {
+	let amount = T::Currency::minimum_balance();
+	MinStake::<T>::set(amount);
+	MinCandidacyBond::<T>::set(amount);
+	let staker = create_funded_user::<T>("staker", 0, 10000);
+	CollatorStaking::<T>::lock(
+		RawOrigin::Signed(staker.clone()).into(),
+		CollatorStaking::<T>::get_free_balance(&staker),
+	)
+	.unwrap();
+
+	staker
+}
+
 fn prepare_rewards<T: Config + pallet_session::Config>(
 	c: u32,
 	r: u32,
@@ -428,22 +442,16 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn stake(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
-		s: Linear<1, { T::MaxStakedCandidates::get() }>,
-	) {
-		let (caller, _, mut candidates) = prepare_rewards::<T>(c, r);
+	fn stake(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+		let caller = prepare_staker::<T>();
 		let amount = T::Currency::minimum_balance();
-		let extra_candidates = Candidates::<T>::iter_keys()
-			.filter(|candidate| !candidates.iter().any(|cand| *cand == *candidate))
-			.take(s.saturating_sub(c) as usize)
-			.collect::<Vec<_>>();
-		candidates.extend(extra_candidates);
+		let candidates = register_validators::<T>(c);
+		register_candidates::<T>(c);
+
 		let targets: Vec<StakeTargetOf<T>> = candidates
 			.into_iter()
 			.map(|candidate| StakeTarget { candidate, stake: amount })
-			.take(s as usize)
+			.take(c as usize)
 			.collect::<Vec<_>>();
 
 		#[extrinsic_call]
@@ -457,14 +465,20 @@ mod benchmarks {
 		}
 	}
 
-	// worst case is promoting from last position to first one
 	#[benchmark]
-	fn unstake_from(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
-	) {
-		let (caller, _, candidates) = prepare_rewards::<T>(c, r);
-		let candidate = candidates[0].clone();
+	fn unstake_from() {
+		let caller = prepare_staker::<T>();
+		let amount = T::Currency::minimum_balance();
+		let candidate = register_single_validator::<T>(0);
+		register_single_candidate::<T>(0);
+
+		CollatorStaking::<T>::stake(
+			RawOrigin::Signed(caller.clone()).into(),
+			vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+				.try_into()
+				.unwrap(),
+		)
+		.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), candidate.clone());
@@ -474,11 +488,23 @@ mod benchmarks {
 
 	// worst case is having stake in as many collators as possible
 	#[benchmark]
-	fn unstake_all(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
-	) {
-		let (caller, _, _) = prepare_rewards::<T>(c, r);
+	fn unstake_all(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+		let caller = prepare_staker::<T>();
+		let amount = T::Currency::minimum_balance();
+		let candidates = register_validators::<T>(c);
+		register_candidates::<T>(c);
+
+		for (index, candidate) in candidates.iter().enumerate() {
+			if index < (c as usize) {
+				CollatorStaking::<T>::stake(
+					RawOrigin::Signed(caller.clone()).into(),
+					vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+						.try_into()
+						.unwrap(),
+				)
+				.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
+			}
+		}
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()));
@@ -544,12 +570,20 @@ mod benchmarks {
 		}
 	}
 
+	//Worst case is if stake exists
 	#[benchmark]
-	fn set_autocompound_percentage(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
-	) {
-		let (caller, _, _) = prepare_rewards::<T>(c, r);
+	fn set_autocompound_percentage() {
+		let caller = prepare_staker::<T>();
+		let amount = T::Currency::minimum_balance();
+		let candidate = register_single_validator::<T>(0);
+		register_single_candidate::<T>(0);
+
+		CollatorStaking::<T>::stake(
+			RawOrigin::Signed(caller.clone()).into(),
+			vec![StakeTarget { candidate, stake: amount }].try_into().unwrap(),
+		)
+		.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
+
 		let percent = Percent::from_parts(50);
 
 		#[extrinsic_call]
