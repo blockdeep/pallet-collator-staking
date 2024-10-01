@@ -1265,6 +1265,46 @@ mod stake {
 			);
 		});
 	}
+
+	#[test]
+	fn must_claim_before_stake() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			//Time travel to the next Session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), 1);
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+				),
+				Error::<Test>::PreviousRewardsNotClaimed
+			);
+
+			//Claim and retry operation
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+			));
+		});
+	}
 }
 
 mod unstake_from {
@@ -1514,6 +1554,40 @@ mod unstake_from {
 			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 		});
 	}
+
+	#[test]
+	fn must_claim_before_unstake_from() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			//Time travel to the next Session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), 1);
+			assert_noop!(
+				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
+				Error::<Test>::PreviousRewardsNotClaimed
+			);
+
+			//Claim and retry operation
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+		});
+	}
 }
 
 mod unstake_all {
@@ -1604,6 +1678,40 @@ mod unstake_all {
 			assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 0, stakers: 0 })]);
 		});
 	}
+
+	#[test]
+	fn must_claim_before_unstake_all() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			//Time travel to the next Session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), 1);
+			assert_noop!(
+				CollatorStaking::unstake_all(RuntimeOrigin::signed(5)),
+				Error::<Test>::PreviousRewardsNotClaimed
+			);
+
+			//Claim and retry operation
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+			assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
+		});
+	}
 }
 
 mod set_autocompound_percentage {
@@ -1634,6 +1742,46 @@ mod set_autocompound_percentage {
 			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
 			System::assert_last_event(RuntimeEvent::CollatorStaking(
 				Event::AutoCompoundPercentageSet { account: 5, percentage: Percent::from_parts(0) },
+			));
+		});
+	}
+
+	#[test]
+	fn must_claim_before_set_autocompound_percentage() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			//Time travel to the next Session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), 1);
+			assert_noop!(
+				CollatorStaking::set_autocompound_percentage(
+					RuntimeOrigin::signed(5),
+					Percent::from_parts(50)
+				),
+				Error::<Test>::PreviousRewardsNotClaimed
+			);
+
+			//Claim and retry operation
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+			assert_ok!(CollatorStaking::set_autocompound_percentage(
+				RuntimeOrigin::signed(5),
+				Percent::from_parts(50)
 			));
 		});
 	}
