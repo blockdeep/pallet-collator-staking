@@ -1307,6 +1307,46 @@ mod stake {
 	}
 }
 
+mod claim_rewards {
+	use super::*;
+
+	#[test]
+	fn cannot_claim_if_on_same_session() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_reward_session: None,
+				}
+			);
+			let pre_stake_session = CurrentSession::<Test>::get();
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			//Attempt claim in same session
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
+			assert_noop!(
+				CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)),
+				Error::<Test>::NoPendingClaim
+			);
+
+			//Time travel to next session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+		});
+	}
+}
+
 mod unstake_from {
 	use super::*;
 
