@@ -538,8 +538,10 @@ pub mod pallet {
 		TooFewCandidates,
 		/// Rewards from previous sessions have not yet been claimed.
 		PreviousRewardsNotClaimed,
-		/// User has not Staked on the given Candidate
+		/// User has not Staked on the given Candidate.
 		NoStakeOnCandidate,
+		// No rewards to claim as previous claim happened on the same session.
+		NoPendingClaim,
 	}
 
 	#[pallet::hooks]
@@ -1062,6 +1064,10 @@ pub mod pallet {
 		))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
+
+			//Staker can't claim in the same session as there are no rewards
+			ensure!(!Self::staker_has_claimed(&who), Error::<T>::NoPendingClaim);
+
 			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
 		}
@@ -1370,7 +1376,7 @@ pub mod pallet {
 				.saturating_add(Invulnerables::<T>::decode_len().unwrap_or_default() as u32)
 		}
 
-		fn staker_has_claimed(who: &T::AccountId) -> bool {
+		pub fn staker_has_claimed(who: &T::AccountId) -> bool {
 			let user_stake_info = UserStake::<T>::get(who);
 			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
 				let current_session = CurrentSession::<T>::get();
@@ -1882,5 +1888,8 @@ sp_api::decl_runtime_apis! {
 
 		/// Gets the total accumulated rewards.
 		fn total_rewards(account: AccountId) -> Balance;
+
+		/// Returns true if user should claim rewards.
+		fn should_claim(account: AccountId) -> bool;
 	}
 }
