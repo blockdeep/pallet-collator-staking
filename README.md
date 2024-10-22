@@ -1,10 +1,10 @@
 # Collator Staking Pallet
 
-A simple DPoS pallet for collators in a parachain.
+Simple DPoS pallet for staking and managing collators in a Polkadot parachain.
 
 ## Overview
 
-The Collator Staking pallet is more of a extension of the [Cumulus Collator Selection pallet](https://github.com/paritytech/polkadot-sdk/tree/master/cumulus/pallets/collator-selection) and provides DPoS functionality to manage collators of a parachain.
+The Collator Staking pallet is an extension of the [Cumulus Collator Selection pallet](https://github.com/paritytech/polkadot-sdk/tree/master/cumulus/pallets/collator-selection) and provides DPoS functionality to manage collators of a parachain.
 
 It allows users to stake their tokens to back collators, and receive rewards proportionately.
 There is no slashing in place. If a collator does not produce blocks as expected, they are removed from the collator set and all stake is refunded.
@@ -23,7 +23,7 @@ Staking rewards distributed to candidates and their stakers come from the follow
 * Transaction fees and tips collected for blocks produced.
 * An optional per-block flat amount coming from a different pot (for example, Treasury). This is to "top-up" the rewards in case fees and tips are too small.
 
-All rewards are generated from existing funds on the blockchain, and **there is no inflation**.
+The pallet assumes all rewards are generated from existing funds on the blockchain, and **there is no inflation** implemented as part of this pallet.
 
 Rewards are distributed so that all stakeholders are incentivized to participate:
 
@@ -50,8 +50,7 @@ Users can also select the percentage of rewards that will be auto-compounded. If
 
 When a session ends, a snapshot of the generated rewards and the per-candidate stake is taken. This information is used to calculate the per-staker rewards for that session.
 Stakers will have to call the `claim_rewards` extrinsic to collect the corresponding earnings from the previous sessions. This process will be automatically triggered whenever
-the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be autocompounded if the user set an autocompound percentage
-greater than zero.
+the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be auto-compounded if the user set an auto-compound percentage greater than zero.
 
 ### Runtime Configuration
 
@@ -93,7 +92,7 @@ This pallet is dependent on [pallet-authorship](https://github.com/paritytech/po
 
 ### Compatibility
 
-This pallet is compatible with [polkadot version 1.11.0](https://github.com/paritytech/polkadot-sdk/releases/tag/polkadot-v1.11.0) or higher.
+This pallet is compatible with [polkadot release stable2407-2](https://github.com/paritytech/polkadot-sdk/releases/tag/polkadot-stable2407-2) or higher.
 
 ## License
 
