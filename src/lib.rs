@@ -192,6 +192,10 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxSessionRewards: Get<u32>;
 
+		/// Minimum stake needed to enable autocompounding.
+		#[pallet::constant]
+		type AutoCompoundingThreshold: Get<BalanceOf<Self>>;
+
 		/// The weight information of this pallet.
 		type WeightInfo: WeightInfo;
 	}
@@ -477,8 +481,10 @@ pub mod pallet {
 		StakeRemoved { account: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
 		StakingRewardReceived { account: T::AccountId, amount: BalanceOf<T> },
-		/// AutoCompound percentage was set.
+		/// Autocompound percentage was set.
 		AutoCompoundPercentageSet { account: T::AccountId, percentage: Percent },
+		/// Autocompounding was disabled.
+		AutoCompoundDisabled { account: T::AccountId },
 		/// Collator reward percentage was set.
 		CollatorRewardPercentageSet { percentage: Percent },
 		/// The extra reward was set.
@@ -555,7 +561,7 @@ pub mod pallet {
 		PreviousRewardsNotClaimed,
 		/// User has not Staked on the given Candidate.
 		NoStakeOnCandidate,
-		// No rewards to claim as previous claim happened on the same session.
+		/// No rewards to claim as previous claim happened on the same session.
 		NoPendingClaim,
 	}
 
@@ -901,13 +907,19 @@ pub mod pallet {
 
 			if percent.is_zero() {
 				AutoCompound::<T>::remove(&who);
+				Self::deposit_event(Event::AutoCompoundDisabled { account: who });
 			} else {
+				ensure!(
+					Self::get_staked_balance(&who) >= T::AutoCompoundingThreshold::get(),
+					Error::<T>::InsufficientStake
+				);
 				AutoCompound::<T>::insert(&who, percent);
+				Self::deposit_event(Event::AutoCompoundPercentageSet {
+					account: who,
+					percentage: percent,
+				});
 			}
-			Self::deposit_event(Event::AutoCompoundPercentageSet {
-				account: who,
-				percentage: percent,
-			});
+
 			Ok(())
 		}
 
@@ -1041,6 +1053,7 @@ pub mod pallet {
 				staked_balance.saturating_sub(amount),
 			)?;
 			Self::add_to_release_queue(&who, amount, T::StakeUnlockDelay::get())?;
+			Self::adjust_autocompound_percentage(&who);
 
 			Ok(())
 		}
@@ -1422,6 +1435,20 @@ pub mod pallet {
 			}
 
 			Ok(stake)
+		}
+
+		/// Disable autocompounding if staked balance dropped below the threshold
+		fn adjust_autocompound_percentage(staker: &T::AccountId) {
+			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
+				AutoCompound::<T>::mutate(staker, |percentage| {
+					if !percentage.is_zero() {
+						*percentage = Percent::from_parts(0);
+						Self::deposit_event(Event::AutoCompoundDisabled {
+							account: staker.clone(),
+						});
+					}
+				});
+			}
 		}
 
 		/// Removes stake from a given candidate.

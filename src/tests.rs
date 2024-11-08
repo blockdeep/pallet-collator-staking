@@ -1778,6 +1778,15 @@ mod set_autocompound_percentage {
 			initialize_to_block(1);
 
 			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
+			assert_noop!(
+				CollatorStaking::set_autocompound_percentage(
+					RuntimeOrigin::signed(5),
+					Percent::from_parts(50)
+				),
+				Error::<Test>::InsufficientStake
+			);
+
+			lock_for_staking(5..=5);
 			assert_ok!(CollatorStaking::set_autocompound_percentage(
 				RuntimeOrigin::signed(5),
 				Percent::from_parts(50)
@@ -1795,9 +1804,9 @@ mod set_autocompound_percentage {
 				Percent::from_parts(0)
 			));
 			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
-			System::assert_last_event(RuntimeEvent::CollatorStaking(
-				Event::AutoCompoundPercentageSet { account: 5, percentage: Percent::from_parts(0) },
-			));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
+				account: 5,
+			}));
 		});
 	}
 
@@ -1877,6 +1886,12 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 60);
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
+			// We have now enough balance to be able to enable autocompounding
+			assert_ok!(CollatorStaking::set_autocompound_percentage(
+				RuntimeOrigin::signed(5),
+				Percent::from_parts(50),
+			));
+
 			// we cannot unlock more funds than what we currently have
 			assert_noop!(
 				CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(100)),
@@ -1895,6 +1910,11 @@ mod lock_unlock_and_release {
 			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), None));
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 50);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 10);
+
+			// If reducing the staked balance under the threshold there should be an event
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
+				account: 5,
+			}));
 		});
 	}
 
@@ -3166,7 +3186,7 @@ mod session_management {
 
 			initialize_to_block(20);
 			assert_eq!(SessionChangeBlock::get(), 20);
-			// changed are now reflected to session handlers.
+			// changes are now reflected to session handlers.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 4, 3]);
 		});
 	}
