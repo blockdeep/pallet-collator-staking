@@ -233,6 +233,7 @@ impl Config for Test {
 	type BondUnlockDelay = ConstU64<5>;
 	type StakeUnlockDelay = ConstU64<2>;
 	type MaxSessionRewards = ConstU32<10>;
+	type AutoCompoundingThreshold = ConstU64<60>;
 	type WeightInfo = ();
 }
 
