@@ -430,13 +430,8 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
-			let duplicate_invulnerables = self
-				.invulnerables
-				.iter()
-				.collect::<sp_std::collections::btree_set::BTreeSet<_>>();
-			assert_eq!(
-				duplicate_invulnerables.len(),
-				self.invulnerables.len(),
+			assert!(
+				!Pallet::<T>::has_duplicates(&self.invulnerables),
 				"duplicate invulnerables in genesis."
 			);
 
@@ -527,6 +522,8 @@ pub mod pallet {
 		NotCandidate,
 		/// There are too many Invulnerables.
 		TooManyInvulnerables,
+		/// At least one of the invulnerables is duplicated
+		DuplicatedInvulnerables,
 		/// Account is already an Invulnerable.
 		AlreadyInvulnerable,
 		/// Account is not an Invulnerable.
@@ -613,9 +610,10 @@ pub mod pallet {
 		pub fn set_invulnerables(origin: OriginFor<T>, new: Vec<T::AccountId>) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 
-			// don't wipe out the collator set
+			ensure!(!Self::has_duplicates(&new), Error::<T>::DuplicatedInvulnerables);
+
+			// Don't wipe out the collator set
 			if new.is_empty() {
-				// Casting `u32` to `usize` should be safe on all machines running this.
 				ensure!(
 					Candidates::<T>::count() >= T::MinEligibleCollators::get(),
 					Error::<T>::TooFewEligibleCollators
@@ -1170,6 +1168,12 @@ pub mod pallet {
 				}
 			}
 			(session_total_amount, unclaimable_rewards)
+		}
+
+		fn has_duplicates(accounts: &[T::AccountId]) -> bool {
+			let duplicates =
+				accounts.iter().collect::<sp_std::collections::btree_set::BTreeSet<_>>();
+			duplicates.len() != accounts.len()
 		}
 
 		/// Claims all rewards from previous sessions.

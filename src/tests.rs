@@ -154,6 +154,23 @@ mod set_invulnerables {
 	}
 
 	#[test]
+	fn it_should_not_allow_duplicated_invulnerables() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+			let new_with_duplicated = vec![1, 1, 2, 4, 3, 2];
+
+			assert_noop!(
+				CollatorStaking::set_invulnerables(
+					RuntimeOrigin::signed(RootAccount::get()),
+					new_with_duplicated
+				),
+				Error::<Test>::DuplicatedInvulnerables
+			);
+		});
+	}
+
+	#[test]
 	fn should_not_allow_to_set_invulnerables_if_already_candidates() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
