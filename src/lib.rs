@@ -663,6 +663,14 @@ pub mod pallet {
 				BoundedVec::<_, T::MaxInvulnerables>::try_from(new_with_keys)
 					.map_err(|_| Error::<T>::TooManyInvulnerables)?;
 
+			// Make sure that the minimum eligible collator requirement is met.
+			let total_invulnerables = bounded_invulnerables.len() as u32;
+			let eligible_collators = total_invulnerables.saturating_add(Candidates::<T>::count());
+			ensure!(
+				eligible_collators >= T::MinEligibleCollators::get(),
+				Error::<T>::TooFewEligibleCollators
+			);
+
 			// Invulnerables must be sorted for removal.
 			bounded_invulnerables.sort();
 

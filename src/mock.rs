@@ -200,7 +200,7 @@ pub struct IdentityCollatorMock<T>(PhantomData<T>);
 impl<T> sp_runtime::traits::Convert<AccountId, Option<AccountId>> for IdentityCollatorMock<T> {
 	fn convert(acc: AccountId) -> Option<AccountId> {
 		match acc {
-			1000 => None,
+			1000..2000 => None,
 			_ => Some(acc),
 		}
 	}

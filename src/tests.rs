@@ -171,6 +171,23 @@ mod set_invulnerables {
 	}
 
 	#[test]
+	fn it_should_not_allow_too_many_invalid_invulnerables() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+			let new_with_many_invalid = vec![1000, 1001, 1002, 1003, 1004, 1005, 1006];
+
+			assert_noop!(
+				CollatorStaking::set_invulnerables(
+					RuntimeOrigin::signed(RootAccount::get()),
+					new_with_many_invalid
+				),
+				Error::<Test>::TooFewEligibleCollators
+			);
+		});
+	}
+
+	#[test]
 	fn should_not_allow_to_set_invulnerables_if_already_candidates() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
