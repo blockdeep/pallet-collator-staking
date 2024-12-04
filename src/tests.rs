@@ -15,11 +15,11 @@
 
 use crate as collator_staking;
 use crate::{
-	mock::*, AutoCompound, BalanceOf, CandidateInfo, CandidateStakeInfo, Candidates,
-	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
-	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MinCandidacyBond, MinStake,
-	PerSessionRewards, ProducedBlocks, ReleaseQueues, StakeTarget, TotalBlocks, UserStake,
-	UserStakeInfo,
+	mock::*, AutoCompound, BalanceOf, CandidacyBondReleases, CandidateInfo, CandidateStakeInfo,
+	Candidates, ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession,
+	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock,
+	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues, StakeTarget,
+	TotalBlocks, UserStake, UserStakeInfo,
 };
 use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
@@ -873,20 +873,39 @@ mod leave_intent {
 			// Unstake request is created
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
-			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 
-			let release_request = ReleaseRequest {
-				block: 6, // higher delay
-				amount: 10,
-			};
+			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CandidacyBondReleases::<Test>::get(3), Some((10, 6)));
+
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 0);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, session: 0 }
 			);
-			assert_eq!(ReleaseQueues::<Test>::get(3), vec![release_request]);
 			assert_eq!(LastAuthoredBlock::<Test>::get(3), 0);
+		});
+	}
+
+	#[test]
+	fn leave_with_release_queue_full_should_work() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+
+			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
+			let release_queue_max_len = <Test as Config>::MaxStakedCandidates::get();
+			assert_ok!(CollatorStaking::lock(
+				RuntimeOrigin::signed(3),
+				(release_queue_max_len * 2) as u64
+			));
+			for _ in 0..release_queue_max_len {
+				assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(3), Some(2)));
+			}
+			assert_eq!(ReleaseQueues::<Test>::get(3).len() as u32, release_queue_max_len);
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 		});
 	}
 }
@@ -3219,10 +3238,7 @@ mod session_management {
 			// kicked collator gets funds back after a delay
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 0);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &3), 10);
-			assert_eq!(
-				ReleaseQueues::<Test>::get(3),
-				vec![ReleaseRequest { block: 25, amount: 10 }]
-			);
+			assert_eq!(CandidacyBondReleases::<Test>::get(3), Some((10, 25)));
 		});
 	}
 
@@ -3269,10 +3285,7 @@ mod session_management {
 			assert_eq!(SessionHandlerCollators::get(), vec![3]);
 			// kicked collator gets funds back after a delay
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 10);
-			assert_eq!(
-				ReleaseQueues::<Test>::get(5),
-				vec![ReleaseRequest { block: 25, amount: 10 }]
-			);
+			assert_eq!(CandidacyBondReleases::<Test>::get(5), Some((10, 25)));
 		});
 	}
 }

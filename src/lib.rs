@@ -404,6 +404,18 @@ pub mod pallet {
 	pub type AutoCompound<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
 
+	/// Time (in blocks) to release an ex-candidate's locked candidacy bond.
+	/// If a candidate leaves the candidacy before its bond is released, the waiting period
+	/// will restart.
+	#[pallet::storage]
+	pub type CandidacyBondReleases<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		(BalanceOf<T>, BlockNumberFor<T>),
+		OptionQuery,
+	>;
+
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
 	pub struct GenesisConfig<T: Config> {
@@ -880,13 +892,14 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::unstake_all(user_stake.candidates.len() as u32)).into())
 		}
 
-		/// Releases all pending [`ReleaseRequest`] for a given account.
+		/// Releases all pending [`ReleaseRequest`] and candidacy bond for a given account.
 		///
 		/// This will unlock all funds in [`ReleaseRequest`] that have already expired.
 		#[pallet::call_index(10)]
 		#[pallet::weight(T::WeightInfo::release(T::MaxStakedCandidates::get()))]
 		pub fn release(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
+			Self::do_claim_candidacy_bond(&who)?;
 			let operations = Self::do_release(&who)?;
 			Ok(Some(T::WeightInfo::release(operations)).into())
 		}
@@ -1486,10 +1499,10 @@ pub mod pallet {
 			stake
 		}
 
-		/// Attempts to remove a candidate, identified by its account, if it exists and refunds the stake.
+		/// Attempts to remove a candidate, identified by its account.
 		///
 		/// Returns the candidate info prior to its removal.
-		fn try_remove_candidate(
+		pub fn try_remove_candidate(
 			who: &T::AccountId,
 			remove_last_authored: bool,
 		) -> Result<CandidateInfoOf<T>, DispatchError> {
@@ -1500,16 +1513,7 @@ pub mod pallet {
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(who.clone())
 					}
-
-					// We firstly optimistically release the candidacy bond.
-					let amount = Self::get_bond(who);
-					T::Currency::set_freeze(
-						&FreezeReason::CandidacyBond.into(),
-						who,
-						Zero::zero(),
-					)?;
-					// And now we lock it again to be released.
-					Self::add_to_release_queue(who, amount, T::BondUnlockDelay::get())?;
+					Self::release_candidacy_bond(who)?;
 
 					Self::deposit_event(Event::CandidateRemoved { account: who.clone() });
 					*maybe_candidate = None;
@@ -1543,6 +1547,67 @@ pub mod pallet {
 				block,
 			});
 			Ok(())
+		}
+
+		/// Prepares the candidacy bond to be released.
+		fn release_candidacy_bond(account: &T::AccountId) -> DispatchResult {
+			let bond = Self::get_bond(account);
+			if !bond.is_zero() {
+				// We firstly release the candidacy bond.
+				T::Currency::set_freeze(
+					&FreezeReason::CandidacyBond.into(),
+					account,
+					Zero::zero(),
+				)?;
+
+				// Now we freeze it again under a different reason.
+				let new_releasing_balance =
+					Self::get_releasing_balance(account).saturating_add(bond);
+				T::Currency::set_freeze(
+					&FreezeReason::Releasing.into(),
+					account,
+					new_releasing_balance,
+				)?;
+
+				// And finally update the period.
+				let release_block =
+					Self::current_block_number().saturating_add(T::BondUnlockDelay::get());
+				CandidacyBondReleases::<T>::mutate(account, |maybe_bond_release| {
+					let mut final_amount = bond;
+					if let Some((previous_bond_amount, previous_bond_deadline)) = maybe_bond_release
+					{
+						// Since we are on it, we auto-claim the previous candidacy bond and only
+						// add this one. But if the previous candidacy bond's delay was not
+						// fulfilled, then it gets replaced by this new one.
+						if *previous_bond_deadline < Self::current_block_number() {
+							final_amount.saturating_accrue(*previous_bond_amount);
+						}
+					}
+					*maybe_bond_release = Some((final_amount, release_block));
+				});
+			}
+			Ok(())
+		}
+
+		/// Claims the candidacy bond, provided sufficient time has passed.
+		fn do_claim_candidacy_bond(account: &T::AccountId) -> DispatchResult {
+			CandidacyBondReleases::<T>::try_mutate(account, |maybe_bond_release| {
+				if let Some((bond, bond_release)) = maybe_bond_release {
+					if *bond_release > Self::current_block_number() {
+						let new_release =
+							Self::get_releasing_balance(account).saturating_sub(*bond);
+						T::Currency::set_freeze(
+							&FreezeReason::Releasing.into(),
+							account,
+							new_release,
+						)?;
+						*maybe_bond_release = None;
+					}
+				}
+				// We always return a success, as it is not an error if the candidacy bond
+				// is not ready to be claimed yet.
+				Ok(())
+			})
 		}
 
 		/// Removes old rewards when a new session starts.

@@ -537,12 +537,20 @@ mod benchmarks {
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		let caller = whitelisted_caller();
-		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into()).unwrap();
+		let bond = MinCandidacyBond::<T>::get();
+		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into() + bond).unwrap();
+
+		// Here we add the staker as candidate and immediately remove it so that the candidacy bond
+		// gets released and the corresponding weight accounted for.
+		CollatorStaking::<T>::do_register_as_candidate(&caller, bond).unwrap();
+		CollatorStaking::<T>::try_remove_candidate(&caller, true).unwrap();
+
 		CollatorStaking::<T>::lock(
 			RawOrigin::Signed(caller.clone()).into(),
 			CollatorStaking::<T>::get_free_balance(&caller),
 		)
 		.unwrap();
+
 		for _ in 0..c {
 			CollatorStaking::<T>::unlock(
 				RawOrigin::Signed(caller.clone()).into(),
@@ -565,6 +573,8 @@ mod benchmarks {
 		r: Linear<1, { T::MaxSessionRewards::get() }>,
 	) {
 		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
+
+		frame_system::Pallet::<T>::set_block_number(T::BondUnlockDelay::get() + 10u32.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
