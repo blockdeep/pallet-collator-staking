@@ -1667,8 +1667,8 @@ pub mod pallet {
 							log::warn!("Cannot reward collator {:?} for producing more blocks than rewardable ones", collator);
 							break;
 						}
-						let rewards_all: BalanceOf<T> =
-							total_rewards.saturating_mul(blocks.into()) / rewardable_blocks.into();
+						let ratio = Perbill::from_rational(blocks, rewardable_blocks);
+						let rewards_all = ratio * total_rewards;
 						let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 						// Reward collator. Note these rewards are not autocompounded.
 						if let Err(error) = Self::do_reward_single(&collator, collator_only_reward)
