@@ -2570,19 +2570,50 @@ mod collator_rewards {
 			let max_rewards = <Test as Config>::MaxSessionRewards::get();
 			assert_eq!(max_rewards, 10);
 			register_candidates(3..=3);
-			for session in 0..max_rewards {
-				initialize_to_block(((session + 1) * 10) as u64);
-				assert_eq!(PerSessionRewards::<Test>::count(), session + 1);
-			}
-			assert_eq!(CollatorStaking::current_block_number(), 100);
-			assert_eq!(PerSessionRewards::<Test>::count(), 10);
-			assert!(PerSessionRewards::<Test>::get(0).is_some());
+			lock_for_staking(3..=3);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 3, stake: 60 }].try_into().unwrap()
+			));
 
-			// now rewards for session zero should be removed
-			initialize_to_block(110);
+			// There are no rewards for first session, so we move one forward.
+			initialize_to_block(10);
+
+			for session in 1..11 {
+				Balances::mint_into(&CollatorStaking::account_id(), 100).unwrap();
+				ProducedBlocks::<Test>::insert(3, 10);
+				let current_block = ((session + 1) * 10) as u64;
+				LastAuthoredBlock::<Test>::insert(3, current_block);
+				initialize_to_block(current_block);
+				assert_eq!(PerSessionRewards::<Test>::count(), session);
+			}
 			assert_eq!(CollatorStaking::current_block_number(), 110);
 			assert_eq!(PerSessionRewards::<Test>::count(), 10);
-			assert!(PerSessionRewards::<Test>::get(0).is_none());
+
+			// now rewards for session one should be removed
+			assert!(PerSessionRewards::<Test>::get(1).is_some());
+			Balances::mint_into(&CollatorStaking::account_id(), 100).unwrap();
+			ProducedBlocks::<Test>::insert(3, 10);
+			LastAuthoredBlock::<Test>::insert(3, 120);
+			initialize_to_block(120);
+			assert_eq!(CollatorStaking::current_block_number(), 120);
+			assert_eq!(PerSessionRewards::<Test>::count(), 10);
+			assert!(PerSessionRewards::<Test>::get(1).is_none());
+		});
+	}
+
+	#[test]
+	fn should_not_insert_rewards_of_zero_value() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			let max_rewards = <Test as Config>::MaxSessionRewards::get();
+			assert_eq!(max_rewards, 10);
+			register_candidates(3..=3);
+			for session in 0..max_rewards {
+				initialize_to_block(((session + 1) * 10) as u64);
+				assert_eq!(PerSessionRewards::<Test>::count(), 0);
+			}
 		});
 	}
 

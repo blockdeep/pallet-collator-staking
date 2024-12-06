@@ -1115,7 +1115,7 @@ pub mod pallet {
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
-			//Staker can't claim in the same session as there are no rewards
+			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&who), Error::<T>::NoPendingClaim);
 
 			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
@@ -1670,23 +1670,26 @@ pub mod pallet {
 						let ratio = Perbill::from_rational(blocks, rewardable_blocks);
 						let rewards_all = ratio * total_rewards;
 						let collator_only_reward = collator_percentage.mul_floor(rewards_all);
+						let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
 						// Reward collator. Note these rewards are not autocompounded.
 						if let Err(error) = Self::do_reward_single(&collator, collator_only_reward)
 						{
 							log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
 						}
 
-						// No rewards if:
+						// No rewards for stakers if:
 						// - The collator has no stakers.
+						// - The actual reward is zero.
 						// - It is the first session. This is because stakers do not receive rewards
 						//   for the first session they stake in, so in the worst case they staked
 						//   in session zero.
-						if collator_info.stake.is_zero() || session.is_zero() {
+						if collator_info.stake.is_zero()
+							|| session.is_zero() || stakers_only_rewards.is_zero()
+						{
 							break;
 						}
 
 						// We should be able to insert it, but in case we cannot, simply ignore this reward.
-						let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
 						if reward_map
 							.try_insert(
 								collator.clone(),
@@ -1703,10 +1706,16 @@ pub mod pallet {
 			}
 
 			let rewardable_collators: u32 = reward_map.len() as u32;
-			PerSessionRewards::<T>::insert(
-				session,
-				SessionInfo { rewards: stakers_rewards, candidates: reward_map },
-			);
+
+			// If there are no rewards for stakers (likely because either no rewards were
+			// produced at all during the session or because the collator reward percentage is
+			// set to 100%) then there is no need to insert this.
+			if !stakers_rewards.is_zero() {
+				PerSessionRewards::<T>::insert(
+					session,
+					SessionInfo { rewards: stakers_rewards, candidates: reward_map },
+				);
+			}
 			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
 			(rewardable_collators, total_rewards)
 		}
