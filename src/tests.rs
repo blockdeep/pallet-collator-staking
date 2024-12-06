@@ -994,6 +994,46 @@ mod stake {
 	}
 
 	#[test]
+	fn cannot_stake_if_recently_unstaked() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(3..=3);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(3),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(3), 3));
+			assert_eq!(
+				UserStake::<Test>::get(3),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(4),
+					vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+		});
+	}
+
+	#[test]
 	fn cannot_stake_if_under_minstake() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
@@ -1051,6 +1091,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1062,6 +1103,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1090,6 +1132,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 20,
 					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0)
 				}
 			);
@@ -1118,6 +1161,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1154,6 +1198,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 40,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0)
 				}
 			);
@@ -1182,6 +1227,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1301,6 +1347,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 32,
 					candidates: bbtreeset![3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0)
 				}
 			);
@@ -1369,6 +1416,7 @@ mod stake {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1413,6 +1461,7 @@ mod claim_rewards {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1453,6 +1502,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1479,6 +1529,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0)
 				}
 			);
@@ -1501,6 +1552,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 10,
 					candidates: bbtreeset![4],
+					maybe_last_unstake: Some((20, 11)),
 					maybe_last_reward_session: Some(0)
 				}
 			);
@@ -1527,6 +1579,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1541,6 +1594,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1555,6 +1609,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 20,
 					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1569,6 +1624,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1600,6 +1656,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 10,
 					candidates: bbtreeset![4],
+					maybe_last_unstake: Some((20, 11)),
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1632,6 +1689,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1666,6 +1724,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1678,6 +1737,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1698,6 +1758,7 @@ mod unstake_from {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1737,6 +1798,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1761,6 +1823,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1773,6 +1836,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 30,
 					candidates: bbtreeset![3, 4],
+					maybe_last_unstake: None,
 					maybe_last_reward_session: Some(0),
 				}
 			);
@@ -1802,6 +1866,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((30, 11)),
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1822,6 +1887,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);
@@ -1898,6 +1964,7 @@ mod set_autocompound_percentage {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
 			);

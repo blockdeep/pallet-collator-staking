@@ -92,6 +92,7 @@ pub mod pallet {
 	pub type UserStakeInfoOf<T> = UserStakeInfo<
 		BoundedBTreeSet<<T as frame_system::Config>::AccountId, <T as Config>::MaxStakedCandidates>,
 		BalanceOf<T>,
+		BlockNumberFor<T>,
 	>;
 	pub type CandidateStakeInfoOf<T> = CandidateStakeInfo<BalanceOf<T>>;
 
@@ -187,6 +188,11 @@ pub mod pallet {
 		#[pallet::constant]
 		type StakeUnlockDelay: Get<BlockNumberFor<Self>>;
 
+		/// Number of blocks to wait before reusing funds previously assigned to a collator.
+		/// It should be set to at least one session.
+		#[pallet::constant]
+		type RestakeUnlockDelay: Get<BlockNumberFor<Self>>;
+
 		/// Maximum number of rewards to keep in storage. Non-claimed rewards will not be claimable
 		/// after they have been removed.
 		#[pallet::constant]
@@ -261,16 +267,19 @@ pub mod pallet {
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
-	pub struct UserStakeInfo<AccountIdSet, Balance> {
+	pub struct UserStakeInfo<AccountIdSet, Balance, BlockNumber> {
 		/// The total amount staked in all candidates.
 		pub stake: Balance,
+		/// Last time an amount was reassigned.
+		pub maybe_last_unstake: Option<(Balance, BlockNumber)>,
 		/// The candidates where this user staked.
 		pub candidates: AccountIdSet,
 		/// Last session where this user got the rewards.
 		pub maybe_last_reward_session: Option<SessionIndex>,
 	}
 
-	impl<AccountIdSet, Balance> Default for UserStakeInfo<AccountIdSet, Balance>
+	impl<AccountIdSet, Balance, BlockNumber> Default
+		for UserStakeInfo<AccountIdSet, Balance, BlockNumber>
 	where
 		AccountIdSet: Default,
 		Balance: Default,
@@ -279,6 +288,7 @@ pub mod pallet {
 			Self {
 				stake: Balance::default(),
 				candidates: AccountIdSet::default(),
+				maybe_last_unstake: None,
 				maybe_last_reward_session: None,
 			}
 		}
@@ -865,27 +875,30 @@ pub mod pallet {
 
 		/// Removes stake from a collator candidate.
 		///
-		/// The amount unstaked will remain locked.
+		/// The amount unstaked will remain locked if the stake was removed from a candidate.
 		#[pallet::call_index(8)]
 		#[pallet::weight(T::WeightInfo::unstake_from())]
-		pub fn unstake_from(origin: OriginFor<T>, candidate: T::AccountId) -> DispatchResult {
+		pub fn unstake_from(origin: OriginFor<T>, account: T::AccountId) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			ensure!(Self::staker_has_claimed(&who), Error::<T>::PreviousRewardsNotClaimed);
 
 			ensure!(
-				CandidateStake::<T>::try_get(candidate.clone(), who.clone()).is_ok(),
+				CandidateStake::<T>::try_get(account.clone(), who.clone()).is_ok(),
 				Error::<T>::NoStakeOnCandidate
 			);
 
-			let _ = Self::do_unstake(&who, &candidate)?;
+			let (amount, is_candidate) = Self::do_unstake(&who, &account)?;
+			if is_candidate {
+				Self::note_last_unstake(&who, amount);
+			}
 
 			Ok(())
 		}
 
 		/// Removes all stake of a user from all candidates.
 		///
-		/// The amount unstaked will remain locked.
+		/// The amount unstaked from candidates will remain locked.
 		#[pallet::call_index(9)]
 		#[pallet::weight(T::WeightInfo::unstake_all(T::MaxStakedCandidates::get()))]
 		pub fn unstake_all(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
@@ -894,8 +907,15 @@ pub mod pallet {
 			ensure!(Self::staker_has_claimed(&who), Error::<T>::PreviousRewardsNotClaimed);
 
 			let user_stake = UserStake::<T>::get(&who);
+			let mut amount_in_candidates: BalanceOf<T> = Zero::zero();
 			for candidate in &user_stake.candidates {
-				Self::do_unstake(&who, candidate)?;
+				let (amount, is_candidate) = Self::do_unstake(&who, candidate)?;
+				if is_candidate {
+					amount_in_candidates.saturating_accrue(amount);
+				}
+			}
+			if !amount_in_candidates.is_zero() {
+				Self::note_last_unstake(&who, amount_in_candidates);
 			}
 
 			Ok(Some(T::WeightInfo::unstake_all(user_stake.candidates.len() as u32)).into())
@@ -1355,6 +1375,18 @@ pub mod pallet {
 			Ok(pos as u32)
 		}
 
+		/// Notes the last unstake operation for a given user
+		fn note_last_unstake(account: &T::AccountId, amount: BalanceOf<T>) {
+			UserStake::<T>::mutate(account, |info| {
+				let (balance, block) = info.maybe_last_unstake.unwrap_or_default();
+				let now = Self::current_block_number();
+				let final_amount =
+					if block >= now { amount } else { amount.saturating_add(balance) };
+				info.maybe_last_unstake =
+					Some((final_amount, now.saturating_add(T::RestakeUnlockDelay::get())));
+			});
+		}
+
 		/// Adds stake into a given candidate by providing its address and the amount to stake.
 		///
 		/// This operation will fail if:
@@ -1409,6 +1441,25 @@ pub mod pallet {
 							if user_stake_info.maybe_last_reward_session.is_none() {
 								user_stake_info.maybe_last_reward_session = Some(current_session);
 							}
+
+							// In case the user recently unstaked we cannot allow those funds to be quickly
+							// reinvested. Otherwise, stakers could potentially move funds right before
+							// the session ends from one candidate to another, depending on the most
+							// performant ones during the current session.
+							if let Some((unavailable_amount, block_limit)) =
+								user_stake_info.maybe_last_unstake
+							{
+								if block_limit < Self::current_block_number() {
+									let available_amount =
+										frozen_balance.saturating_sub(unavailable_amount);
+									ensure!(
+										available_amount >= amount,
+										Error::<T>::InsufficientLockedBalance
+									);
+								} else {
+									user_stake_info.maybe_last_unstake = None;
+								}
+							}
 							Ok(())
 						})?;
 
@@ -1446,23 +1497,25 @@ pub mod pallet {
 
 		/// Unstakes all funds deposited by `staker` in a given `candidate`.
 		///
-		/// Returns the amount unstaked.
+		/// Returns the amount unstaked, and whether it was unstaked from a candidate or not.
 		fn do_unstake(
 			staker: &T::AccountId,
 			candidate: &T::AccountId,
-		) -> Result<BalanceOf<T>, DispatchError> {
+		) -> Result<(BalanceOf<T>, bool), DispatchError> {
 			let stake = Self::remove_stake(candidate, staker);
+			let mut is_candidate = true;
 
 			if !stake.is_zero() {
 				Candidates::<T>::mutate_exists(candidate, |maybe_info| {
 					if let Some(info) = maybe_info {
+						is_candidate = true;
 						info.stake.saturating_reduce(stake);
 						info.stakers.saturating_dec();
 					}
 				});
 			}
 
-			Ok(stake)
+			Ok((stake, is_candidate))
 		}
 
 		/// Disable autocompounding if staked balance dropped below the threshold
