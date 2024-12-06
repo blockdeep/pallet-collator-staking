@@ -321,9 +321,6 @@ pub mod pallet {
 	/// Desired number of candidates.
 	///
 	/// This should always be less than [`Config::MaxCandidates`] for weights to be correct.
-	///
-	/// IMP: This must be less than the session length,
-	/// because rewards are distributed for one collator per block.
 	#[pallet::storage]
 	pub type DesiredCandidates<T> = StorageValue<_, u32, ValueQuery>;
 
@@ -691,6 +688,12 @@ pub mod pallet {
 		pub fn set_desired_candidates(origin: OriginFor<T>, max: u32) -> DispatchResult {
 			T::UpdateOrigin::ensure_origin(origin)?;
 			ensure!(max <= T::MaxCandidates::get(), Error::<T>::TooManyDesiredCandidates);
+
+			let invulnerables = Invulnerables::<T>::get();
+			ensure!(
+				max.saturating_add(invulnerables.len() as u32) >= T::MinEligibleCollators::get(),
+				Error::<T>::TooFewEligibleCollators
+			);
 
 			DesiredCandidates::<T>::set(max);
 			Self::deposit_event(Event::NewDesiredCandidates { desired_candidates: max });

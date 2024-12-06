@@ -232,13 +232,36 @@ mod set_desired_candidates {
 				CollatorStaking::set_desired_candidates(RuntimeOrigin::signed(1), 2),
 				BadOrigin
 			);
-			// rejects bad origin
+			// rejects too many
 			assert_noop!(
 				CollatorStaking::set_desired_candidates(
 					RuntimeOrigin::signed(RootAccount::get()),
 					50
 				),
 				Error::<Test>::TooManyDesiredCandidates
+			);
+		});
+	}
+
+	#[test]
+	fn cannot_set_desired_candidates_if_under_min_collator_limit() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			// given
+			assert_eq!(DesiredCandidates::<Test>::get(), 2);
+			assert_eq!(<Test as Config>::MinEligibleCollators::get(), 1);
+			register_candidates(3..=3);
+
+			assert_ok!(CollatorStaking::set_invulnerables(
+				RuntimeOrigin::signed(RootAccount::get()),
+				vec![]
+			));
+			assert_noop!(
+				CollatorStaking::set_desired_candidates(
+					RuntimeOrigin::signed(RootAccount::get()),
+					0
+				),
+				Error::<Test>::TooFewEligibleCollators
 			);
 		});
 	}
