@@ -196,7 +196,7 @@ pub mod pallet {
 		/// Maximum number of rewards to keep in storage. Non-claimed rewards will not be claimable
 		/// after they have been removed.
 		#[pallet::constant]
-		type MaxSessionRewards: Get<u32>;
+		type MaxRewardSessions: Get<u32>;
 
 		/// Minimum stake needed to enable autocompounding.
 		#[pallet::constant]
@@ -1127,7 +1127,7 @@ pub mod pallet {
 		#[pallet::call_index(20)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(
 			T::MaxStakedCandidates::get(),
-			T::MaxSessionRewards::get()
+			T::MaxRewardSessions::get()
 		))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
@@ -1549,9 +1549,6 @@ pub mod pallet {
 									user_stake_info.candidates.remove(candidate);
 								},
 							}
-						} else {
-							// This should never occur.
-							*maybe_user_stake_info = None;
 						}
 					});
 				}
@@ -1681,8 +1678,8 @@ pub mod pallet {
 		/// Returns the rewards that have been released.
 		fn remove_old_rewards_if_needed(session: SessionIndex) -> BalanceOf<T> {
 			let mut released_rewards: BalanceOf<T> = Zero::zero();
-			if PerSessionRewards::<T>::count() >= T::MaxSessionRewards::get() {
-				let reward_to_remove = session.saturating_sub(T::MaxSessionRewards::get());
+			if PerSessionRewards::<T>::count() >= T::MaxRewardSessions::get() {
+				let reward_to_remove = session.saturating_sub(T::MaxRewardSessions::get());
 				PerSessionRewards::<T>::mutate_exists(reward_to_remove, |maybe_reward| {
 					if let Some(reward) = maybe_reward {
 						released_rewards.saturating_accrue(reward.rewards);
@@ -1715,6 +1712,8 @@ pub mod pallet {
 					if let Ok(collator_info) = Self::get_candidate(&collator) {
 						if blocks > rewardable_blocks {
 							// The only case this could happen is if the candidate was an invulnerable during the session.
+							// Since blocks produced by invulnerables are not currently stored in ProducedBlocks this error
+							// should not occur.
 							log::warn!("Cannot reward collator {:?} for producing more blocks than rewardable ones", collator);
 							break;
 						}
@@ -1917,9 +1916,20 @@ pub mod pallet {
 		/// * The number of selected candidates together with the invulnerables must be greater than
 		///   or equal to the minimum number of eligible collators.
 		///
-		/// ## [`MaxCandidates`]
+		/// ## [`MaxStakedCandidates`]
 		///
-		/// * The amount of stakers per account is limited and its maximum value must not be surpassed.
+		/// * The amount of staked candidates per account is limited and its maximum value must not be surpassed.
+		///
+		/// ## [`Candidates`]
+		///
+		/// * The amount of stakers per Candidate is limited and its maximum value must not be surpassed.
+		/// * The number of candidates should not exceed the candidate list capacity
+		///
+		/// ## [`PerSessionRewards`]
+		///
+		/// * The amount of stored sessions must not exceed the capacity established by the maximum
+		/// 	amount of sessions kept in storage
+
 		#[cfg(any(test, feature = "try-runtime"))]
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 			let desired_candidates = DesiredCandidates::<T>::get();
@@ -1954,8 +1964,8 @@ pub mod pallet {
 			);
 
 			ensure!(
-				PerSessionRewards::<T>::count() <= T::MaxSessionRewards::get(),
-				"Per-session reward count must not exceed MaxSessionRewards"
+				PerSessionRewards::<T>::count() <= T::MaxRewardSessions::get(),
+				"Per-session reward count must not exceed MaxRewardSessions"
 			);
 
 			Ok(())

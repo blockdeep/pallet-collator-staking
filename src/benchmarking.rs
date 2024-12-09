@@ -570,7 +570,7 @@ mod benchmarks {
 	#[benchmark]
 	fn claim_rewards(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
+		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
 		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
 

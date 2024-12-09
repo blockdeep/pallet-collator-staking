@@ -2634,7 +2634,7 @@ mod collator_rewards {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			let max_rewards = <Test as Config>::MaxSessionRewards::get();
+			let max_rewards = <Test as Config>::MaxRewardSessions::get();
 			assert_eq!(max_rewards, 10);
 			register_candidates(3..=3);
 			lock_for_staking(3..=3);
@@ -2674,7 +2674,7 @@ mod collator_rewards {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			let max_rewards = <Test as Config>::MaxSessionRewards::get();
+			let max_rewards = <Test as Config>::MaxRewardSessions::get();
 			assert_eq!(max_rewards, 10);
 			register_candidates(3..=3);
 			for session in 0..max_rewards {
