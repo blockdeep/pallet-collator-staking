@@ -539,16 +539,12 @@ pub mod pallet {
 		NoAssociatedCollatorId,
 		/// Collator ID is not yet registered.
 		CollatorNotRegistered,
-		/// Could not insert in the candidate list.
-		InsertToCandidateListFailed,
 		/// Amount not sufficient to be staked.
 		InsufficientStake,
 		/// DesiredCandidates is out of bounds.
 		TooManyDesiredCandidates,
 		/// Too many unstaking requests. Claim some of them first.
 		TooManyReleaseRequests,
-		/// Cannot take some candidate's slot while the candidate list is not full.
-		CanRegister,
 		/// Invalid value for MinStake. It must be lower than or equal to `MinStake`.
 		InvalidMinStake,
 		/// Invalid value for CandidacyBond. It must be higher than or equal to `MinCandidacyBond`.
