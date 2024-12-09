@@ -1856,7 +1856,7 @@ pub mod pallet {
 			let now = Self::current_block_number();
 			let kick_threshold = T::KickThreshold::get();
 			let min_collators = T::MinEligibleCollators::get();
-			let candidacy_bond = MinCandidacyBond::<T>::get();
+			let min_candidacy_bond = MinCandidacyBond::<T>::get();
 			Candidates::<T>::iter()
                 .filter_map(|(who, info)| {
                     let last_block = LastAuthoredBlock::<T>::get(who.clone());
@@ -1864,7 +1864,7 @@ pub mod pallet {
                     let is_lazy = since_last >= kick_threshold;
                     let bond = Self::get_bond(&who);
 
-                    if Self::eligible_collators() <= min_collators || (!is_lazy && bond.saturating_add(info.stake) >= candidacy_bond) {
+                    if Self::eligible_collators() <= min_collators || (!is_lazy && bond >= min_candidacy_bond) {
                         // Either this is a good collator (not lazy) or we are at the minimum
                         // that the system needs. They get to stay, as long as they have sufficient deposit plus stake.
                         Some(info)

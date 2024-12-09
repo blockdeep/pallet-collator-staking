@@ -571,7 +571,6 @@ mod set_min_candidacy_bond {
 			let candidate_5 = CandidateInfo { stake: 0, stakers: 0 };
 
 			register_candidates(3..=5);
-			lock_for_staking(3..=5);
 			assert_eq!(
 				candidate_list(),
 				vec![(5, candidate_5.clone()), (3, candidate_3.clone()), (4, candidate_4.clone())]
@@ -616,21 +615,9 @@ mod set_min_candidacy_bond {
 				bond_amount: 20,
 			}));
 			assert_eq!(MinCandidacyBond::<Test>::get(), 20);
-			assert_ok!(CollatorStaking::stake(
-				RuntimeOrigin::signed(5),
-				vec![StakeTarget { candidate: 5, stake: 20 }].try_into().unwrap()
-			));
-			let new_candidate_5 = CandidateInfo { stake: 20, stakers: 1 };
-			assert_eq!(
-				candidate_list(),
-				vec![
-					(3, candidate_3.clone()),
-					(4, candidate_4.clone()),
-					(5, new_candidate_5.clone())
-				]
-			);
+			assert_ok!(CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(5), 20));
 			CollatorStaking::kick_stale_candidates();
-			assert_eq!(candidate_list(), vec![(5, new_candidate_5)]);
+			assert_eq!(candidate_list(), vec![(5, candidate_5)]);
 		});
 	}
 }
