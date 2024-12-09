@@ -323,6 +323,11 @@ pub mod pallet {
 	pub type Candidates<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, T::AccountId, CandidateInfoOf<T>, OptionQuery>;
 
+	/// Map of Candidates that have been removed in the current session.
+	#[pallet::storage]
+	pub type SessionRemovedCandidates<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, CandidateInfoOf<T>, OptionQuery>;
+
 	/// Last block authored by a collator.
 	#[pallet::storage]
 	pub type LastAuthoredBlock<T: Config> =
@@ -575,6 +580,8 @@ pub mod pallet {
 		NoStakeOnCandidate,
 		/// No rewards to claim as previous claim happened on the same session.
 		NoPendingClaim,
+		/// Candidate has not been removed in the current session.
+		NotRemovedCandidate,
 	}
 
 	#[pallet::hooks]
@@ -1328,6 +1335,11 @@ pub mod pallet {
 					}
 					let info = CandidateInfo { stake, stakers };
 					*maybe_candidate_info = Some(info.clone());
+
+					// If the candidate left in the current session and is now rejoining
+					// remove it from the SessionRemovedCandidates
+					SessionRemovedCandidates::<T>::remove(who);
+
 					T::Currency::set_freeze(&FreezeReason::CandidacyBond.into(), who, bond)?;
 					Ok(info)
 				},
@@ -1578,6 +1590,10 @@ pub mod pallet {
 					}
 					Self::release_candidacy_bond(who)?;
 
+					// Store removed candidate in SessionRemovedCandidates to properly reward
+					// the candidate and its stakers at the end of the session.
+					SessionRemovedCandidates::<T>::insert(who, candidate.clone());
+
 					Self::deposit_event(Event::CandidateRemoved { account: who.clone() });
 					*maybe_candidate = None;
 					Ok(candidate)
@@ -1709,7 +1725,17 @@ pub mod pallet {
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
 				for (collator, blocks) in ProducedBlocks::<T>::drain() {
-					if let Ok(collator_info) = Self::get_candidate(&collator) {
+					// Get the collator info of a candidate, in the case that the collator was removed from the
+					// candidate list during the session, the collator and its stakers must still be rewarded
+					// for the produced blocks in the session so the info can be obtained from SessionRemovedCandidates.
+					let info = Self::get_candidate(&collator)
+						.or_else(|_| {
+							SessionRemovedCandidates::<T>::take(&collator)
+								.ok_or(Error::<T>::NotRemovedCandidate)
+						})
+						.ok();
+
+					if let Some(collator_info) = info {
 						if blocks > rewardable_blocks {
 							// The only case this could happen is if the candidate was an invulnerable during the session.
 							// Since blocks produced by invulnerables are not currently stored in ProducedBlocks this error
@@ -1901,6 +1927,7 @@ pub mod pallet {
 			let (candidate, worst_bond) = Self::get_worst_candidate()?;
 			ensure!(bond > worst_bond, Error::<T>::InvalidCandidacyBond);
 			Self::try_remove_candidate(&candidate, false)?;
+
 			Ok(candidate)
 		}
 
@@ -2009,6 +2036,12 @@ pub mod pallet {
 			let active_candidates_count = Self::kick_stale_candidates();
 			let removed = candidates_len_before.saturating_sub(active_candidates_count);
 			let result = Self::assemble_collators();
+
+			// Although the removed candidates are passively deleted from SessionRemovedCandidates
+			// during the distribution of session rewards, it is possible that a removed candidate
+			// is not removed if the candidate didn't produce and blocks during the session. For that
+			// reason the leftover keys in the SessionRemovedCandidates StorageMap must be cleared.
+			let _ = SessionRemovedCandidates::<T>::clear(T::MaxCandidates::get(), None);
 
 			frame_system::Pallet::<T>::register_extra_weight_unchecked(
 				T::WeightInfo::new_session(removed, candidates_len_before),

@@ -18,8 +18,8 @@ use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidacyBondReleases, CandidateInfo, CandidateStakeInfo,
 	Candidates, ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession,
 	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock,
-	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues, StakeTarget,
-	TotalBlocks, UserStake, UserStakeInfo,
+	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues,
+	SessionRemovedCandidates, StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
 };
 use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
@@ -823,6 +823,10 @@ mod register_as_candidate {
 
 			// the candidate leaves
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(
+				SessionRemovedCandidates::<Test>::get(3),
+				Some(CandidateInfo { stake: 60, stakers: 1 })
+			);
 			// the stake remains the same
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
@@ -929,6 +933,10 @@ mod leave_intent {
 				CandidateStakeInfo { stake: 0, session: 0 }
 			);
 			assert_eq!(LastAuthoredBlock::<Test>::get(3), 0);
+			assert_eq!(
+				SessionRemovedCandidates::<Test>::get(3),
+				Some(CandidateInfo { stake: 0, stakers: 0 })
+			);
 		});
 	}
 
@@ -2506,6 +2514,7 @@ mod collator_rewards {
 			}));
 		});
 	}
+
 	#[test]
 	fn should_reward_collator() {
 		new_test_ext().execute_with(|| {
@@ -2572,6 +2581,10 @@ mod collator_rewards {
 				Balances::free_balance(CollatorStaking::account_id()) - Balances::minimum_balance(),
 				18
 			);
+			// we can safely remove the collator, as rewards will be delivered anyway to both
+			// the collator itself and its stakers.
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(4)));
+
 			initialize_to_block(20);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::SessionEnded {
 				index: 1,
