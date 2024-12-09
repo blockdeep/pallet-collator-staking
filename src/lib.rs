@@ -1108,8 +1108,9 @@ pub mod pallet {
 			ensure!(amount >= MinCandidacyBond::<T>::get(), Error::<T>::InvalidCandidacyBond);
 			ensure!(Self::get_candidate(&who).is_ok(), Error::<T>::NotCandidate);
 
-			let available_balance =
-				Self::get_free_balance(&who).saturating_add(Self::get_bond(&who));
+			let available_balance = T::Currency::balance(&who)
+				.saturating_sub(Self::get_staked_balance(&who))
+				.saturating_sub(Self::get_releasing_balance(&who));
 			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
 
 			T::Currency::set_freeze(&FreezeReason::CandidacyBond.into(), &who, amount)?;
