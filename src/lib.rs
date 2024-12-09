@@ -1870,8 +1870,13 @@ pub mod pallet {
                         Some(info)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
-                        let _ = Self::try_remove_candidate(&who, true);
-                        None
+                        match Self::try_remove_candidate(&who, true) {
+							Ok(_) => None,
+							Err(error) => {
+								log::warn!("Could not remove candidate {:?}: {:?}", info, error);
+								Some(info)
+							},
+						}
                     }
                 })
                 .count()
