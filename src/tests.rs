@@ -15,13 +15,13 @@
 
 use crate as collator_staking;
 use crate::{
-	mock::*, AutoCompound, BalanceOf, CandidacyBondReleases, CandidateInfo, CandidateStakeInfo,
-	Candidates, ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession,
-	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock,
-	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues,
-	SessionRemovedCandidates, StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
+	mock::*, AutoCompound, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
+	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
+	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
+	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MinCandidacyBond, MinStake,
+	PerSessionRewards, ProducedBlocks, ReleaseQueues, ReleaseRequest, SessionRemovedCandidates,
+	StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
 };
-use crate::{CandidateStake, ReleaseRequest};
 use frame_support::pallet_prelude::TypedGet;
 use frame_support::traits::fungible::InspectFreeze;
 use frame_support::traits::tokens::Preservation::Preserve;
@@ -847,6 +847,95 @@ mod register_as_candidate {
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 60, stakers: 1 }));
 		});
 	}
+
+	#[test]
+	fn register_as_candidate_reuses_old_bond_if_replaced() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// given
+			assert_eq!(DesiredCandidates::<Test>::get(), 2);
+			assert_eq!(MinCandidacyBond::<Test>::get(), 10);
+			assert_eq!(Candidates::<Test>::count(), 0);
+			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+
+			// register the first time
+			assert_eq!(Balances::balance(&3), 100);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			assert_eq!(Candidates::<Test>::count(), 1);
+			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+
+			// the candidate is replaced (artificially)
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			CandidacyBondReleases::<Test>::mutate(3, |maybe_bond_release| {
+				let bond_release = maybe_bond_release.as_mut().unwrap();
+				bond_release.reason = CandidacyBondReleaseReason::Replaced;
+			});
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+
+			// and finally rejoins using the old candidacy bond
+			assert_ok!(CollatorStaking::register_as_candidate(
+				RuntimeOrigin::signed(3),
+				MinCandidacyBond::<Test>::get()
+			));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 0);
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+		});
+	}
+
+	#[test]
+	fn register_as_candidate_does_not_reuse_old_bond_if_wrong_reason() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// given
+			assert_eq!(DesiredCandidates::<Test>::get(), 2);
+			assert_eq!(MinCandidacyBond::<Test>::get(), 10);
+			assert_eq!(Candidates::<Test>::count(), 0);
+			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
+
+			// register the first time
+			assert_eq!(Balances::balance(&3), 100);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			assert_eq!(Candidates::<Test>::count(), 1);
+			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+
+			// the candidate removes itself
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+
+			// and finally rejoins using the old candidacy bond
+			assert_ok!(CollatorStaking::register_as_candidate(
+				RuntimeOrigin::signed(3),
+				MinCandidacyBond::<Test>::get()
+			));
+			// the old locked candidacy bond should remain
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+		});
+	}
 }
 
 mod leave_intent {
@@ -924,7 +1013,14 @@ mod leave_intent {
 
 			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
-			assert_eq!(CandidacyBondReleases::<Test>::get(3), Some((10, 6)));
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
 
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 0);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &3), 10);
@@ -3393,7 +3489,14 @@ mod session_management {
 			// kicked collator gets funds back after a delay
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 0);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &3), 10);
-			assert_eq!(CandidacyBondReleases::<Test>::get(3), Some((10, 25)));
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 25,
+					reason: CandidacyBondReleaseReason::Idle
+				})
+			);
 		});
 	}
 
@@ -3440,7 +3543,14 @@ mod session_management {
 			assert_eq!(SessionHandlerCollators::get(), vec![3]);
 			// kicked collator gets funds back after a delay
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 10);
-			assert_eq!(CandidacyBondReleases::<Test>::get(5), Some((10, 25)));
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(5),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 25,
+					reason: CandidacyBondReleaseReason::Idle
+				})
+			);
 		});
 	}
 }

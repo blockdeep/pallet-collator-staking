@@ -95,6 +95,7 @@ pub mod pallet {
 		BlockNumberFor<T>,
 	>;
 	pub type CandidateStakeInfoOf<T> = CandidateStakeInfo<BalanceOf<T>>;
+	pub type CandidacyBondReleaseOf<T> = CandidacyBondRelease<BalanceOf<T>, BlockNumberFor<T>>;
 
 	/// A convertor from collators id. Since this pallet does not have stash/controller, this is
 	/// just identity.
@@ -305,6 +306,28 @@ pub mod pallet {
 		pub candidates: AccountIdMap,
 	}
 
+	/// Reasons a candidady left the candidacy list for.
+	#[derive(
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+	)]
+	pub enum CandidacyBondReleaseReason {
+		/// The candidacy did not produce at least one block for [`KickThreshold`] blocks.
+		Idle,
+		/// The candidate left by itself.
+		Left,
+		/// The candidate was replaced by another one with higher bond.
+		Replaced,
+	}
+
+	#[derive(
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+	)]
+	pub struct CandidacyBondRelease<Balance, BlockNumber> {
+		pub bond: Balance,
+		pub block: BlockNumber,
+		pub reason: CandidacyBondReleaseReason,
+	}
+
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
@@ -420,13 +443,8 @@ pub mod pallet {
 	/// If a candidate leaves the candidacy before its bond is released, the waiting period
 	/// will restart.
 	#[pallet::storage]
-	pub type CandidacyBondReleases<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		T::AccountId,
-		(BalanceOf<T>, BlockNumberFor<T>),
-		OptionQuery,
-	>;
+	pub type CandidacyBondReleases<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -774,7 +792,7 @@ pub mod pallet {
 				Error::<T>::TooFewEligibleCollators
 			);
 			// Do remove their last authored block.
-			Self::try_remove_candidate(&who, true)?;
+			Self::try_remove_candidate(&who, true, CandidacyBondReleaseReason::Left)?;
 
 			Ok(())
 		}
@@ -1333,6 +1351,31 @@ pub mod pallet {
 						stake.saturating_accrue(info.stake);
 						stakers.saturating_inc();
 					}
+					// Users are allowed to reuse the old candidacy bond as long as they were
+					// replaced by another candidate.
+					CandidacyBondReleases::<T>::try_mutate(
+						who,
+						|maybe_bond_release| -> DispatchResult {
+							if let Some(bond_release) = maybe_bond_release {
+								if bond_release.reason == CandidacyBondReleaseReason::Replaced
+									&& bond_release.bond >= bond
+								{
+									let remaining_lock =
+										Self::get_releasing_balance(who).saturating_sub(bond);
+									T::Currency::set_freeze(
+										&FreezeReason::Releasing.into(),
+										who,
+										remaining_lock,
+									)?;
+									bond_release.bond.saturating_reduce(bond);
+									if bond_release.bond.is_zero() {
+										*maybe_bond_release = None;
+									}
+								}
+							}
+							Ok(())
+						},
+					)?;
 					let info = CandidateInfo { stake, stakers };
 					*maybe_candidate_info = Some(info.clone());
 
@@ -1580,6 +1623,7 @@ pub mod pallet {
 		pub fn try_remove_candidate(
 			who: &T::AccountId,
 			remove_last_authored: bool,
+			reason: CandidacyBondReleaseReason,
 		) -> Result<CandidateInfoOf<T>, DispatchError> {
 			Candidates::<T>::try_mutate_exists(
 				who,
@@ -1588,7 +1632,7 @@ pub mod pallet {
 					if remove_last_authored {
 						LastAuthoredBlock::<T>::remove(who.clone())
 					}
-					Self::release_candidacy_bond(who)?;
+					Self::release_candidacy_bond(who, reason)?;
 
 					// Store removed candidate in SessionRemovedCandidates to properly reward
 					// the candidate and its stakers at the end of the session.
@@ -1629,7 +1673,10 @@ pub mod pallet {
 		}
 
 		/// Prepares the candidacy bond to be released.
-		fn release_candidacy_bond(account: &T::AccountId) -> DispatchResult {
+		fn release_candidacy_bond(
+			account: &T::AccountId,
+			reason: CandidacyBondReleaseReason,
+		) -> DispatchResult {
 			let bond = Self::get_bond(account);
 			if !bond.is_zero() {
 				// We firstly release the candidacy bond.
@@ -1653,7 +1700,11 @@ pub mod pallet {
 					Self::current_block_number().saturating_add(T::BondUnlockDelay::get());
 				CandidacyBondReleases::<T>::mutate(account, |maybe_bond_release| {
 					let mut final_amount = bond;
-					if let Some((previous_bond_amount, previous_bond_deadline)) = maybe_bond_release
+					if let Some(CandidacyBondRelease {
+						bond: previous_bond_amount,
+						block: previous_bond_deadline,
+						..
+					}) = maybe_bond_release
 					{
 						// Since we are on it, we auto-claim the previous candidacy bond and only
 						// add this one. But if the previous candidacy bond's delay was not
@@ -1662,7 +1713,11 @@ pub mod pallet {
 							final_amount.saturating_accrue(*previous_bond_amount);
 						}
 					}
-					*maybe_bond_release = Some((final_amount, release_block));
+					*maybe_bond_release = Some(CandidacyBondRelease {
+						bond: final_amount,
+						block: release_block,
+						reason,
+					});
 				});
 			}
 			Ok(())
@@ -1671,7 +1726,9 @@ pub mod pallet {
 		/// Claims the candidacy bond, provided sufficient time has passed.
 		fn do_claim_candidacy_bond(account: &T::AccountId) -> DispatchResult {
 			CandidacyBondReleases::<T>::try_mutate(account, |maybe_bond_release| {
-				if let Some((bond, bond_release)) = maybe_bond_release {
+				if let Some(CandidacyBondRelease { bond, block: bond_release, .. }) =
+					maybe_bond_release
+				{
 					if *bond_release > Self::current_block_number() {
 						let new_release =
 							Self::get_releasing_balance(account).saturating_sub(*bond);
@@ -1896,7 +1953,7 @@ pub mod pallet {
                         Some(info)
                     } else {
                         // This collator has not produced a block recently enough. Bye bye.
-                        match Self::try_remove_candidate(&who, true) {
+                        match Self::try_remove_candidate(&who, true, CandidacyBondReleaseReason::Idle) {
 							Ok(_) => None,
 							Err(error) => {
 								log::warn!("Could not remove candidate {:?}: {:?}", info, error);
@@ -1926,8 +1983,7 @@ pub mod pallet {
 		) -> Result<T::AccountId, DispatchError> {
 			let (candidate, worst_bond) = Self::get_worst_candidate()?;
 			ensure!(bond > worst_bond, Error::<T>::InvalidCandidacyBond);
-			Self::try_remove_candidate(&candidate, false)?;
-
+			Self::try_remove_candidate(&candidate, false, CandidacyBondReleaseReason::Replaced)?;
 			Ok(candidate)
 		}
 

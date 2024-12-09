@@ -543,7 +543,8 @@ mod benchmarks {
 		// Here we add the staker as candidate and immediately remove it so that the candidacy bond
 		// gets released and the corresponding weight accounted for.
 		CollatorStaking::<T>::do_register_as_candidate(&caller, bond).unwrap();
-		CollatorStaking::<T>::try_remove_candidate(&caller, true).unwrap();
+		CollatorStaking::<T>::try_remove_candidate(&caller, true, CandidacyBondReleaseReason::Idle)
+			.unwrap();
 
 		CollatorStaking::<T>::lock(
 			RawOrigin::Signed(caller.clone()).into(),
