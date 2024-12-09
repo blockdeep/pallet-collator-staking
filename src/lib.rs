@@ -1262,6 +1262,7 @@ pub mod pallet {
 		}
 
 		/// Computes pending rewards for a given user.
+		/// This function is intended to be used in the runtime implementation.
 		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
