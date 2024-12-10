@@ -580,8 +580,6 @@ pub mod pallet {
 		ExtraRewardAlreadyDisabled,
 		/// The amount to fund the extra reward pot must be greater than zero.
 		InvalidFundingAmount,
-		/// There is nothing to unstake.
-		NothingToUnstake,
 		/// Cannot add more stakers to a given candidate.
 		TooManyStakers,
 		/// The user does not have enough balance to be locked for staking.
