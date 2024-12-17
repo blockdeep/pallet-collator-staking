@@ -1675,9 +1675,13 @@ pub mod pallet {
 			account: &T::AccountId,
 			reason: CandidacyBondReleaseReason,
 		) -> DispatchResult {
+			// First attempt to claim a hypothetical older candidacy bond in case the user forgot
+			// to do so before leaving the candidacy list.
+			Self::do_claim_candidacy_bond(account)?;
+
 			let bond = Self::get_bond(account);
 			if !bond.is_zero() {
-				// We firstly release the candidacy bond.
+				// We firstly release the current candidacy bond.
 				T::Currency::set_freeze(
 					&FreezeReason::CandidacyBond.into(),
 					account,
@@ -1697,22 +1701,17 @@ pub mod pallet {
 				let release_block =
 					Self::current_block_number().saturating_add(T::BondUnlockDelay::get());
 				CandidacyBondReleases::<T>::mutate(account, |maybe_bond_release| {
-					let mut final_amount = bond;
-					if let Some(CandidacyBondRelease {
-						bond: previous_bond_amount,
-						block: previous_bond_deadline,
-						..
-					}) = maybe_bond_release
+					let mut final_bond = bond;
+					if let Some(CandidacyBondRelease { bond: previous_bond, .. }) =
+						maybe_bond_release
 					{
-						// Since we are on it, we auto-claim the previous candidacy bond and only
-						// add this one. But if the previous candidacy bond's delay was not
-						// fulfilled, then it gets replaced by this new one.
-						if *previous_bond_deadline < Self::current_block_number() {
-							final_amount.saturating_accrue(*previous_bond_amount);
-						}
+						// In case there exists a previous bond that could not be claimed at the
+						// beginning of this function, it gets accumulated with this new bond that
+						// has just been released.
+						final_bond.saturating_accrue(*previous_bond);
 					}
 					*maybe_bond_release = Some(CandidacyBondRelease {
-						bond: final_amount,
+						bond: final_bond,
 						block: release_block,
 						reason,
 					});
@@ -1727,7 +1726,7 @@ pub mod pallet {
 				if let Some(CandidacyBondRelease { bond, block: bond_release, .. }) =
 					maybe_bond_release
 				{
-					if *bond_release > Self::current_block_number() {
+					if Self::current_block_number() > *bond_release {
 						let new_release =
 							Self::get_releasing_balance(account).saturating_sub(*bond);
 						T::Currency::set_freeze(
