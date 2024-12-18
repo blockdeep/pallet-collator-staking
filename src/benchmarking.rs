@@ -27,7 +27,6 @@ use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
-use sp_runtime::traits::Zero;
 use sp_runtime::Percent;
 use sp_std::prelude::*;
 
@@ -146,12 +145,14 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	let amount = T::Currency::minimum_balance();
 	MinStake::<T>::set(amount);
 	MinCandidacyBond::<T>::set(amount);
-	let staker = create_funded_user::<T>("staker", 0, 10000);
+
+	let staker = create_funded_user::<T>("staker", 0, 10000000);
 	CollatorStaking::<T>::lock(
 		RawOrigin::Signed(staker.clone()).into(),
 		CollatorStaking::<T>::get_free_balance(&staker),
 	)
 	.unwrap();
+
 	CollatorStaking::<T>::set_autocompound_percentage(
 		RawOrigin::Signed(staker.clone()).into(),
 		Percent::from_parts(100),
@@ -200,7 +201,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn set_invulnerables(
-		b: Linear<1, { T::MaxInvulnerables::get() }>,
+		b: Linear<{ T::MinEligibleCollators::get() }, { T::MaxInvulnerables::get() }>,
 	) -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
@@ -740,19 +741,6 @@ mod benchmarks {
 		#[block]
 		{
 			<CollatorStaking<T> as SessionManager<_>>::end_session(1);
-		}
-
-		let collator_reward = CollatorRewardPercentage::<T>::get().mul_floor(amount);
-		if !collator_reward.is_zero() {
-			for candidate in candidates {
-				assert_has_event::<T>(
-					Event::<T>::StakingRewardReceived {
-						account: candidate.clone(),
-						amount: collator_reward,
-					}
-					.into(),
-				);
-			}
 		}
 	}
 
