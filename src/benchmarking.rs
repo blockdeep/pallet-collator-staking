@@ -128,7 +128,7 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 	let amount = T::Currency::minimum_balance();
 	MinStake::<T>::set(amount);
 	MinCandidacyBond::<T>::set(amount);
-	let staker = create_funded_user::<T>("staker", 0, 10000);
+	let staker = create_funded_user::<T>("staker", 0, 10000000);
 	CollatorStaking::<T>::lock(
 		RawOrigin::Signed(staker.clone()).into(),
 		CollatorStaking::<T>::get_free_balance(&staker),
@@ -601,7 +601,7 @@ mod benchmarks {
 	#[benchmark]
 	fn set_autocompound_percentage() {
 		let caller = prepare_staker::<T>();
-		let amount = T::Currency::minimum_balance();
+		let amount = T::AutoCompoundingThreshold::get();
 		let candidate = register_single_validator::<T>(0);
 		register_single_candidate::<T>(0);
 
