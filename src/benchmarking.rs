@@ -27,7 +27,6 @@ use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
-use sp_runtime::traits::Zero;
 use sp_runtime::Percent;
 use sp_std::prelude::*;
 
@@ -129,7 +128,7 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 	let amount = T::Currency::minimum_balance();
 	MinStake::<T>::set(amount);
 	MinCandidacyBond::<T>::set(amount);
-	let staker = create_funded_user::<T>("staker", 0, 10000);
+	let staker = create_funded_user::<T>("staker", 0, 10000000);
 	CollatorStaking::<T>::lock(
 		RawOrigin::Signed(staker.clone()).into(),
 		CollatorStaking::<T>::get_free_balance(&staker),
@@ -146,12 +145,14 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	let amount = T::Currency::minimum_balance();
 	MinStake::<T>::set(amount);
 	MinCandidacyBond::<T>::set(amount);
-	let staker = create_funded_user::<T>("staker", 0, 10000);
+
+	let staker = create_funded_user::<T>("staker", 0, 10000000);
 	CollatorStaking::<T>::lock(
 		RawOrigin::Signed(staker.clone()).into(),
 		CollatorStaking::<T>::get_free_balance(&staker),
 	)
 	.unwrap();
+
 	CollatorStaking::<T>::set_autocompound_percentage(
 		RawOrigin::Signed(staker.clone()).into(),
 		Percent::from_parts(100),
@@ -200,7 +201,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn set_invulnerables(
-		b: Linear<1, { T::MaxInvulnerables::get() }>,
+		b: Linear<{ T::MinEligibleCollators::get() }, { T::MaxInvulnerables::get() }>,
 	) -> Result<(), BenchmarkError> {
 		let origin =
 			T::UpdateOrigin::try_successful_origin().map_err(|_| BenchmarkError::Weightless)?;
@@ -537,12 +538,21 @@ mod benchmarks {
 		frame_system::Pallet::<T>::set_block_number(0u32.into());
 
 		let caller = whitelisted_caller();
-		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into()).unwrap();
+		let bond = MinCandidacyBond::<T>::get();
+		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into() + bond).unwrap();
+
+		// Here we add the staker as candidate and immediately remove it so that the candidacy bond
+		// gets released and the corresponding weight accounted for.
+		CollatorStaking::<T>::do_register_as_candidate(&caller, bond).unwrap();
+		CollatorStaking::<T>::try_remove_candidate(&caller, true, CandidacyBondReleaseReason::Idle)
+			.unwrap();
+
 		CollatorStaking::<T>::lock(
 			RawOrigin::Signed(caller.clone()).into(),
 			CollatorStaking::<T>::get_free_balance(&caller),
 		)
 		.unwrap();
+
 		for _ in 0..c {
 			CollatorStaking::<T>::unlock(
 				RawOrigin::Signed(caller.clone()).into(),
@@ -562,9 +572,11 @@ mod benchmarks {
 	#[benchmark]
 	fn claim_rewards(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxSessionRewards::get() }>,
+		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
 		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
+
+		frame_system::Pallet::<T>::set_block_number(T::BondUnlockDelay::get() + 10u32.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
@@ -589,7 +601,7 @@ mod benchmarks {
 	#[benchmark]
 	fn set_autocompound_percentage() {
 		let caller = prepare_staker::<T>();
-		let amount = T::Currency::minimum_balance();
+		let amount = T::AutoCompoundingThreshold::get();
 		let candidate = register_single_validator::<T>(0);
 		register_single_candidate::<T>(0);
 
@@ -729,19 +741,6 @@ mod benchmarks {
 		#[block]
 		{
 			<CollatorStaking<T> as SessionManager<_>>::end_session(1);
-		}
-
-		let collator_reward = CollatorRewardPercentage::<T>::get().mul_floor(amount);
-		if !collator_reward.is_zero() {
-			for candidate in candidates {
-				assert_has_event::<T>(
-					Event::<T>::StakingRewardReceived {
-						account: candidate.clone(),
-						amount: collator_reward,
-					}
-					.into(),
-				);
-			}
 		}
 	}
 

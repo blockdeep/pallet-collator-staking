@@ -200,7 +200,7 @@ pub struct IdentityCollatorMock<T>(PhantomData<T>);
 impl<T> sp_runtime::traits::Convert<AccountId, Option<AccountId>> for IdentityCollatorMock<T> {
 	fn convert(acc: AccountId) -> Option<AccountId> {
 		match acc {
-			1000 => None,
+			1000..2000 => None,
 			_ => Some(acc),
 		}
 	}
@@ -232,7 +232,8 @@ impl Config for Test {
 	type MaxStakers = ConstU32<25>;
 	type BondUnlockDelay = ConstU64<5>;
 	type StakeUnlockDelay = ConstU64<2>;
-	type MaxSessionRewards = ConstU32<10>;
+	type RestakeUnlockDelay = ConstU64<10>;
+	type MaxRewardSessions = ConstU32<10>;
 	type AutoCompoundingThreshold = ConstU64<60>;
 	type WeightInfo = ();
 }

@@ -16,16 +16,16 @@ and all stake is refunded.
 
 Similar to the Collator Selection pallet, this pallet also maintains two kind of block producers:
 
-* `Invulnerables`: accounts that are always selected to become collators. They can only be removed by the pallet's
+- `Invulnerables`: accounts that are always selected to become collators. They can only be removed by the pallet's
   authority. Invulnerables do not receive staking rewards.
-* `Candidates`: accounts that compete to be part of the collator set based on delegated stake.
+- `Candidates`: accounts that compete to be part of the collator set based on delegated stake.
 
 ### Rewards
 
 Staking rewards distributed to candidates and their stakers come from the following sources:
 
-* Transaction fees and tips collected for blocks produced.
-* An optional per-block flat amount coming from a different pot (for example, Treasury). This is to "top-up" the rewards
+- Transaction fees and tips collected for blocks produced.
+- An optional per-block flat amount coming from a different pot (for example, Treasury). This is to "top-up" the rewards
   in case fees and tips are too small.
 
 The pallet assumes all rewards are generated from existing funds on the blockchain, and **there is no inflation**
@@ -33,14 +33,14 @@ implemented as part of this pallet.
 
 Rewards are distributed so that all stakeholders are incentivized to participate:
 
-* Candidates compete to become collators.
-* Collators must not misbehave and produce blocks honestly so that they increase the chances to produce more blocks and
+- Candidates compete to become collators.
+- Collators must not misbehave and produce blocks honestly so that they increase the chances to produce more blocks and
   this way be more attractive for other users to stake on.
-* Stakers must select wisely the candidates they want to deposit the stake on, hence determining the best possible
+- Stakers must select wisely the candidates they want to deposit the stake on, hence determining the best possible
   candidates that are likely to become collators.
-* Rewards are proportionally distributed among collators and stakers when the session ends.
-    * Collators receive an exclusive percentage of them for collating. This is configurable.
-    * Stakers receive the remaining proportionally to the amount staked in a given collator.
+- Rewards are proportionally distributed among collators and stakers when the session ends.
+  - Collators receive an exclusive percentage of them for collating. This is configurable.
+  - Stakers receive the remaining proportionally to the amount staked in a given collator.
 
 ### Staking
 
@@ -69,7 +69,7 @@ auto-compounded if the user set an auto-compound percentage greater than zero.
 ### Runtime Configuration
 
 | Parameter                  | Description                                                                                          |
-|----------------------------|------------------------------------------------------------------------------------------------------|
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `RuntimeEvent`             | The overarching event type.                                                                          |
 | `Currency`                 | The currency mechanism.                                                                              |
 | `RuntimeFreezeReason`      | The overarching freeze reason.                                                                       |
@@ -85,7 +85,7 @@ auto-compounded if the user set an auto-compound percentage greater than zero.
 | `CollatorRegistration`     | Validate a collator is registered.                                                                   |
 | `MaxStakedCandidates`      | Maximum candidates a staker can stake on.                                                            |
 | `MaxStakers`               | Maximum stakers per candidate.                                                                       |
-| `MaxSessionRewards`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
+| `MaxRewardSessions`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `BondUnlockDelay`          | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `StakeUnlockDelay`         | Number of blocks to wait before unlocking the stake by a user.                                       |
 | `AutoCompoundingThreshold` | Minimum stake needed to enable autocompounding.                                                      |
