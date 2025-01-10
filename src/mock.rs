@@ -97,6 +97,7 @@ impl pallet_balances::Config for Test {
 	type MaxLocks = ();
 	type MaxReserves = MaxReserves;
 	type MaxFreezes = ConstU32<10>;
+	type DoneSlashHandler = ();
 }
 
 pub struct Author4;
