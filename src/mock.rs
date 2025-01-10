@@ -256,7 +256,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 		collator_reward_percentage: Percent::from_parts(20),
 		extra_reward: 0,
 	};
-	let session = pallet_session::GenesisConfig::<Test> { keys };
+	let session = pallet_session::GenesisConfig::<Test> { keys, non_authority_keys: vec![] };
 	pallet_balances::GenesisConfig::<Test> { balances }
 		.assimilate_storage(&mut t)
 		.unwrap();
