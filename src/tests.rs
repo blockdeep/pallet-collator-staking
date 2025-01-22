@@ -1871,6 +1871,84 @@ mod unstake_from {
 			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 		});
 	}
+
+	#[test]
+	fn unstakes_accumulates_amount() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(5..=5);
+
+			// Not staked yet
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// First stake
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// First unstake
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Moving one block
+			initialize_to_block(2);
+
+			// Second stake
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Second unstake
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((40, 12)),
+					maybe_last_reward_session: None,
+				}
+			);
+		});
+	}
 }
 
 mod unstake_all {
@@ -1957,7 +2035,8 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 0,
 					candidates: BoundedBTreeSet::new(),
-					maybe_last_unstake: Some((30, 11)),
+					// Candidate 3 left, so 20 immediately restakable.
+					maybe_last_unstake: Some((10, 11)),
 					maybe_last_reward_session: None,
 				}
 			);

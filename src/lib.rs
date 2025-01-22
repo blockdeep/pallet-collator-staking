@@ -1432,7 +1432,7 @@ pub mod pallet {
 				let (balance, block) = info.maybe_last_unstake.unwrap_or_default();
 				let now = Self::current_block_number();
 				let final_amount =
-					if block >= now { amount } else { amount.saturating_add(balance) };
+					if now > block { amount } else { amount.saturating_add(balance) };
 				info.maybe_last_unstake =
 					Some((final_amount, now.saturating_add(T::RestakeUnlockDelay::get())));
 			});
@@ -1500,7 +1500,7 @@ pub mod pallet {
 							if let Some((unavailable_amount, block_limit)) =
 								user_stake_info.maybe_last_unstake
 							{
-								if block_limit < Self::current_block_number() {
+								if block_limit > Self::current_block_number() {
 									let available_amount =
 										frozen_balance.saturating_sub(unavailable_amount);
 									ensure!(
@@ -1554,7 +1554,7 @@ pub mod pallet {
 			candidate: &T::AccountId,
 		) -> Result<(BalanceOf<T>, bool), DispatchError> {
 			let stake = Self::remove_stake(candidate, staker);
-			let mut is_candidate = true;
+			let mut is_candidate = false;
 
 			if !stake.is_zero() {
 				Candidates::<T>::mutate_exists(candidate, |maybe_info| {
@@ -1594,7 +1594,17 @@ pub mod pallet {
 					UserStake::<T>::mutate_exists(staker, |maybe_user_stake_info| {
 						if let Some(user_stake_info) = maybe_user_stake_info {
 							match user_stake_info.candidates.len() {
-								0..=1 => *maybe_user_stake_info = None,
+								// We must maintain the last unstake operation.
+								0..=1 => {
+									if let Some(last_unstake) = user_stake_info.maybe_last_unstake {
+										*user_stake_info = UserStakeInfo {
+											maybe_last_unstake: Some(last_unstake),
+											..Default::default()
+										}
+									} else {
+										*maybe_user_stake_info = None;
+									}
+								},
 								_ => {
 									user_stake_info
 										.stake
