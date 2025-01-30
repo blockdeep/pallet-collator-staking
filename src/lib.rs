@@ -1484,15 +1484,6 @@ pub mod pallet {
 						candidate_stake_info.stake = final_staker_stake;
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
-							user_stake_info
-								.candidates
-								.try_insert(candidate.clone())
-								.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
-							user_stake_info.stake.saturating_accrue(amount);
-							if user_stake_info.maybe_last_reward_session.is_none() {
-								user_stake_info.maybe_last_reward_session = Some(current_session);
-							}
-
 							// In case the user recently unstaked we cannot allow those funds to be quickly
 							// reinvested. Otherwise, stakers could potentially move funds right before
 							// the session ends from one candidate to another, depending on the most
@@ -1501,8 +1492,9 @@ pub mod pallet {
 								user_stake_info.maybe_last_unstake
 							{
 								if block_limit > Self::current_block_number() {
-									let available_amount =
-										frozen_balance.saturating_sub(unavailable_amount);
+									let available_amount = frozen_balance
+										.saturating_sub(unavailable_amount)
+										.saturating_sub(user_stake_info.stake);
 									ensure!(
 										available_amount >= amount,
 										Error::<T>::InsufficientLockedBalance
@@ -1510,6 +1502,15 @@ pub mod pallet {
 								} else {
 									user_stake_info.maybe_last_unstake = None;
 								}
+							}
+
+							user_stake_info
+								.candidates
+								.try_insert(candidate.clone())
+								.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
+							user_stake_info.stake.saturating_accrue(amount);
+							if user_stake_info.maybe_last_reward_session.is_none() {
+								user_stake_info.maybe_last_reward_session = Some(current_session);
 							}
 							Ok(())
 						})?;
@@ -1665,13 +1666,30 @@ pub mod pallet {
 				account,
 				releasing_balance.saturating_add(amount),
 			)?;
-			let block = Self::current_block_number() + delay;
+			let now = Self::current_block_number();
+			let block = now + delay;
 			ReleaseQueues::<T>::try_mutate(account, |requests| -> DispatchResult {
 				requests
 					.try_push(ReleaseRequest { block, amount })
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
 				Ok(())
 			})?;
+			// If the user just unstaked and unlocked the funds we can decrease the unavailable amount
+			// to stake. This is to allow users that decided to lock more funds during the penalty
+			// period not to have a penalty for funds that are no longer available to be staked, since
+			// they are using "new" funds.
+			UserStake::<T>::mutate(account, |user_stake_info| {
+				if let Some((unavailable_amount, block_limit)) = user_stake_info.maybe_last_unstake
+				{
+					let new_unavailable_amount = unavailable_amount.saturating_sub(amount);
+					user_stake_info.maybe_last_unstake =
+						if new_unavailable_amount.is_zero() || now > block_limit {
+							None
+						} else {
+							Some((new_unavailable_amount, block_limit))
+						}
+				}
+			});
 			Self::deposit_event(Event::ReleaseRequestCreated {
 				account: account.clone(),
 				amount,

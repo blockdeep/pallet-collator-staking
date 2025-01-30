@@ -1535,6 +1535,182 @@ mod stake {
 			));
 		});
 	}
+
+	#[test]
+	fn lock_stake_unstake_unlock_and_stake_again() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Lock balance for staking
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 30));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+
+			// Register candidates
+			register_candidates(3..=3);
+
+			// Stake funds
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 20, stakers: 1 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 0, stakers: 0 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Now we have a penalty of 20, and we staked 30. This implies we can now stake up to 10
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 11 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 10,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake and unlock all balance
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: Some((30, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), None));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 0);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Lock and stake again after unlocking
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 10));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 10);
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+			));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 10, stakers: 1 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 10);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 10,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+		});
+	}
+
+	#[test]
+	fn stake_in_one_then_unstake_in_another_and_fail_to_restake_in_original() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register candidates 3 and 4
+			register_candidates(3..=4);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 30));
+
+			// Ensure initial user stake state is empty
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: BoundedBTreeSet::new(),
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Stake 20 on candidate 3
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Stake 10 on candidate 4
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+			));
+
+			// Validate the candidate list
+			assert_eq!(
+				candidate_list(),
+				vec![
+					(4, CandidateInfo { stake: 10, stakers: 1 }),
+					(3, CandidateInfo { stake: 20, stakers: 1 }),
+				]
+			);
+
+			// Unstake 10 from candidate 4
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 4));
+
+			// Validate the updated user stake state
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((10, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Attempt to stake the unstaked 10 back into candidate 3 (should fail)
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+		});
+	}
 }
 
 mod claim_rewards {
