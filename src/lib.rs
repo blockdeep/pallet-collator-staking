@@ -1051,9 +1051,9 @@ pub mod pallet {
 
 			let pot = Self::extra_reward_account_id();
 			let balance = T::Currency::reducible_balance(&pot, Expendable, Polite);
-			let receiver = T::ExtraRewardReceiver::get();
+			let maybe_receiver = T::ExtraRewardReceiver::get();
 			if !balance.is_zero() {
-				if let Some(ref receiver) = receiver {
+				if let Some(ref receiver) = maybe_receiver {
 					if let Err(error) = T::Currency::transfer(&pot, receiver, balance, Expendable) {
 						// We should not cancel the operation if we cannot transfer funds from the pot,
 						// as it is more important to stop the rewards.
@@ -1061,7 +1061,10 @@ pub mod pallet {
 					}
 				}
 			}
-			Self::deposit_event(Event::ExtraRewardRemoved { amount_left: balance, receiver });
+			Self::deposit_event(Event::ExtraRewardRemoved {
+				amount_left: balance,
+				receiver: maybe_receiver,
+			});
 			Ok(())
 		}
 
@@ -1535,16 +1538,12 @@ pub mod pallet {
 				.saturating_add(Invulnerables::<T>::decode_len().unwrap_or_default() as u32)
 		}
 
+		/// Checks if the given staker has already claimed their rewards for the current session.
 		pub fn staker_has_claimed(who: &T::AccountId) -> bool {
-			let user_stake_info = UserStake::<T>::get(who);
-			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
-				let current_session = CurrentSession::<T>::get();
-				if last_reward_session != current_session {
-					return false;
-				}
-			}
-
-			true
+			UserStake::<T>::get(who)
+				.maybe_last_reward_session
+				.map(|last_reward_session| last_reward_session >= CurrentSession::<T>::get())
+				.unwrap_or(true)
 		}
 
 		/// Unstakes all funds deposited by `staker` in a given `candidate`.

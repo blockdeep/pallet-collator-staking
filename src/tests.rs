@@ -1062,6 +1062,22 @@ mod stake {
 	use super::*;
 
 	#[test]
+	fn cannot_stake_with_empty_target() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(4..=4);
+
+			// Attempt to stake with an empty target vector
+			assert_noop!(
+				CollatorStaking::stake(RuntimeOrigin::signed(4), vec![].try_into().unwrap()),
+				Error::<Test>::TooFewCandidates
+			);
+		});
+	}
+
+	#[test]
 	fn cannot_stake_if_not_candidate() {
 		new_test_ext().execute_with(|| {
 			lock_for_staking(4..=4);
@@ -1090,7 +1106,7 @@ mod stake {
 			initialize_to_block(1);
 
 			register_candidates(3..=3);
-			lock_for_staking(3..=3);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(3), 20));
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(3),
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
@@ -1116,10 +1132,26 @@ mod stake {
 			);
 			assert_noop!(
 				CollatorStaking::stake(
-					RuntimeOrigin::signed(4),
+					RuntimeOrigin::signed(3),
 					vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 				),
 				Error::<Test>::InsufficientLockedBalance
+			);
+
+			// In the future we can stake again
+			initialize_to_block(12);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(3),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(1),
+				}
 			);
 		});
 	}
@@ -1516,7 +1548,7 @@ mod stake {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -1527,7 +1559,7 @@ mod stake {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(5),
@@ -1841,14 +1873,14 @@ mod claim_rewards {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Attempt claim in same session
+			// Attempt claim in same session
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
 			assert_noop!(
 				CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)),
 				Error::<Test>::NoPendingClaim
 			);
 
-			//Time travel to next session
+			// Time travel to next session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
@@ -2136,7 +2168,7 @@ mod unstake_from {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -2144,7 +2176,7 @@ mod unstake_from {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 		});
@@ -2344,7 +2376,7 @@ mod unstake_all {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -2352,7 +2384,7 @@ mod unstake_all {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
 		});
@@ -2421,7 +2453,7 @@ mod set_autocompound_percentage {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -2432,7 +2464,7 @@ mod set_autocompound_percentage {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::set_autocompound_percentage(
 				RuntimeOrigin::signed(5),
@@ -2986,6 +3018,7 @@ mod collator_rewards {
 				.unwrap();
 			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
 				assert_eq!(CurrentSession::<Test>::get(), 0);
@@ -2994,6 +3027,7 @@ mod collator_rewards {
 				// Assume we collected one unit in fees per block
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(
 				Balances::balance(&CollatorStaking::account_id()),
 				Balances::minimum_balance() + 9
@@ -3008,6 +3042,7 @@ mod collator_rewards {
 			assert_eq!(ProducedBlocks::<Test>::get(4), 9);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			initialize_to_block(10);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
@@ -3030,6 +3065,7 @@ mod collator_rewards {
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
 
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(
 				Balances::free_balance(CollatorStaking::account_id()) - Balances::minimum_balance(),
 				18
