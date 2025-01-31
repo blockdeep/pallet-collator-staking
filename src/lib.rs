@@ -306,7 +306,7 @@ pub mod pallet {
 		pub candidates: AccountIdMap,
 	}
 
-	/// Reasons a candidady left the candidacy list for.
+	/// Reasons a candidacy left the candidacy list for.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
@@ -319,12 +319,20 @@ pub mod pallet {
 		Replaced,
 	}
 
+	/// Represents a bond release for a collator candidacy.
+	///
+	/// This struct encapsulates crucial information regarding the release of a bond tied to a
+	/// collator's candidacy. The bond can only be released after a specified block number and for a
+	/// concrete reason defined in `CandidacyBondReleaseReason`.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub struct CandidacyBondRelease<Balance, BlockNumber> {
+		/// The amount of bond associated with the candidacy.
 		pub bond: Balance,
+		/// The block number when the bond can be released.
 		pub block: BlockNumber,
+		/// The reason for the bond release, represented by [`CandidacyBondReleaseReason`].
 		pub reason: CandidacyBondReleaseReason,
 	}
 
@@ -618,17 +626,16 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Set the list of invulnerable (fixed) collators. These collators must do some
-		/// preparation, namely to have registered session keys.
+		/// Set the list of invulnerable (fixed) collators. These collators must:
+		///   - Have registered session keys.
+		///   - Not currently be collator candidates (the call will fail if an entry is already a candidate).
 		///
-		/// The call will remove any accounts that have not registered keys from the set. That is,
-		/// it is non-atomic; the caller accepts all `AccountId`s passed in `new` _individually_ as
-		/// acceptable Invulnerables, and is not proposing a _set_ of new Invulnerables.
+		/// If the provided list is empty, it also ensures that the total number of eligible collators
+		/// does not fall below the configured minimum.
 		///
-		/// This call does not maintain mutual exclusivity of `Invulnerables` and `Candidates`. It
-		/// is recommended to use a batch of `add_invulnerable` and `remove_invulnerable` instead. A
-		/// `batch_all` can also be used to enforce atomicity. If any candidates are included in
-		/// `new`, they should be removed with `remove_invulnerable_candidate` after execution.
+		/// This call does not inherently maintain mutual exclusivity with `Candidates`, but in practice,
+		/// accounts that are already candidates will be rejected. If you need to convert a candidate
+		/// to be invulnerable, remove them from the set of candidates first, then call this function.
 		///
 		/// Must be called by the `UpdateOrigin`.
 		#[pallet::call_index(0)]
@@ -1068,7 +1075,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Funds the extra reward pot account.
+		/// Transfers funds to the extra reward pot account for distribution.
+		///
+		/// **Parameters**:
+		/// - `origin`: Signed account initiating the transfer.
+		/// - `amount`: Amount to transfer.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::InvalidFundingAmount`: Amount is zero.
 		#[pallet::call_index(16)]
 		#[pallet::weight(T::WeightInfo::top_up_extra_rewards())]
 		pub fn top_up_extra_rewards(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
@@ -1086,10 +1100,18 @@ pub mod pallet {
 		}
 
 		/// Locks free balance from the caller to be used for staking.
+		///
+		/// **Parameters**:
+		/// - `origin`: Signed account initiating the lock.
+		/// - `amount`: Amount to lock.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::InvalidFundingAmount`: Amount is zero.
 		#[pallet::call_index(17)]
 		#[pallet::weight(T::WeightInfo::lock())]
 		pub fn lock(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(!amount.is_zero(), Error::<T>::InvalidFundingAmount);
 
 			Self::do_lock(&who, amount)
 		}
@@ -1149,7 +1171,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Claims all rewards for previous sessions.
+		/// Claims all pending rewards for stakers and candidates.
+		///
+		/// Distributes rewards accumulated over previous sessions
+		/// and ensures that rewards are only claimable for sessions where the
+		/// caller has participated. Rewards for the current session cannot be claimed.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
 		#[pallet::call_index(20)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(
 			T::MaxStakedCandidates::get(),
@@ -1224,6 +1253,7 @@ pub mod pallet {
 			(session_total_amount, unclaimable_rewards)
 		}
 
+		/// Checks if the provided list of accounts contains duplicate entries.
 		fn has_duplicates(accounts: &[T::AccountId]) -> bool {
 			let duplicates =
 				accounts.iter().collect::<sp_std::collections::btree_set::BTreeSet<_>>();
@@ -1569,7 +1599,7 @@ pub mod pallet {
 			Ok((stake, is_candidate))
 		}
 
-		/// Disable autocompounding if staked balance dropped below the threshold
+		/// Disable autocompounding if staked balance dropped below the threshold.
 		fn adjust_autocompound_percentage(staker: &T::AccountId) {
 			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
 				AutoCompound::<T>::mutate(staker, |percentage| {
@@ -2035,8 +2065,7 @@ pub mod pallet {
 		/// ## [`PerSessionRewards`]
 		///
 		/// * The amount of stored sessions must not exceed the capacity established by the maximum
-		/// 	amount of sessions kept in storage
-
+		///   amount of sessions kept in storage.
 		#[cfg(any(test, feature = "try-runtime"))]
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 			let desired_candidates = DesiredCandidates::<T>::get();
@@ -2109,7 +2138,7 @@ pub mod pallet {
 		}
 	}
 
-	/// Impl of the session manager.
+	/// Implementation of the session manager.
 	impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
 		fn new_session(_: SessionIndex) -> Option<Vec<T::AccountId>> {
 			let candidates_len_before = Candidates::<T>::count();
