@@ -23,12 +23,11 @@ use crate::{
 	StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
 };
 use frame_support::pallet_prelude::TypedGet;
-use frame_support::traits::fungible::InspectFreeze;
-use frame_support::traits::tokens::Preservation::Preserve;
 use frame_support::{
 	assert_noop, assert_ok,
 	traits::{
-		fungible::{Inspect, Mutate},
+		fungible::{Inspect, InspectFreeze, Mutate},
+		tokens::Preservation::Preserve,
 		OnInitialize,
 	},
 };
@@ -934,6 +933,74 @@ mod register_as_candidate {
 			// the old locked candidacy bond should remain
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
 			assert_eq!(CollatorStaking::get_bond(&3), 10);
+		});
+	}
+
+	#[test]
+	fn register_leave_register_leave_again() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// First registration
+			// Ensure preconditions
+			assert_eq!(Balances::balance(&3), 100);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			assert_eq!(Candidates::<Test>::count(), 1);
+			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CandidacyBondReleases::<Test>::get(&3), None);
+
+			// First leave
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
+			// Re-register
+			assert_ok!(CollatorStaking::register_as_candidate(
+				RuntimeOrigin::signed(3),
+				MinCandidacyBond::<Test>::get()
+			));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
+			// Second leave. The bond should accumulate.
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 20);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 20, // 10 the first time, and 10 the second
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
 		});
 	}
 }
@@ -2585,6 +2652,117 @@ mod lock_unlock_and_release {
 				account: 5,
 				amount: 20,
 			}));
+		});
+	}
+
+	#[test]
+	fn lock_stake_unstake_unlock() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			register_candidates(4..=4);
+
+			// Lock 20 tokens for account 5
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 20));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Stake the tokens
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![4],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake the tokens
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 4));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 0);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Attempt first 10 tokens unlock
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(10)));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 10);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 10);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((10, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Attempt second 10 tokens unlock
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(10)));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+		});
+	}
+
+	#[test]
+	fn too_many_release_requests() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Preconditions
+			assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
+
+			// Lock tokens for account 5
+			lock_for_staking(5..=5);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
+
+			// Try to create release requests up to the maximum allowed
+			for i in 1..=16 {
+				assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(1)));
+				let expected_queue =
+					(1..=i).map(|_| ReleaseRequest { block: 3, amount: 1 }).collect::<Vec<_>>();
+				assert_eq!(ReleaseQueues::<Test>::get(5), expected_queue);
+			}
+
+			// Attempting one more release request should raise an error
+			assert_noop!(
+				CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(1)),
+				Error::<Test>::TooManyReleaseRequests
+			);
+
+			// Ensure no additional request was added
+			assert_eq!(ReleaseQueues::<Test>::get(5).len(), 16);
 		});
 	}
 }

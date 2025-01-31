@@ -755,7 +755,9 @@ pub mod pallet {
 		///
 		/// This call is not available to `Invulnerable` collators.
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::register_as_candidate())]
+		#[pallet::weight(
+			T::WeightInfo::register_as_candidate() + T::WeightInfo::remove_worst_candidate()
+		)]
 		pub fn register_as_candidate(
 			origin: OriginFor<T>,
 			bond: BalanceOf<T>,

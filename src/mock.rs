@@ -36,6 +36,7 @@ use super::*;
 
 type Block = frame_system::mocking::MockBlock<Test>;
 type AccountId = <Test as frame_system::Config>::AccountId;
+type Balance = u64;
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -88,7 +89,7 @@ impl pallet_balances::Config for Test {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type RuntimeFreezeReason = ();
 	type WeightInfo = ();
-	type Balance = u64;
+	type Balance = Balance;
 	type DustRemoval = ();
 	type ExistentialDeposit = ExistentialDeposit;
 	type AccountStore = System;
