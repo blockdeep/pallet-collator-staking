@@ -1574,6 +1574,8 @@ pub mod pallet {
 		pub fn staker_has_claimed(who: &T::AccountId) -> bool {
 			UserStake::<T>::get(who)
 				.maybe_last_reward_session
+				// Theoretically you cannot receive rewards in the future, but regardless, it
+				// should yield the same result.
 				.map(|last_reward_session| last_reward_session >= CurrentSession::<T>::get())
 				.unwrap_or(true)
 		}
@@ -1705,6 +1707,8 @@ pub mod pallet {
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
 				Ok(())
 			})?;
+			// Since the process of unstaking leads to penalties, this lets users stake new funds
+			// without penalties on them, while still tracking their previously unstaked funds.
 			// If the user just unstaked and unlocked the funds we can decrease the unavailable amount
 			// to stake. This is to allow users that decided to lock more funds during the penalty
 			// period not to have a penalty for funds that are no longer available to be staked, since
