@@ -543,7 +543,7 @@ pub mod pallet {
 		/// The extra reward pot account was funded.
 		ExtraRewardPotFunded { pot: T::AccountId, amount: BalanceOf<T> },
 		/// The staking locked amount got extended.
-		LockExtended { amount: BalanceOf<T> },
+		LockExtended { account: T::AccountId, amount: BalanceOf<T> },
 		/// A candidate's candidacy bond got updated.
 		CandidacyBondUpdated { candidate: T::AccountId, new_bond: BalanceOf<T> },
 	}
@@ -1919,7 +1919,7 @@ pub mod pallet {
 			let total = Self::get_staked_balance(account).saturating_add(amount);
 			T::Currency::set_freeze(&FreezeReason::Staking.into(), account, total)?;
 
-			Self::deposit_event(Event::<T>::LockExtended { amount });
+			Self::deposit_event(Event::<T>::LockExtended { account: account.clone(), amount });
 			Ok(())
 		}
 
