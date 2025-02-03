@@ -306,7 +306,7 @@ pub mod pallet {
 		pub candidates: AccountIdMap,
 	}
 
-	/// Reasons a candidady left the candidacy list for.
+	/// Reasons a candidacy left the candidacy list for.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
@@ -319,12 +319,20 @@ pub mod pallet {
 		Replaced,
 	}
 
+	/// Represents a bond release for a collator candidacy.
+	///
+	/// This struct encapsulates crucial information regarding the release of a bond tied to a
+	/// collator's candidacy. The bond can only be released after a specified block number and for a
+	/// concrete reason defined in `CandidacyBondReleaseReason`.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub struct CandidacyBondRelease<Balance, BlockNumber> {
+		/// The amount of bond associated with the candidacy.
 		pub bond: Balance,
+		/// The block number when the bond can be released.
 		pub block: BlockNumber,
+		/// The reason for the bond release, represented by [`CandidacyBondReleaseReason`].
 		pub reason: CandidacyBondReleaseReason,
 	}
 
@@ -535,7 +543,7 @@ pub mod pallet {
 		/// The extra reward pot account was funded.
 		ExtraRewardPotFunded { pot: T::AccountId, amount: BalanceOf<T> },
 		/// The staking locked amount got extended.
-		LockExtended { amount: BalanceOf<T> },
+		LockExtended { account: T::AccountId, amount: BalanceOf<T> },
 		/// A candidate's candidacy bond got updated.
 		CandidacyBondUpdated { candidate: T::AccountId, new_bond: BalanceOf<T> },
 	}
@@ -618,17 +626,16 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Set the list of invulnerable (fixed) collators. These collators must do some
-		/// preparation, namely to have registered session keys.
+		/// Set the list of invulnerable (fixed) collators. These collators must:
+		///   - Have registered session keys.
+		///   - Not currently be collator candidates (the call will fail if an entry is already a candidate).
 		///
-		/// The call will remove any accounts that have not registered keys from the set. That is,
-		/// it is non-atomic; the caller accepts all `AccountId`s passed in `new` _individually_ as
-		/// acceptable Invulnerables, and is not proposing a _set_ of new Invulnerables.
+		/// If the provided list is empty, it also ensures that the total number of eligible collators
+		/// does not fall below the configured minimum.
 		///
-		/// This call does not maintain mutual exclusivity of `Invulnerables` and `Candidates`. It
-		/// is recommended to use a batch of `add_invulnerable` and `remove_invulnerable` instead. A
-		/// `batch_all` can also be used to enforce atomicity. If any candidates are included in
-		/// `new`, they should be removed with `remove_invulnerable_candidate` after execution.
+		/// This call does not inherently maintain mutual exclusivity with `Candidates`, but in practice,
+		/// accounts that are already candidates will be rejected. If you need to convert a candidate
+		/// to be invulnerable, remove them from the set of candidates first, then call this function.
 		///
 		/// Must be called by the `UpdateOrigin`.
 		#[pallet::call_index(0)]
@@ -748,7 +755,9 @@ pub mod pallet {
 		///
 		/// This call is not available to `Invulnerable` collators.
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::register_as_candidate())]
+		#[pallet::weight(
+			T::WeightInfo::register_as_candidate() + T::WeightInfo::remove_worst_candidate()
+		)]
 		pub fn register_as_candidate(
 			origin: OriginFor<T>,
 			bond: BalanceOf<T>,
@@ -1051,9 +1060,9 @@ pub mod pallet {
 
 			let pot = Self::extra_reward_account_id();
 			let balance = T::Currency::reducible_balance(&pot, Expendable, Polite);
-			let receiver = T::ExtraRewardReceiver::get();
+			let maybe_receiver = T::ExtraRewardReceiver::get();
 			if !balance.is_zero() {
-				if let Some(ref receiver) = receiver {
+				if let Some(ref receiver) = maybe_receiver {
 					if let Err(error) = T::Currency::transfer(&pot, receiver, balance, Expendable) {
 						// We should not cancel the operation if we cannot transfer funds from the pot,
 						// as it is more important to stop the rewards.
@@ -1061,11 +1070,21 @@ pub mod pallet {
 					}
 				}
 			}
-			Self::deposit_event(Event::ExtraRewardRemoved { amount_left: balance, receiver });
+			Self::deposit_event(Event::ExtraRewardRemoved {
+				amount_left: balance,
+				receiver: maybe_receiver,
+			});
 			Ok(())
 		}
 
-		/// Funds the extra reward pot account.
+		/// Transfers funds to the extra reward pot account for distribution.
+		///
+		/// **Parameters**:
+		/// - `origin`: Signed account initiating the transfer.
+		/// - `amount`: Amount to transfer.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::InvalidFundingAmount`: Amount is zero.
 		#[pallet::call_index(16)]
 		#[pallet::weight(T::WeightInfo::top_up_extra_rewards())]
 		pub fn top_up_extra_rewards(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
@@ -1083,10 +1102,18 @@ pub mod pallet {
 		}
 
 		/// Locks free balance from the caller to be used for staking.
+		///
+		/// **Parameters**:
+		/// - `origin`: Signed account initiating the lock.
+		/// - `amount`: Amount to lock.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::InvalidFundingAmount`: Amount is zero.
 		#[pallet::call_index(17)]
 		#[pallet::weight(T::WeightInfo::lock())]
 		pub fn lock(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
+			ensure!(!amount.is_zero(), Error::<T>::InvalidFundingAmount);
 
 			Self::do_lock(&who, amount)
 		}
@@ -1146,7 +1173,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Claims all rewards for previous sessions.
+		/// Claims all pending rewards for stakers and candidates.
+		///
+		/// Distributes rewards accumulated over previous sessions
+		/// and ensures that rewards are only claimable for sessions where the
+		/// caller has participated. Rewards for the current session cannot be claimed.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
 		#[pallet::call_index(20)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(
 			T::MaxStakedCandidates::get(),
@@ -1221,6 +1255,7 @@ pub mod pallet {
 			(session_total_amount, unclaimable_rewards)
 		}
 
+		/// Checks if the provided list of accounts contains duplicate entries.
 		fn has_duplicates(accounts: &[T::AccountId]) -> bool {
 			let duplicates =
 				accounts.iter().collect::<sp_std::collections::btree_set::BTreeSet<_>>();
@@ -1484,15 +1519,6 @@ pub mod pallet {
 						candidate_stake_info.stake = final_staker_stake;
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
-							user_stake_info
-								.candidates
-								.try_insert(candidate.clone())
-								.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
-							user_stake_info.stake.saturating_accrue(amount);
-							if user_stake_info.maybe_last_reward_session.is_none() {
-								user_stake_info.maybe_last_reward_session = Some(current_session);
-							}
-
 							// In case the user recently unstaked we cannot allow those funds to be quickly
 							// reinvested. Otherwise, stakers could potentially move funds right before
 							// the session ends from one candidate to another, depending on the most
@@ -1501,8 +1527,9 @@ pub mod pallet {
 								user_stake_info.maybe_last_unstake
 							{
 								if block_limit > Self::current_block_number() {
-									let available_amount =
-										frozen_balance.saturating_sub(unavailable_amount);
+									let available_amount = frozen_balance
+										.saturating_sub(unavailable_amount)
+										.saturating_sub(user_stake_info.stake);
 									ensure!(
 										available_amount >= amount,
 										Error::<T>::InsufficientLockedBalance
@@ -1510,6 +1537,15 @@ pub mod pallet {
 								} else {
 									user_stake_info.maybe_last_unstake = None;
 								}
+							}
+
+							user_stake_info
+								.candidates
+								.try_insert(candidate.clone())
+								.map_err(|_| Error::<T>::TooManyStakedCandidates)?;
+							user_stake_info.stake.saturating_accrue(amount);
+							if user_stake_info.maybe_last_reward_session.is_none() {
+								user_stake_info.maybe_last_reward_session = Some(current_session);
 							}
 							Ok(())
 						})?;
@@ -1534,16 +1570,14 @@ pub mod pallet {
 				.saturating_add(Invulnerables::<T>::decode_len().unwrap_or_default() as u32)
 		}
 
+		/// Checks if the given staker has already claimed their rewards for the current session.
 		pub fn staker_has_claimed(who: &T::AccountId) -> bool {
-			let user_stake_info = UserStake::<T>::get(who);
-			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
-				let current_session = CurrentSession::<T>::get();
-				if last_reward_session != current_session {
-					return false;
-				}
-			}
-
-			true
+			UserStake::<T>::get(who)
+				.maybe_last_reward_session
+				// Theoretically you cannot receive rewards in the future, but regardless, it
+				// should yield the same result.
+				.map(|last_reward_session| last_reward_session >= CurrentSession::<T>::get())
+				.unwrap_or(true)
 		}
 
 		/// Unstakes all funds deposited by `staker` in a given `candidate`.
@@ -1569,7 +1603,7 @@ pub mod pallet {
 			Ok((stake, is_candidate))
 		}
 
-		/// Disable autocompounding if staked balance dropped below the threshold
+		/// Disable autocompounding if staked balance dropped below the threshold.
 		fn adjust_autocompound_percentage(staker: &T::AccountId) {
 			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
 				AutoCompound::<T>::mutate(staker, |percentage| {
@@ -1665,13 +1699,32 @@ pub mod pallet {
 				account,
 				releasing_balance.saturating_add(amount),
 			)?;
-			let block = Self::current_block_number() + delay;
+			let now = Self::current_block_number();
+			let block = now + delay;
 			ReleaseQueues::<T>::try_mutate(account, |requests| -> DispatchResult {
 				requests
 					.try_push(ReleaseRequest { block, amount })
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
 				Ok(())
 			})?;
+			// Since the process of unstaking leads to penalties, this lets users stake new funds
+			// without penalties on them, while still tracking their previously unstaked funds.
+			// If the user just unstaked and unlocked the funds we can decrease the unavailable amount
+			// to stake. This is to allow users that decided to lock more funds during the penalty
+			// period not to have a penalty for funds that are no longer available to be staked, since
+			// they are using "new" funds.
+			UserStake::<T>::mutate(account, |user_stake_info| {
+				if let Some((unavailable_amount, block_limit)) = user_stake_info.maybe_last_unstake
+				{
+					let new_unavailable_amount = unavailable_amount.saturating_sub(amount);
+					user_stake_info.maybe_last_unstake =
+						if new_unavailable_amount.is_zero() || now > block_limit {
+							None
+						} else {
+							Some((new_unavailable_amount, block_limit))
+						}
+				}
+			});
 			Self::deposit_event(Event::ReleaseRequestCreated {
 				account: account.clone(),
 				amount,
@@ -1870,7 +1923,7 @@ pub mod pallet {
 			let total = Self::get_staked_balance(account).saturating_add(amount);
 			T::Currency::set_freeze(&FreezeReason::Staking.into(), account, total)?;
 
-			Self::deposit_event(Event::<T>::LockExtended { amount });
+			Self::deposit_event(Event::<T>::LockExtended { account: account.clone(), amount });
 			Ok(())
 		}
 
@@ -2018,8 +2071,7 @@ pub mod pallet {
 		/// ## [`PerSessionRewards`]
 		///
 		/// * The amount of stored sessions must not exceed the capacity established by the maximum
-		/// 	amount of sessions kept in storage
-
+		///   amount of sessions kept in storage.
 		#[cfg(any(test, feature = "try-runtime"))]
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 			let desired_candidates = DesiredCandidates::<T>::get();
@@ -2092,7 +2144,7 @@ pub mod pallet {
 		}
 	}
 
-	/// Impl of the session manager.
+	/// Implementation of the session manager.
 	impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
 		fn new_session(_: SessionIndex) -> Option<Vec<T::AccountId>> {
 			let candidates_len_before = Candidates::<T>::count();

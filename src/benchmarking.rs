@@ -597,7 +597,7 @@ mod benchmarks {
 		}
 	}
 
-	//Worst case is if stake exists
+	// Worst case is if stake exists
 	#[benchmark]
 	fn set_autocompound_percentage() {
 		let caller = prepare_staker::<T>();

@@ -18,22 +18,25 @@ use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
-	Event, ExtraReward, FreezeReason, Invulnerables, LastAuthoredBlock, MinCandidacyBond, MinStake,
-	PerSessionRewards, ProducedBlocks, ReleaseQueues, ReleaseRequest, SessionRemovedCandidates,
-	StakeTarget, TotalBlocks, UserStake, UserStakeInfo,
+	Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables, LastAuthoredBlock,
+	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues, ReleaseRequest,
+	SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks, UserStake,
+	UserStakeInfo,
 };
 use frame_support::pallet_prelude::TypedGet;
-use frame_support::traits::fungible::InspectFreeze;
-use frame_support::traits::tokens::Preservation::Preserve;
 use frame_support::{
 	assert_noop, assert_ok,
 	traits::{
-		fungible::{Inspect, Mutate},
+		fungible::{Inspect, InspectFreeze, Mutate},
+		tokens::Preservation::Preserve,
 		OnInitialize,
 	},
-	BoundedBTreeSet,
 };
-use sp_runtime::{testing::UintAuthorityId, traits::BadOrigin, BuildStorage, Percent, TokenError};
+use sp_runtime::{
+	testing::UintAuthorityId,
+	traits::{BadOrigin, Convert},
+	BuildStorage, Percent, TokenError,
+};
 use std::ops::RangeInclusive;
 
 type AccountId = <Test as frame_system::Config>::AccountId;
@@ -41,11 +44,12 @@ type AccountId = <Test as frame_system::Config>::AccountId;
 macro_rules! bbtreeset {
     ( $( $x:expr ),* ) => {
         {
+			#[allow(unused_mut)]
             let mut set = sp_std::collections::btree_set::BTreeSet::new();
             $(
                 set.insert($x);
             )*
-            set.try_into().unwrap()
+            set.try_into().expect("Failed to create BTreeSet")
         }
     };
 }
@@ -72,7 +76,7 @@ fn register_candidates(range: RangeInclusive<AccountId>) {
 		));
 		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
 			account: ii,
-			deposit: 10,
+			deposit: MinCandidacyBond::<Test>::get(),
 		}));
 	}
 }
@@ -85,10 +89,26 @@ fn candidate_list() -> Vec<(AccountId, CandidateInfo<BalanceOf<Test>>)> {
 
 fn lock_for_staking(range: RangeInclusive<AccountId>) {
 	for ii in range {
-		assert_ok!(CollatorStaking::lock(
-			RuntimeOrigin::signed(ii),
-			CollatorStaking::get_free_balance(&ii)
-		));
+		let balance = CollatorStaking::get_free_balance(&ii);
+		assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(ii), balance));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+			account: ii,
+			amount: balance,
+		}));
+	}
+}
+
+mod extra {
+	use super::*;
+
+	#[test]
+	fn identify_collator_should_work() {
+		assert_eq!(IdentityCollator::convert(4), Some(4));
+	}
+
+	#[test]
+	fn staking_pot_should_work() {
+		assert_eq!(StakingPotAccountId::<Test>::get(), CollatorStaking::account_id());
 	}
 }
 
@@ -120,6 +140,8 @@ mod set_invulnerables {
 	#[test]
 	fn cannot_empty_invulnerables_if_not_enough_candidates() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_noop!(
 				CollatorStaking::set_invulnerables(
 					RuntimeOrigin::signed(RootAccount::get()),
@@ -134,6 +156,7 @@ mod set_invulnerables {
 	fn it_should_set_invulnerables_even_with_some_invalid() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			let new_with_invalid = vec![1, 4, 3, 42, 2, 1000];
 
@@ -157,6 +180,7 @@ mod set_invulnerables {
 	fn it_should_not_allow_duplicated_invulnerables() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			let new_with_duplicated = vec![1, 1, 2, 4, 3, 2];
 
@@ -174,6 +198,7 @@ mod set_invulnerables {
 	fn it_should_not_allow_too_many_invalid_invulnerables() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			let new_with_many_invalid = vec![1000, 1001, 1002, 1003, 1004, 1005, 1006];
 
@@ -214,6 +239,7 @@ mod set_desired_candidates {
 	fn set_desired_candidates_works() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			// given
 			assert_eq!(DesiredCandidates::<Test>::get(), 2);
 
@@ -247,6 +273,7 @@ mod set_desired_candidates {
 	fn cannot_set_desired_candidates_if_under_min_collator_limit() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			// given
 			assert_eq!(DesiredCandidates::<Test>::get(), 2);
 			assert_eq!(<Test as Config>::MinEligibleCollators::get(), 1);
@@ -274,6 +301,7 @@ mod add_invulnerable {
 	fn add_invulnerable_works() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			let new = 3;
 
@@ -318,6 +346,7 @@ mod add_invulnerable {
 	fn invulnerable_limit_works() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
 			// MaxInvulnerables: u32 = 20
@@ -418,6 +447,7 @@ mod remove_invulnerable {
 	fn remove_invulnerable_works() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
 			assert_ok!(CollatorStaking::add_invulnerable(
@@ -468,6 +498,7 @@ mod set_min_candidacy_bond {
 	fn set_candidacy_bond_empty_candidate_list() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			// given
 			assert_eq!(MinCandidacyBond::<Test>::get(), 10);
 			assert_eq!(Candidates::<Test>::count(), 0);
@@ -562,6 +593,7 @@ mod set_min_candidacy_bond {
 	fn set_candidacy_bond_with_many_candidates_same_deposit() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			// given
 			assert_eq!(MinCandidacyBond::<Test>::get(), 10);
 			assert_eq!(Candidates::<Test>::count(), 0);
@@ -616,8 +648,17 @@ mod set_min_candidacy_bond {
 			}));
 			assert_eq!(MinCandidacyBond::<Test>::get(), 20);
 			assert_ok!(CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(5), 20));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(
+				Event::<Test>::CandidacyBondUpdated { candidate: 5, new_bond: 20 },
+			));
 			CollatorStaking::kick_stale_candidates();
 			assert_eq!(candidate_list(), vec![(5, candidate_5)]);
+			System::assert_has_event(RuntimeEvent::CollatorStaking(
+				Event::<Test>::CandidateRemoved { account: 3 },
+			));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(
+				Event::<Test>::CandidateRemoved { account: 4 },
+			));
 		});
 	}
 }
@@ -629,9 +670,10 @@ mod register_as_candidate {
 	fn cannot_register_candidate_if_too_many() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
-			assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
 
 			// MaxCandidates: u32 = 20
+			assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
+
 			// Aside from 3, 4, and 5, create enough accounts to have 21 potential
 			// candidates.
 			for acc in 3..=22 {
@@ -656,6 +698,9 @@ mod register_as_candidate {
 	#[test]
 	fn cannot_register_as_candidate_if_invulnerable() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// given
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
 			// can't 1 because it is invulnerable.
@@ -672,6 +717,8 @@ mod register_as_candidate {
 	#[test]
 	fn cannot_register_as_candidate_if_bond_too_low() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_noop!(
 				CollatorStaking::register_as_candidate(RuntimeOrigin::signed(3), 1),
 				Error::<Test>::InvalidCandidacyBond,
@@ -682,6 +729,8 @@ mod register_as_candidate {
 	#[test]
 	fn cannot_register_as_candidate_if_keys_not_registered() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			// can't 42 because keys not registered.
 			assert_noop!(
 				CollatorStaking::register_as_candidate(
@@ -724,6 +773,7 @@ mod register_as_candidate {
 	fn cannot_register_as_candidate_if_poor() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(Balances::balance(&33), 0);
 
@@ -811,6 +861,10 @@ mod register_as_candidate {
 			// another user adds stake
 			fund_account(4);
 			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(4), 60));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 4,
+				amount: 60,
+			}));
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(4),
 				vec![StakeTarget { candidate: 3, stake: 60 }].try_into().unwrap()
@@ -936,6 +990,74 @@ mod register_as_candidate {
 			assert_eq!(CollatorStaking::get_bond(&3), 10);
 		});
 	}
+
+	#[test]
+	fn register_leave_register_leave_again() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// First registration
+			// Ensure preconditions
+			assert_eq!(Balances::balance(&3), 100);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, session: 0 }
+			);
+			assert_eq!(Candidates::<Test>::count(), 1);
+			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CandidacyBondReleases::<Test>::get(&3), None);
+
+			// First leave
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
+			// Re-register
+			assert_ok!(CollatorStaking::register_as_candidate(
+				RuntimeOrigin::signed(3),
+				MinCandidacyBond::<Test>::get()
+			));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
+			// Second leave. The bond should accumulate.
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 20);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 20, // 10 the first time, and 10 the second
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+		});
+	}
 }
 
 mod leave_intent {
@@ -945,6 +1067,7 @@ mod leave_intent {
 	fn cannot_unregister_candidate_if_too_few() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+
 			assert_eq!(Candidates::<Test>::count(), 0);
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			assert_ok!(CollatorStaking::remove_invulnerable(
@@ -1045,10 +1168,12 @@ mod leave_intent {
 
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 			let release_queue_max_len = <Test as Config>::MaxStakedCandidates::get();
-			assert_ok!(CollatorStaking::lock(
-				RuntimeOrigin::signed(3),
-				(release_queue_max_len * 2) as u64
-			));
+			let lock = (release_queue_max_len * 2) as u64;
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(3), lock));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 3,
+				amount: lock,
+			}));
 			for _ in 0..release_queue_max_len {
 				assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(3), Some(2)));
 			}
@@ -1062,8 +1187,26 @@ mod stake {
 	use super::*;
 
 	#[test]
+	fn cannot_stake_with_empty_target() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(4..=4);
+
+			// Attempt to stake with an empty target vector
+			assert_noop!(
+				CollatorStaking::stake(RuntimeOrigin::signed(4), vec![].try_into().unwrap()),
+				Error::<Test>::TooFewCandidates
+			);
+		});
+	}
+
+	#[test]
 	fn cannot_stake_if_not_candidate() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			lock_for_staking(4..=4);
 			// invulnerable
 			assert_noop!(
@@ -1090,7 +1233,11 @@ mod stake {
 			initialize_to_block(1);
 
 			register_candidates(3..=3);
-			lock_for_staking(3..=3);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(3), 20));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 3,
+				amount: 20,
+			}));
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(3),
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
@@ -1109,17 +1256,33 @@ mod stake {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: Some((20, 11)),
 					maybe_last_reward_session: None,
 				}
 			);
 			assert_noop!(
 				CollatorStaking::stake(
-					RuntimeOrigin::signed(4),
+					RuntimeOrigin::signed(3),
 					vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 				),
 				Error::<Test>::InsufficientLockedBalance
+			);
+
+			// In the future we can stake again
+			initialize_to_block(12);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(3),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(1),
+				}
 			);
 		});
 	}
@@ -1181,7 +1344,7 @@ mod stake {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1193,7 +1356,7 @@ mod stake {
 				UserStake::<Test>::get(4),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1251,7 +1414,7 @@ mod stake {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1317,7 +1480,7 @@ mod stake {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1348,6 +1511,10 @@ mod stake {
 			assert_eq!(CollatorStaking::get_staked_balance(&5), 0);
 			assert_eq!(CollatorStaking::get_free_balance(&5), 100);
 			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 60));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 60,
+			}));
 			assert_eq!(CollatorStaking::get_staked_balance(&5), 60);
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
@@ -1484,6 +1651,8 @@ mod stake {
 	#[test]
 	fn cannot_stake_invulnerable() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			lock_for_staking(3..=3);
 			assert_noop!(
 				CollatorStaking::stake(
@@ -1506,7 +1675,7 @@ mod stake {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1516,7 +1685,7 @@ mod stake {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -1527,12 +1696,305 @@ mod stake {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(5),
 				vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
 			));
+		});
+	}
+
+	#[test]
+	fn lock_stake_unstake_unlock_and_stake_again() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Lock balance for staking
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 30));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 30,
+			}));
+
+			// Register candidates
+			register_candidates(3..=3);
+
+			// Stake funds
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 20, stakers: 1 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 0, stakers: 0 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 30);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Now we have a penalty of 20, and we staked 30. This implies we can now stake up to 10
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 11 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+			));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 10,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake and unlock all balance
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((30, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), None));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 0);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Lock and stake again after unlocking
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 10));
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 10);
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 10,
+			}));
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+			));
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 10, stakers: 1 }),]);
+			assert_eq!(CollatorStaking::get_staked_balance(&5), 10);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 10,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+		});
+	}
+
+	#[test]
+	fn stake_in_one_then_unstake_in_another_and_fail_to_restake_in_original() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register candidates 3 and 4
+			register_candidates(3..=4);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 30));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 30,
+			}));
+
+			// Ensure initial user stake state is empty
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Stake 20 on candidate 3
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Stake 10 on candidate 4
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 10 }].try_into().unwrap()
+			));
+
+			// Validate the candidate list
+			assert_eq!(
+				candidate_list(),
+				vec![
+					(4, CandidateInfo { stake: 10, stakers: 1 }),
+					(3, CandidateInfo { stake: 20, stakers: 1 }),
+				]
+			);
+
+			// Unstake 10 from candidate 4
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 4));
+
+			// Validate the updated user stake state
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((10, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Attempt to stake the unstaked 10 back into candidate 3 (should fail)
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 10 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+		});
+	}
+}
+
+mod edge_case_tests {
+	use super::*;
+
+	#[test]
+	fn stake_zero_amount_fails() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			register_candidates(3..=3);
+
+			// Attempt to stake with zero amount
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 0 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientStake
+			);
+		});
+	}
+
+	#[test]
+	fn unstake_from_nonexistent_candidate() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			// User stakes 30 on candidate 3
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 30 }].try_into().unwrap()
+			));
+			// Attempt to unstake from a non-existent candidate (e.g. candidate 42)
+			assert_noop!(
+				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 42),
+				Error::<Test>::NoStakeOnCandidate
+			);
+		});
+	}
+
+	#[test]
+	fn stake_more_than_locked_balance_fails() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			// Attempt to stake more than user's locked balance
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::signed(5),
+					vec![StakeTarget { candidate: 3, stake: 110 }].try_into().unwrap()
+				),
+				Error::<Test>::InsufficientLockedBalance
+			);
+		});
+	}
+
+	#[test]
+	fn restaking_after_full_unstake() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(5..=5);
+
+			// User stakes 30 on candidate 3
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 30 }].try_into().unwrap()
+			));
+
+			// Fully unstake from candidate 3
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((30, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Restake on candidate 3 after full unstake
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Validate new stakes and user state
+			assert_eq!(candidate_list(), vec![(3, CandidateInfo { stake: 20, stakers: 1 })]);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![3],
+					maybe_last_unstake: Some((30, 11)),
+					maybe_last_reward_session: Some(0),
+				}
+			);
 		});
 	}
 }
@@ -1551,7 +2013,7 @@ mod claim_rewards {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1563,14 +2025,14 @@ mod claim_rewards {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Attempt claim in same session
+			// Attempt claim in same session
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
 			assert_noop!(
 				CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)),
 				Error::<Test>::NoPendingClaim
 			);
 
-			//Time travel to next session
+			// Time travel to next session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
@@ -1592,7 +2054,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1669,7 +2131,7 @@ mod unstake_from {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1684,7 +2146,7 @@ mod unstake_from {
 				UserStake::<Test>::get(3),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1779,7 +2241,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1848,7 +2310,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1858,7 +2320,7 @@ mod unstake_from {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -1866,7 +2328,7 @@ mod unstake_from {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3));
 		});
@@ -1885,7 +2347,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -1912,7 +2374,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: Some((20, 11)),
 					maybe_last_reward_session: None,
 				}
@@ -1942,7 +2404,7 @@ mod unstake_from {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: Some((40, 12)),
 					maybe_last_reward_session: None,
 				}
@@ -1966,7 +2428,7 @@ mod unstake_all {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -2034,7 +2496,7 @@ mod unstake_all {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					// Candidate 3 left, so 20 immediately restakable.
 					maybe_last_unstake: Some((10, 11)),
 					maybe_last_reward_session: None,
@@ -2056,7 +2518,7 @@ mod unstake_all {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -2066,7 +2528,7 @@ mod unstake_all {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -2074,7 +2536,7 @@ mod unstake_all {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
 		});
@@ -2133,7 +2595,7 @@ mod set_autocompound_percentage {
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
 					stake: 0,
-					candidates: BoundedBTreeSet::new(),
+					candidates: bbtreeset![],
 					maybe_last_unstake: None,
 					maybe_last_reward_session: None,
 				}
@@ -2143,7 +2605,7 @@ mod set_autocompound_percentage {
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
 			));
 
-			//Time travel to the next Session
+			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
@@ -2154,7 +2616,7 @@ mod set_autocompound_percentage {
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
-			//Claim and retry operation
+			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 			assert_ok!(CollatorStaking::set_autocompound_percentage(
 				RuntimeOrigin::signed(5),
@@ -2175,6 +2637,10 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
 			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 60));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 60,
+			}));
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 60);
 
@@ -2195,6 +2661,10 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
 			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 60));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 60,
+			}));
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 60);
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
@@ -2275,6 +2745,121 @@ mod lock_unlock_and_release {
 				account: 5,
 				amount: 20,
 			}));
+		});
+	}
+
+	#[test]
+	fn lock_stake_unstake_unlock() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+			register_candidates(4..=4);
+
+			// Lock 20 tokens for account 5
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 20));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 20,
+			}));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Stake the tokens
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 20 }].try_into().unwrap()
+			));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 20,
+					candidates: bbtreeset![4],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: Some(0),
+				}
+			);
+
+			// Unstake the tokens
+			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 4));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 20);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 0);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((20, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Attempt first 10 tokens unlock
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(10)));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 10);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 10);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: Some((10, 11)),
+					maybe_last_reward_session: None,
+				}
+			);
+
+			// Attempt second 10 tokens unlock
+			assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(10)));
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &5), 20);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+		});
+	}
+
+	#[test]
+	fn too_many_release_requests() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Preconditions
+			assert_eq!(<Test as Config>::MaxStakedCandidates::get(), 16);
+
+			// Lock tokens for account 5
+			lock_for_staking(5..=5);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
+
+			// Try to create release requests up to the maximum allowed
+			for i in 1..=16 {
+				assert_ok!(CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(1)));
+				let expected_queue =
+					(1..=i).map(|_| ReleaseRequest { block: 3, amount: 1 }).collect::<Vec<_>>();
+				assert_eq!(ReleaseQueues::<Test>::get(5), expected_queue);
+			}
+
+			// Attempting one more release request should raise an error
+			assert_noop!(
+				CollatorStaking::unlock(RuntimeOrigin::signed(5), Some(1)),
+				Error::<Test>::TooManyReleaseRequests
+			);
+
+			// Ensure no additional request was added
+			assert_eq!(ReleaseQueues::<Test>::get(5).len(), 16);
 		});
 	}
 }
@@ -2465,6 +3050,9 @@ mod update_candidacy_bond {
 			);
 
 			assert_ok!(CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(3), 20));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(
+				Event::<Test>::CandidacyBondUpdated { candidate: 3, new_bond: 20 },
+			));
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 20);
 		});
 	}
@@ -2476,6 +3064,8 @@ mod general_tests {
 	#[test]
 	fn basic_setup_works() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_eq!(<Test as Config>::MaxInvulnerables::get(), 20);
 			assert_eq!(<Test as Config>::MaxCandidates::get(), 20);
 			assert_eq!(<Test as Config>::MinEligibleCollators::get(), 1);
@@ -2655,17 +3245,19 @@ mod collator_rewards {
 	#[test]
 	fn should_not_reward_invulnerables() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_ok!(CollatorStaking::add_invulnerable(
 				RuntimeOrigin::signed(RootAccount::get()),
 				4
 			));
 			assert_eq!(ExtraReward::<Test>::get(), 0);
-			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
+			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
 				assert_eq!(CurrentSession::<Test>::get(), 0);
-				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, 0));
+				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, 1));
 
 				// Transfer the ED first
 				Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
@@ -2675,7 +3267,7 @@ mod collator_rewards {
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
 
-			assert_eq!(ProducedBlocks::<Test>::get(4), 0);
+			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 0));
@@ -2693,6 +3285,8 @@ mod collator_rewards {
 	#[test]
 	fn should_reward_collator() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(4),
 				MinCandidacyBond::<Test>::get()
@@ -2706,8 +3300,9 @@ mod collator_rewards {
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
 				.unwrap();
-			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
+			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
 				assert_eq!(CurrentSession::<Test>::get(), 0);
@@ -2716,6 +3311,7 @@ mod collator_rewards {
 				// Assume we collected one unit in fees per block
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(
 				Balances::balance(&CollatorStaking::account_id()),
 				Balances::minimum_balance() + 9
@@ -2730,6 +3326,7 @@ mod collator_rewards {
 			assert_eq!(ProducedBlocks::<Test>::get(4), 9);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			initialize_to_block(10);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
@@ -2752,6 +3349,7 @@ mod collator_rewards {
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
 
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			assert_eq!(
 				Balances::free_balance(CollatorStaking::account_id()) - Balances::minimum_balance(),
 				18
@@ -2862,6 +3460,8 @@ mod collator_rewards {
 	#[test]
 	fn should_reward_collator_with_extra_rewards() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(4),
 				MinCandidacyBond::<Test>::get()
@@ -2877,7 +3477,7 @@ mod collator_rewards {
 				.unwrap();
 			fund_account(CollatorStaking::extra_reward_account_id());
 
-			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
+			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
@@ -2965,6 +3565,8 @@ mod collator_rewards {
 	#[test]
 	fn should_reward_collator_with_extra_rewards_and_no_funds() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(4),
 				MinCandidacyBond::<Test>::get()
@@ -2980,7 +3582,7 @@ mod collator_rewards {
 			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
 				.unwrap();
 
-			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
+			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
@@ -3070,6 +3672,8 @@ mod collator_rewards {
 	#[test]
 	fn should_reward_collator_with_extra_rewards_and_many_stakers() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(3),
 				MinCandidacyBond::<Test>::get()
@@ -3110,7 +3714,7 @@ mod collator_rewards {
 				.unwrap();
 			fund_account(CollatorStaking::extra_reward_account_id());
 
-			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
+			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
@@ -3543,6 +4147,8 @@ mod session_management {
 	#[test]
 	fn kick_mechanism() {
 		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
 			// add a new collator
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(3),
@@ -3554,15 +4160,15 @@ mod session_management {
 			));
 			initialize_to_block(10);
 			assert_eq!(Candidates::<Test>::count(), 2);
-			initialize_to_block(20);
-			assert_eq!(SessionChangeBlock::get(), 20);
+			initialize_to_block(30);
+			assert_eq!(SessionChangeBlock::get(), 30);
 			// 4 authored this block, gets to stay 3 was kicked
 			assert_eq!(Candidates::<Test>::count(), 1);
 			// 3 will be kicked after 1 session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 3, 4]);
 			assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 0, stakers: 0 })]);
-			assert_eq!(LastAuthoredBlock::<Test>::get(4), 20);
-			initialize_to_block(30);
+			assert_eq!(LastAuthoredBlock::<Test>::get(4), 30);
+			initialize_to_block(40);
 			// 3 gets kicked after 1 session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 4]);
 			// kicked collator gets funds back after a delay
@@ -3572,7 +4178,7 @@ mod session_management {
 				CandidacyBondReleases::<Test>::get(3),
 				Some(CandidacyBondRelease {
 					bond: 10,
-					block: 25,
+					block: 35,
 					reason: CandidacyBondReleaseReason::Idle
 				})
 			);
@@ -3582,8 +4188,9 @@ mod session_management {
 	#[test]
 	fn should_not_kick_mechanism_too_few() {
 		new_test_ext().execute_with(|| {
-			// remove the invulnerables and add new collators 3 and 5
+			initialize_to_block(1);
 
+			// remove the invulnerables and add new collators 3 and 5
 			assert_eq!(Candidates::<Test>::count(), 0);
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 			assert_ok!(CollatorStaking::remove_invulnerable(
@@ -3603,11 +4210,11 @@ mod session_management {
 				2
 			));
 
-			initialize_to_block(10);
+			initialize_to_block(20);
 			assert_eq!(Candidates::<Test>::count(), 2);
 
-			initialize_to_block(20);
-			assert_eq!(SessionChangeBlock::get(), 20);
+			initialize_to_block(30);
+			assert_eq!(SessionChangeBlock::get(), 30);
 			// 4 authored this block, 3 is kicked, 5 stays because of too few collators
 			assert_eq!(Candidates::<Test>::count(), 1);
 			// 3 will be kicked after 1 session delay
@@ -3615,9 +4222,9 @@ mod session_management {
 			// tuple of (id, deposit).
 			let collator = CandidateInfo { stake: 0, stakers: 0 };
 			assert_eq!(candidate_list(), vec![(3, collator)]);
-			assert_eq!(LastAuthoredBlock::<Test>::get(4), 20);
+			assert_eq!(LastAuthoredBlock::<Test>::get(4), 30);
 
-			initialize_to_block(30);
+			initialize_to_block(40);
 			// 3 gets kicked after 1 session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![3]);
 			// kicked collator gets funds back after a delay
@@ -3626,7 +4233,7 @@ mod session_management {
 				CandidacyBondReleases::<Test>::get(5),
 				Some(CandidacyBondRelease {
 					bond: 10,
-					block: 25,
+					block: 35,
 					reason: CandidacyBondReleaseReason::Idle
 				})
 			);
