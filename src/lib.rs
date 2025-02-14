@@ -300,8 +300,10 @@ pub mod pallet {
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub struct SessionInfo<AccountIdMap, Balance> {
-		/// The total amount staked in all candidates.
+		/// The total rewards generated during the session.
 		pub rewards: Balance,
+		/// Total rewards already claimed by stakers. It must be lower than or equal to `rewards`.
+		pub claimed_rewards: Balance,
 		/// The candidates that participated in this session.
 		pub candidates: AccountIdMap,
 	}
@@ -1232,7 +1234,7 @@ pub mod pallet {
 			session_rewards: &SessionInfoOf<T>,
 			candidate_rewards: &mut BTreeMap<T::AccountId, (CandidateStakeInfoOf<T>, BalanceOf<T>)>,
 		) -> (BalanceOf<T>, BalanceOf<T>) {
-			let mut session_total_amount: BalanceOf<T> = Zero::zero();
+			let mut claimable_rewards: BalanceOf<T> = Zero::zero();
 			let mut unclaimable_rewards: BalanceOf<T> = Zero::zero();
 			for (candidate, (user_stake_info, amount)) in candidate_rewards.iter_mut() {
 				if let Some((candidate_snapshot_stake, candidate_reward)) =
@@ -1246,13 +1248,13 @@ pub mod pallet {
 					// rewards for the session.
 					if index > user_stake_info.session {
 						amount.saturating_accrue(candidate_session_reward);
-						session_total_amount.saturating_accrue(candidate_session_reward);
+						claimable_rewards.saturating_accrue(candidate_session_reward);
 					} else {
 						unclaimable_rewards.saturating_accrue(candidate_session_reward);
 					}
 				}
 			}
-			(session_total_amount, unclaimable_rewards)
+			(claimable_rewards, unclaimable_rewards)
 		}
 
 		/// Checks if the provided list of accounts contains duplicate entries.
@@ -1270,6 +1272,11 @@ pub mod pallet {
 				let mut total_sessions = 0;
 				let mut total_candidates = 0;
 				if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
+					let current_session = CurrentSession::<T>::get();
+					// If the user took a really long time since he last collected the rewards we
+					// can skip rewards we already know they have been discarded.
+					let last_reward_session = last_reward_session
+						.max(current_session.saturating_sub(T::MaxRewardSessions::get()));
 					let mut candidate_rewards = user_stake_info
 						.candidates
 						.iter()
@@ -1280,22 +1287,26 @@ pub mod pallet {
 							)
 						})
 						.collect::<BTreeMap<_, _>>();
-					let current_session = CurrentSession::<T>::get();
 					total_sessions = current_session.saturating_sub(last_reward_session);
 					total_candidates = user_stake_info.candidates.len() as u32;
 					let mut total_rewards: BalanceOf<T> = Zero::zero();
 					let mut total_unclaimable_rewards: BalanceOf<T> = Zero::zero();
 					for session in last_reward_session..current_session {
-						if let Some(rewards) = PerSessionRewards::<T>::get(session) {
-							let (session_total_reward, unclaimable_rewards) =
-								Self::calculate_rewards_for_session(
-									session,
-									&rewards,
-									&mut candidate_rewards,
-								);
-							total_rewards.saturating_accrue(session_total_reward);
-							total_unclaimable_rewards.saturating_accrue(unclaimable_rewards);
-						}
+						PerSessionRewards::<T>::mutate(session, |maybe_session_rewards| {
+							if let Some(session_rewards) = maybe_session_rewards {
+								let (session_total_reward, session_unclaimable_rewards) =
+									Self::calculate_rewards_for_session(
+										session,
+										session_rewards,
+										&mut candidate_rewards,
+									);
+								total_rewards.saturating_accrue(session_total_reward);
+								total_unclaimable_rewards
+									.saturating_accrue(session_unclaimable_rewards);
+								session_rewards.claimed_rewards =
+									session_total_reward.saturating_add(total_unclaimable_rewards);
+							}
+						});
 					}
 					Self::do_reward_single(who, total_rewards)?;
 					ClaimableRewards::<T>::mutate(|claimable_rewards| {
@@ -1807,20 +1818,27 @@ pub mod pallet {
 		}
 
 		/// Removes old rewards when a new session starts.
-		///
-		/// Returns the rewards that have been released.
-		fn remove_old_rewards_if_needed(session: SessionIndex) -> BalanceOf<T> {
-			let mut released_rewards: BalanceOf<T> = Zero::zero();
-			if PerSessionRewards::<T>::count() >= T::MaxRewardSessions::get() {
-				let reward_to_remove = session.saturating_sub(T::MaxRewardSessions::get());
+		fn remove_old_rewards_if_needed(session: SessionIndex) {
+			let rewards_to_remove = PerSessionRewards::<T>::count()
+				.saturating_sub(T::MaxRewardSessions::get().saturating_sub(1));
+			let mut remaining_unclaimed_rewards: BalanceOf<T> = Zero::zero();
+			for i in 0..rewards_to_remove {
+				let reward_to_remove =
+					session.saturating_sub(T::MaxRewardSessions::get().saturating_add(i));
 				PerSessionRewards::<T>::mutate_exists(reward_to_remove, |maybe_reward| {
 					if let Some(reward) = maybe_reward {
-						released_rewards.saturating_accrue(reward.rewards);
+						remaining_unclaimed_rewards.saturating_accrue(
+							reward.rewards.saturating_sub(reward.claimed_rewards),
+						);
 					}
 					*maybe_reward = None;
 				});
 			}
-			released_rewards
+			if !remaining_unclaimed_rewards.is_zero() {
+				ClaimableRewards::<T>::mutate(|claimable_rewards| {
+					claimable_rewards.saturating_reduce(remaining_unclaimed_rewards)
+				});
+			}
 		}
 
 		/// Rewards all collators for a given session.
@@ -1828,10 +1846,7 @@ pub mod pallet {
 		/// Returns a tuple with the number of rewardable collators and the total rewards for the
 		/// current session.
 		fn reward_collators(session: SessionIndex) -> (u32, BalanceOf<T>) {
-			let released_rewards = Self::remove_old_rewards_if_needed(session);
-
-			// Calculate the total rewards for this session.
-			let claimable_rewards = ClaimableRewards::<T>::get().saturating_sub(released_rewards);
+			let claimable_rewards = ClaimableRewards::<T>::get();
 			let total_rewards =
 				T::Currency::reducible_balance(&Self::account_id(), Preserve, Polite)
 					.saturating_sub(claimable_rewards);
@@ -1899,16 +1914,14 @@ pub mod pallet {
 			}
 
 			let rewardable_collators: u32 = reward_map.len() as u32;
-
-			// If there are no rewards for stakers (likely because either no rewards were
-			// produced at all during the session or because the collator reward percentage is
-			// set to 100%) then there is no need to insert this.
-			if !stakers_rewards.is_zero() {
-				PerSessionRewards::<T>::insert(
-					session,
-					SessionInfo { rewards: stakers_rewards, candidates: reward_map },
-				);
-			}
+			PerSessionRewards::<T>::insert(
+				session,
+				SessionInfo {
+					rewards: stakers_rewards,
+					candidates: reward_map,
+					claimed_rewards: Zero::zero(),
+				},
+			);
 			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
 			(rewardable_collators, total_rewards)
 		}
@@ -2193,8 +2206,8 @@ pub mod pallet {
 				}
 			}
 
-			// Rewards are the total amount in the pot minus the existential deposit and minus
-			// the rewards pending to be claimed.
+			// Firstly remove old rewards. Users that did not claim them will lose the right to do so.
+			Self::remove_old_rewards_if_needed(index);
 			let (total_collators, total_rewards) = Self::reward_collators(index);
 			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 

@@ -20,8 +20,8 @@ use crate::{
 	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
 	Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables, LastAuthoredBlock,
 	MinCandidacyBond, MinStake, PerSessionRewards, ProducedBlocks, ReleaseQueues, ReleaseRequest,
-	SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks, UserStake,
-	UserStakeInfo,
+	SessionInfo, SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks,
+	UserStake, UserStakeInfo,
 };
 use frame_support::pallet_prelude::TypedGet;
 use frame_support::{
@@ -1013,7 +1013,7 @@ mod register_as_candidate {
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
 			assert_eq!(CollatorStaking::get_bond(&3), 10);
-			assert_eq!(CandidacyBondReleases::<Test>::get(&3), None);
+			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
 
 			// First leave
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
@@ -3407,53 +3407,102 @@ mod collator_rewards {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			let max_rewards = <Test as Config>::MaxRewardSessions::get();
-			assert_eq!(max_rewards, 10);
+			assert_eq!(<Test as Config>::MaxRewardSessions::get(), 10);
 			register_candidates(3..=3);
 			lock_for_staking(3..=3);
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(3),
 				vec![StakeTarget { candidate: 3, stake: 60 }].try_into().unwrap()
 			));
+			assert!(PerSessionRewards::<Test>::get(0).is_none());
 
-			// There are no rewards for first session, so we move one forward.
+			assert_eq!(PerSessionRewards::<Test>::count(), 0);
+			assert!(PerSessionRewards::<Test>::get(0).is_none());
+			// We want to discard the first session where there are no rewards.
 			initialize_to_block(10);
+			assert_eq!(PerSessionRewards::<Test>::count(), 1);
+			assert!(matches!(
+				PerSessionRewards::<Test>::get(0),
+				Some(SessionInfo { rewards: 0, claimed_rewards: 0, .. })
+			));
+			assert!(PerSessionRewards::<Test>::get(0).is_some());
+			// Fund the pot with the ED to make calculations easier.
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 0);
 
-			for session in 1..11 {
-				Balances::mint_into(&CollatorStaking::account_id(), 100).unwrap();
+			for session in 2..=10 {
+				assert_ok!(Balances::mint_into(&CollatorStaking::account_id(), 100));
 				ProducedBlocks::<Test>::insert(3, 10);
-				let current_block = ((session + 1) * 10) as u64;
+				let current_block = (session * 10) as u64;
 				LastAuthoredBlock::<Test>::insert(3, current_block);
 				initialize_to_block(current_block);
 				assert_eq!(PerSessionRewards::<Test>::count(), session);
+				let claimable_rewards = 80 * (session - 1) as u64;
+				assert_eq!(ClaimableRewards::<Test>::get(), claimable_rewards);
+				assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), claimable_rewards);
+				assert!(matches!(
+					PerSessionRewards::<Test>::get(session - 1),
+					Some(SessionInfo { rewards: 80, claimed_rewards: 0, .. })
+				));
 			}
-			assert_eq!(CollatorStaking::current_block_number(), 110);
+			assert_eq!(CollatorStaking::current_block_number(), 100);
 			assert_eq!(PerSessionRewards::<Test>::count(), 10);
+			assert_eq!(ClaimableRewards::<Test>::get(), 720);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 720);
 
-			// now rewards for session one should be removed
+			// So far no rewards should have been removed, so 80 * 9 = 720
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 720);
+			assert!(PerSessionRewards::<Test>::get(0).is_some());
 			assert!(PerSessionRewards::<Test>::get(1).is_some());
-			Balances::mint_into(&CollatorStaking::account_id(), 100).unwrap();
+			LastAuthoredBlock::<Test>::insert(3, 110);
+
+			// Rewards for session 0 should be removed.
 			ProducedBlocks::<Test>::insert(3, 10);
+			initialize_to_block(110);
+			assert_eq!(CollatorStaking::current_block_number(), 110);
+			assert_eq!(PerSessionRewards::<Test>::count(), 10); // this must not increase
+			assert!(PerSessionRewards::<Test>::get(0).is_none());
+			assert!(PerSessionRewards::<Test>::get(1).is_some());
 			LastAuthoredBlock::<Test>::insert(3, 120);
+			assert_eq!(ClaimableRewards::<Test>::get(), 720);
+			// This is important: since the staker did not claim rewards for session zero have disappeared now.
+			// However, there are no rewards for stakers for session zero, so they remain the same.
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 720);
+
+			// Rewards for session 1 should be removed.
+			ProducedBlocks::<Test>::insert(3, 10);
 			initialize_to_block(120);
 			assert_eq!(CollatorStaking::current_block_number(), 120);
 			assert_eq!(PerSessionRewards::<Test>::count(), 10);
 			assert!(PerSessionRewards::<Test>::get(1).is_none());
-		});
-	}
+			assert!(PerSessionRewards::<Test>::get(2).is_some());
+			LastAuthoredBlock::<Test>::insert(3, 130);
+			// Now rewards for session one have disappeared and the user lost the right to claim them.
+			// However, 80 were lost, but readded to the pot. So 20% of those 80 (16) were used to reward
+			// the collator, leaving 64 that go again to the same collator as staking rewards, leaving
+			// a total of 704.
+			assert_eq!(ClaimableRewards::<Test>::get(), 704);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 704);
 
-	#[test]
-	fn should_not_insert_rewards_of_zero_value() {
-		new_test_ext().execute_with(|| {
-			initialize_to_block(1);
+			// Rewards for session 2 should be removed.
+			ProducedBlocks::<Test>::insert(3, 10);
+			initialize_to_block(130);
+			assert_eq!(CollatorStaking::current_block_number(), 130);
+			assert_eq!(PerSessionRewards::<Test>::count(), 10);
+			assert!(PerSessionRewards::<Test>::get(2).is_none());
+			assert!(PerSessionRewards::<Test>::get(3).is_some());
+			// And now rewards for session two are lost too. Same math applies here:
+			// 704 - 80 + 80 * 0.8 = 688
+			assert_eq!(ClaimableRewards::<Test>::get(), 688);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 688);
 
-			let max_rewards = <Test as Config>::MaxRewardSessions::get();
-			assert_eq!(max_rewards, 10);
-			register_candidates(3..=3);
-			for session in 0..max_rewards {
-				initialize_to_block(((session + 1) * 10) as u64);
-				assert_eq!(PerSessionRewards::<Test>::count(), 0);
-			}
+			// Now we collect the rewards for staker 3.
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(3)));
+			assert_eq!(ClaimableRewards::<Test>::get(), 0);
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 0);
 		});
 	}
 
