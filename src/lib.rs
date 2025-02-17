@@ -1273,8 +1273,8 @@ pub mod pallet {
 				let mut total_candidates = 0;
 				if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
 					let current_session = CurrentSession::<T>::get();
-					// If the user took a really long time since he last collected the rewards we
-					// can skip rewards we already know they have been discarded.
+					// If the user has not collected rewards from sessions past the `MaxRewardSessions`
+					// limit we can skip rewards we already know they have been discarded.
 					let last_reward_session = last_reward_session
 						.max(current_session.saturating_sub(T::MaxRewardSessions::get()));
 					let mut candidate_rewards = user_stake_info
