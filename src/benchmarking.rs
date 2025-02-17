@@ -27,6 +27,7 @@ use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
+use sp_runtime::traits::Zero;
 use sp_runtime::Percent;
 use sp_std::prelude::*;
 
@@ -179,13 +180,17 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	for session in 1..(r + 1) {
 		PerSessionRewards::<T>::insert(
 			session,
-			SessionInfo { candidates: reward_map.clone(), rewards: amount * c.into() },
+			SessionInfo {
+				candidates: reward_map.clone(),
+				rewards: amount * c.into(),
+				claimed_rewards: Zero::zero(),
+			},
 		);
 	}
 
 	let total_rewards = amount * c.into() * r.into();
 	ClaimableRewards::<T>::set(total_rewards);
-	CurrentSession::<T>::mutate(|session| *session = r + 2);
+	CurrentSession::<T>::set(r + 1);
 	T::Currency::mint_into(
 		&CollatorStaking::<T>::account_id(),
 		T::Currency::minimum_balance() + total_rewards,
@@ -575,8 +580,6 @@ mod benchmarks {
 		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
 		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
-
-		frame_system::Pallet::<T>::set_block_number(T::BondUnlockDelay::get() + 10u32.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
