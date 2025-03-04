@@ -1304,7 +1304,8 @@ pub mod pallet {
 								total_unclaimable_rewards
 									.saturating_accrue(session_unclaimable_rewards);
 								session_rewards.claimed_rewards.saturating_accrue(
-									session_total_reward.saturating_add(total_unclaimable_rewards));
+									session_total_reward.saturating_add(total_unclaimable_rewards),
+								);
 							}
 						});
 					}
