@@ -30,6 +30,7 @@ use core::marker::PhantomData;
 
 use codec::Codec;
 use frame_support::traits::TypedGet;
+use sp_std::vec::Vec;
 
 pub use pallet::*;
 
@@ -67,11 +68,10 @@ pub mod pallet {
 	use sp_runtime::{Perbill, Percent};
 	use sp_staking::SessionIndex;
 	use sp_std::collections::btree_map::BTreeMap;
-	use sp_std::vec::Vec;
 
 	pub use crate::weights::WeightInfo;
 
-	use super::LOG_TARGET;
+	use super::*;
 
 	/// The in-code storage version.
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
