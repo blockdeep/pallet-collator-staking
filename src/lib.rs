@@ -1304,7 +1304,8 @@ pub mod pallet {
 								total_unclaimable_rewards
 									.saturating_accrue(session_unclaimable_rewards);
 								session_rewards.claimed_rewards.saturating_accrue(
-									session_total_reward.saturating_add(total_unclaimable_rewards));
+									session_total_reward.saturating_add(total_unclaimable_rewards),
+								);
 							}
 						});
 					}
@@ -2004,6 +2005,16 @@ pub mod pallet {
 			all_candidates
 		}
 
+		/// Retrieve the list of candidates sorted by stake.
+		///
+		/// **Note:** This function is intended for use within the runtime API only.
+		pub fn candidates() -> Vec<(T::AccountId, BalanceOf<T>)> {
+			Self::get_sorted_candidate_list()
+				.into_iter()
+				.map(|(acc, info)| (acc, info.stake))
+				.collect()
+		}
+
 		/// Kicks out candidates that did not produce a block in the kick threshold, and refunds
 		/// the stakers. The candidate is refunded after a delay.
 		///
@@ -2253,6 +2264,9 @@ sp_api::decl_runtime_apis! {
 	///    fn should_claim(account: AccountId) -> bool {
 	///        !CollatorStaking::staker_has_claimed(&account)
 	///    }
+	///	   fn candidates() -> Vec<(AccountId, Balance)> {
+	///        CollatorStaking::candidates()
+	///    }
 	/// }
 	/// ```
 	pub trait CollatorStakingApi<AccountId, Balance>
@@ -2271,5 +2285,8 @@ sp_api::decl_runtime_apis! {
 
 		/// Returns true if user should claim rewards.
 		fn should_claim(account: AccountId) -> bool;
+
+		/// Returns a list with all candidates and their stake.
+		fn candidates() -> Vec<(AccountId, Balance)>;
 	}
 }
