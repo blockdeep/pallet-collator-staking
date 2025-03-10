@@ -25,7 +25,7 @@ Similar to the Collator Selection pallet, this pallet also maintains two kind of
 Staking rewards distributed to candidates and their stakers come from the following sources:
 
 - Transaction fees and tips collected for blocks produced.
-- An optional per-block flat amount coming from a different pot (for example, Treasury). This is to "top-up" the rewards
+- An optional per-block flat amount coming from a different pot. This is to "top-up" the rewards
   in case fees and tips are too small.
 
 The pallet assumes all rewards are generated from existing funds on the blockchain, and **there is no inflation**
@@ -39,17 +39,17 @@ Rewards are distributed so that all stakeholders are incentivized to participate
 - Stakers must select wisely the candidates they want to deposit the stake on, hence determining the best possible
   candidates that are likely to become collators.
 - Rewards are proportionally distributed among collators and stakers when the session ends.
-  - Collators receive an exclusive percentage of them for collating. This is configurable.
-  - Stakers receive the remaining proportionally to the amount staked in a given collator.
+    - Collators receive an exclusive percentage of them for collating. This is configurable.
+    - Stakers receive the remaining proportionally to the amount staked in a given collator.
 
 ### Staking
 
-Any account in the parachain can deposit a stake on a given candidate so that he gets access to staking rewards
+Any account in the parachain can deposit a stake on a given candidate so that it gets access to staking rewards
 proportional to the blocks produced by the selected candidate.
 
 ### Un-staking
 
-When a user or candidate wishes to unstake, there is a delay: the staker will have to wait for a given number of blocks
+When a staker wishes to unstake, there is a delay: the staker will have to wait for a given number of blocks
 before their funds are unlocked. No rewards are given during this delay period.
 
 ### Auto Compounding
@@ -64,19 +64,20 @@ to calculate the per-staker rewards for that session.
 Stakers will have to call the `claim_rewards` extrinsic to collect the corresponding earnings from the previous
 sessions. This process will be automatically triggered whenever
 the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be
-auto-compounded if the user set an auto-compound percentage greater than zero.
+auto-compounded if the user sets an auto-compound percentage greater than zero.
 
 ### Runtime Configuration
 
 | Parameter                  | Description                                                                                          |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+|----------------------------|------------------------------------------------------------------------------------------------------|
 | `RuntimeEvent`             | The overarching event type.                                                                          |
 | `Currency`                 | The currency mechanism.                                                                              |
 | `RuntimeFreezeReason`      | The overarching freeze reason.                                                                       |
 | `UpdateOrigin`             | Origin that can dictate updating parameters of this pallet.                                          |
 | `PotId`                    | Account Identifier from which the internal pot is generated.                                         |
-| `ExtraRewardPotId`         | Account Identifier from which the extra reward pot is generated.                                     |
+| `ExtraRewardPotId`         | Account Identifier from which the internal extra reward pot is generated.                            |
 | `ExtraRewardReceiver`      | Account that will receive all funds in the extra reward pot when those are stopped.                  |
+| `MaxCandidates`            | Maximum number of candidates allowed.                                                                |
 | `MinEligibleCollators`     | Minimum number eligible collators including Invulnerables.                                           |
 | `MaxInvulnerables`         | Maximum number of invulnerables.                                                                     |
 | `KickThreshold`            | Candidates will be removed from active collator set, if block is not produced within this threshold. |
@@ -85,9 +86,10 @@ auto-compounded if the user set an auto-compound percentage greater than zero.
 | `CollatorRegistration`     | Validate a collator is registered.                                                                   |
 | `MaxStakedCandidates`      | Maximum candidates a staker can stake on.                                                            |
 | `MaxStakers`               | Maximum stakers per candidate.                                                                       |
-| `MaxRewardSessions`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
-| `BondUnlockDelay`          | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `StakeUnlockDelay`         | Number of blocks to wait before unlocking the stake by a user.                                       |
+| `BondUnlockDelay`          | Number of blocks to wait before unlocking the bond by a collator.                                    |
+| `RestakeUnlockDelay`       | Number of blocks to wait before reusing funds previously assigned to a candidate.                    |
+| `MaxRewardSessions`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `AutoCompoundingThreshold` | Minimum stake needed to enable autocompounding.                                                      |
 | `WeightInfo`               | Information on runtime weights.                                                                      |
 

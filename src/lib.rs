@@ -189,7 +189,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type StakeUnlockDelay: Get<BlockNumberFor<Self>>;
 
-		/// Number of blocks to wait before reusing funds previously assigned to a collator.
+		/// Number of blocks to wait before reusing funds previously assigned to a candidate.
 		/// It should be set to at least one session.
 		#[pallet::constant]
 		type RestakeUnlockDelay: Get<BlockNumberFor<Self>>;
@@ -215,7 +215,7 @@ pub mod pallet {
 		Releasing,
 	}
 
-	/// Basic information about a collator candidate.
+	/// Basic information about a candidate.
 	#[derive(
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
@@ -372,7 +372,7 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type DesiredCandidates<T> = StorageValue<_, u32, ValueQuery>;
 
-	/// Minimum amount to become a collator.
+	/// Minimum amount to become a candidate.
 	#[pallet::storage]
 	pub type MinCandidacyBond<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
@@ -444,7 +444,7 @@ pub mod pallet {
 	pub type PerSessionRewards<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, SessionIndex, SessionInfoOf<T>, OptionQuery>;
 
-	/// Percentage of reward to be re-invested in collators.
+	/// Percentage of rewards to be re-invested in collators.
 	#[pallet::storage]
 	pub type AutoCompound<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
