@@ -139,7 +139,7 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 	staker
 }
 
-fn prepare_old_rewards<T: Config + pallet_session::Config>(
+fn prepare_rewards<T: Config + pallet_session::Config>(
 	c: u32,
 	r: u32,
 ) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
@@ -187,7 +187,7 @@ fn prepare_old_rewards<T: Config + pallet_session::Config>(
 			},
 		);
 
-		for (candidate, (_, stake)) in &reward_map {
+		for candidate in reward_map.keys() {
 			Counters::<T>::mutate(candidate, |counter| {
 				counter.saturating_accrue(
 					FixedU128::saturating_from_rational(amount, amount * r.into()).into(),
@@ -206,8 +206,6 @@ fn prepare_old_rewards<T: Config + pallet_session::Config>(
 	.unwrap();
 	(staker, total_rewards, candidates)
 }
-
-fn prepare_rewards<T: Config + pallet_session::Config>(c: u32) {}
 
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
@@ -589,7 +587,7 @@ mod benchmarks {
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
-		let (staker, total_rewards, candidates) = prepare_old_rewards::<T>(c, r);
+		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
 
 		#[block]
 		{
@@ -615,7 +613,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn claim_rewards(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
-		let (staker, total_rewards, candidates) = prepare_old_rewards::<T>(c, 1);
+		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, 1);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));

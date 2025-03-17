@@ -48,6 +48,7 @@ const LOG_TARGET: &str = "runtime::collator-staking";
 
 #[frame_support::pallet]
 pub mod pallet {
+	use frame_support::weights::WeightMeter;
 	use frame_support::{
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
@@ -456,9 +457,20 @@ pub mod pallet {
 	pub type CandidacyBondReleases<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
 
+	/// Accumulated rewards delivered to stakers by each collator.
 	#[pallet::storage]
 	pub type Counters<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
+
+	/// The storage value `LastRewardedKey` is used to track the last key that was rewarded
+	/// automatically by the system.
+	///
+	/// Only those accounts with autocompound enabled have their rewards automatically collected.
+	///
+	/// - `bool`: Indicates if reward distribution was completed for the current session.
+	/// - `Option<T::AccountId>`: The account ID of the last rewarded key, if any.
+	#[pallet::storage]
+	pub type LastRewardedKey<T: Config> = StorageValue<_, (bool, Option<T::AccountId>), ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -630,8 +642,43 @@ pub mod pallet {
 		}
 
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
-			// TODO
-			Weight::zero()
+			let mut meter = WeightMeter::with_limit(remaining_weight);
+			meter.consume(T::DbWeight::get().reads_writes(1, 0));
+			let (should_collect, mut maybe_last_key) = LastRewardedKey::<T>::get();
+			if should_collect {
+				let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
+				let mut iter = if let Some(last_key) = &maybe_last_key {
+					AutoCompound::<T>::iter_keys_from_key(last_key)
+				} else {
+					AutoCompound::<T>::iter_keys()
+				};
+
+				while meter.can_consume(worst_case_weight) {
+					if let Some(staker) = iter.next() {
+						match Self::do_claim_rewards(&staker) {
+							Ok(explored_candidates) => {
+								meter.consume(T::WeightInfo::claim_rewards(explored_candidates));
+							},
+							Err(e) => {
+								meter.consume(worst_case_weight);
+								log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
+							},
+						};
+						maybe_last_key = Some(staker);
+					} else {
+						// End of the iteration.
+						meter.consume(T::DbWeight::get().reads_writes(1, 1));
+						maybe_last_key = None;
+						break;
+					}
+				}
+				if let Some(last_key) = maybe_last_key {
+					LastRewardedKey::<T>::set((true, Some(last_key)));
+				} else {
+					LastRewardedKey::<T>::set((false, None));
+				}
+			}
+			meter.consumed()
 		}
 	}
 
@@ -1294,7 +1341,7 @@ pub mod pallet {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let mut candidate_rewards = vec![];
 			let current_session = CurrentSession::<T>::get();
-			UserStake::<T>::mutate(who, |user_stake_info| {
+			UserStake::<T>::try_mutate(who, |user_stake_info| {
 				for candidate in &user_stake_info.candidates {
 					let counter = Counters::<T>::get(&candidate);
 					CandidateStake::<T>::mutate(candidate, who, |info| {
@@ -1306,25 +1353,25 @@ pub mod pallet {
 					});
 				}
 				user_stake_info.maybe_last_reward_session = Some(current_session);
-			});
-			if !total_rewards.is_zero() {
-				Self::do_reward_single(who, total_rewards)?;
-				ClaimableRewards::<T>::mutate(|claimable_rewards| {
-					claimable_rewards.saturating_reduce(total_rewards);
-				});
-				let autocompound_percentage = AutoCompound::<T>::get(who);
-				let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
-				if !autocompound_amount.is_zero() {
-					Self::do_lock(who, autocompound_amount)?;
-					for (candidate, rewards) in &candidate_rewards {
-						let amount = autocompound_percentage.mul_floor(*rewards);
-						if !amount.is_zero() {
-							Self::do_stake(who, candidate, amount)?;
+				if !total_rewards.is_zero() {
+					Self::do_reward_single(who, total_rewards)?;
+					ClaimableRewards::<T>::mutate(|claimable_rewards| {
+						claimable_rewards.saturating_reduce(total_rewards);
+					});
+					let autocompound_percentage = AutoCompound::<T>::get(who);
+					let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
+					if !autocompound_amount.is_zero() {
+						Self::do_lock(who, autocompound_amount)?;
+						for (candidate, rewards) in &candidate_rewards {
+							let amount = autocompound_percentage.mul_floor(*rewards);
+							if !amount.is_zero() {
+								Self::do_stake(who, candidate, amount)?;
+							}
 						}
 					}
 				}
-			}
-			Ok(candidate_rewards.len() as u32)
+				Ok(candidate_rewards.len() as u32)
+			})
 		}
 
 		/// Claims all rewards from previous sessions.
@@ -1969,7 +2016,7 @@ pub mod pallet {
 						);
 						Counters::<T>::mutate(&collator, |counter| {
 							counter.saturating_accrue(session_ratio.into())
-						})
+						});
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}
@@ -1986,6 +2033,7 @@ pub mod pallet {
 				},
 			);
 			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
+			LastRewardedKey::<T>::set((true, None));
 			(rewardable_collators, total_rewards)
 		}
 
