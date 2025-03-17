@@ -259,9 +259,12 @@ pub mod pallet {
 	)]
 	pub struct CandidateStakeInfo<Balance> {
 		/// Session when the user first staked on a given candidate.
+		#[deprecated]
 		pub session: SessionIndex,
 		/// The amount staked.
 		pub stake: Balance,
+		/// Checkpoint to track rewards for a given collator.
+		pub checkpoint: Perbill,
 	}
 
 	/// Information about a users' stake.
@@ -349,9 +352,6 @@ pub mod pallet {
 
 	/// The (community, limited) collation candidates. `Candidates` and `Invulnerables` should be
 	/// mutually exclusive.
-	///
-	/// This list is sorted in ascending order by total stake and when the stake amounts are equal, the least
-	/// recently updated is considered greater.
 	#[pallet::storage]
 	pub type Candidates<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, T::AccountId, CandidateInfoOf<T>, OptionQuery>;
@@ -440,6 +440,7 @@ pub mod pallet {
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
 	/// Per-session rewards.
+	#[deprecated]
 	#[pallet::storage]
 	pub type PerSessionRewards<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, SessionIndex, SessionInfoOf<T>, OptionQuery>;
@@ -455,6 +456,10 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CandidacyBondReleases<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
+
+	#[pallet::storage]
+	pub type Counters<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, Perbill, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -1184,18 +1189,15 @@ pub mod pallet {
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
 		#[pallet::call_index(20)]
-		#[pallet::weight(T::WeightInfo::claim_rewards(
-			T::MaxStakedCandidates::get(),
-			T::MaxRewardSessions::get()
-		))]
+		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get(),))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&who), Error::<T>::NoPendingClaim);
 
-			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
-			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
+			let candidates = Self::do_claim_rewards(&who)?;
+			Ok(Some(T::WeightInfo::claim_rewards(candidates).into()).into())
 		}
 	}
 
@@ -1264,10 +1266,47 @@ pub mod pallet {
 			duplicates.len() != accounts.len()
 		}
 
+		fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
+			let mut total_rewards: BalanceOf<T> = Zero::zero();
+			let mut candidate_rewards = vec![];
+			let current_session = CurrentSession::<T>::get();
+			UserStake::<T>::mutate(who, |user_stake_info| {
+				for candidate in &user_stake_info.candidates {
+					let counter = Counters::<T>::get(&candidate);
+					CandidateStake::<T>::mutate(candidate, who, |info| {
+						let reward = counter.saturating_sub(info.checkpoint) * info.stake;
+						candidate_rewards.push((candidate.clone(), reward));
+						total_rewards.saturating_accrue(reward);
+						info.checkpoint = counter;
+					});
+				}
+				user_stake_info.maybe_last_reward_session = Some(current_session);
+			});
+			if !total_rewards.is_zero() {
+				Self::do_reward_single(who, total_rewards)?;
+				ClaimableRewards::<T>::mutate(|claimable_rewards| {
+					claimable_rewards.saturating_reduce(total_rewards);
+				});
+				let autocompound_percentage = AutoCompound::<T>::get(who);
+				let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
+				if !autocompound_amount.is_zero() {
+					Self::do_lock(who, autocompound_amount)?;
+					for (candidate, rewards) in &candidate_rewards {
+						let amount = autocompound_percentage.mul_floor(*rewards);
+						if !amount.is_zero() {
+							Self::do_stake(who, candidate, amount)?;
+						}
+					}
+				}
+			}
+			Ok(candidate_rewards.len() as u32)
+		}
+
 		/// Claims all rewards from previous sessions.
 		///
 		/// Returns the number of collators the users added stake to, and the total sessions with rewards.
-		fn do_claim_rewards(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
+		#[deprecated]
+		pub fn do_claim_rewards_old(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
 			UserStake::<T>::mutate(who, |user_stake_info| -> Result<(u32, u32), DispatchError> {
 				let mut total_sessions = 0;
 				let mut total_candidates = 0;
@@ -1335,6 +1374,19 @@ pub mod pallet {
 		/// Computes pending rewards for a given user.
 		/// This function is intended to be used in the runtime implementation.
 		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
+			let mut total_rewards: BalanceOf<T> = Zero::zero();
+			let user_stake_info = UserStake::<T>::get(who);
+			for candidate in &user_stake_info.candidates {
+				let counter = Counters::<T>::get(&candidate);
+				let info = CandidateStake::<T>::get(candidate, who);
+				let reward = counter.saturating_sub(info.checkpoint) * info.stake;
+				total_rewards.saturating_accrue(reward);
+			}
+			total_rewards
+		}
+
+		#[deprecated]
+		pub(crate) fn calculate_unclaimed_rewards_old(who: &T::AccountId) -> BalanceOf<T> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
 			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
@@ -1861,14 +1913,14 @@ pub mod pallet {
 					// Get the collator info of a candidate, in the case that the collator was removed from the
 					// candidate list during the session, the collator and its stakers must still be rewarded
 					// for the produced blocks in the session so the info can be obtained from SessionRemovedCandidates.
-					let info = Self::get_candidate(&collator)
+					let maybe_collator_info = Self::get_candidate(&collator)
 						.or_else(|_| {
 							SessionRemovedCandidates::<T>::take(&collator)
 								.ok_or(Error::<T>::NotRemovedCandidate)
 						})
 						.ok();
 
-					if let Some(collator_info) = info {
+					if let Some(collator_info) = maybe_collator_info {
 						if blocks > rewardable_blocks {
 							// The only case this could happen is if the candidate was an invulnerable during the session.
 							// Since blocks produced by invulnerables are not currently stored in ProducedBlocks this error
@@ -1908,6 +1960,13 @@ pub mod pallet {
 						{
 							stakers_rewards.saturating_accrue(stakers_only_rewards);
 						}
+
+						// Increase the reward counter for this collator.
+						let session_ratio =
+							Perbill::from_rational(stakers_only_rewards, collator_info.stake);
+						Counters::<T>::mutate(&collator, |counter| {
+							counter.saturating_accrue(session_ratio)
+						})
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}

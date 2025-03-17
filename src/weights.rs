@@ -67,7 +67,7 @@ pub trait WeightInfo {
 	fn unstake_from() -> Weight;
 	fn unstake_all(c: u32, ) -> Weight;
 	fn release(c: u32, ) -> Weight;
-	fn claim_rewards(c: u32, r: u32, ) -> Weight;
+	fn claim_rewards(c: u32) -> Weight;
 	fn set_autocompound_percentage() -> Weight;
 	fn set_collator_reward_percentage() -> Weight;
 	fn set_extra_reward() -> Weight;
@@ -391,7 +391,7 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 5]`.
 	/// The range of component `r` is `[1, 365]`.
-	fn claim_rewards(c: u32, r: u32, ) -> Weight {
+	fn claim_rewards(c: u32) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2313 + c * (307 ±0) + r * (5245 ±0)`
 		//  Estimated: `16416 + c * (2567 ±0) + r * (7713 ±0)`
@@ -400,14 +400,11 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 			// Standard Error: 2_908_047
 			.saturating_add(Weight::from_parts(25_905_757, 0).saturating_mul(c.into()))
 			// Standard Error: 39_723
-			.saturating_add(Weight::from_parts(8_781_104, 0).saturating_mul(r.into()))
 			.saturating_add(T::DbWeight::get().reads(11_u64))
 			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(c.into())))
-			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(r.into())))
 			.saturating_add(T::DbWeight::get().writes(5_u64))
 			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(c.into())))
 			.saturating_add(Weight::from_parts(0, 2567).saturating_mul(c.into()))
-			.saturating_add(Weight::from_parts(0, 7713).saturating_mul(r.into()))
 	}
 	/// Storage: `CollatorSelection::UserStake` (r:1 w:0)
 	/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)
@@ -884,7 +881,7 @@ impl WeightInfo for () {
 	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
 	/// The range of component `c` is `[1, 5]`.
 	/// The range of component `r` is `[1, 365]`.
-	fn claim_rewards(c: u32, r: u32, ) -> Weight {
+	fn claim_rewards(c: u32) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `2313 + c * (307 ±0) + r * (5245 ±0)`
 		//  Estimated: `16416 + c * (2567 ±0) + r * (7713 ±0)`
@@ -893,14 +890,11 @@ impl WeightInfo for () {
 			// Standard Error: 2_908_047
 			.saturating_add(Weight::from_parts(25_905_757, 0).saturating_mul(c.into()))
 			// Standard Error: 39_723
-			.saturating_add(Weight::from_parts(8_781_104, 0).saturating_mul(r.into()))
 			.saturating_add(RocksDbWeight::get().reads(11_u64))
 			.saturating_add(RocksDbWeight::get().reads((2_u64).saturating_mul(c.into())))
-			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(r.into())))
 			.saturating_add(RocksDbWeight::get().writes(5_u64))
 			.saturating_add(RocksDbWeight::get().writes((2_u64).saturating_mul(c.into())))
 			.saturating_add(Weight::from_parts(0, 2567).saturating_mul(c.into()))
-			.saturating_add(Weight::from_parts(0, 7713).saturating_mul(r.into()))
 	}
 	/// Storage: `CollatorSelection::UserStake` (r:1 w:0)
 	/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)

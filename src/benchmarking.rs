@@ -28,7 +28,7 @@ use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
 use sp_runtime::traits::Zero;
-use sp_runtime::Percent;
+use sp_runtime::{Perbill, Percent, Saturating};
 use sp_std::prelude::*;
 
 const SEED: u32 = 0;
@@ -139,7 +139,7 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 	staker
 }
 
-fn prepare_rewards<T: Config + pallet_session::Config>(
+fn prepare_old_rewards<T: Config + pallet_session::Config>(
 	c: u32,
 	r: u32,
 ) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
@@ -168,7 +168,7 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 		if index < (c as usize) {
 			CollatorStaking::<T>::stake(
 				RawOrigin::Signed(staker.clone()).into(),
-				vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+				vec![StakeTarget { candidate: candidate.clone(), stake: amount * r.into() }]
 					.try_into()
 					.unwrap(),
 			)
@@ -186,6 +186,12 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 				claimed_rewards: Zero::zero(),
 			},
 		);
+
+		for (candidate, (_, stake)) in &reward_map {
+			Counters::<T>::mutate(candidate, |counter| {
+				counter.saturating_accrue(Perbill::from_rational(amount, amount * r.into()))
+			})
+		}
 	}
 
 	let total_rewards = amount * c.into() * r.into();
@@ -198,6 +204,8 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	.unwrap();
 	(staker, total_rewards, candidates)
 }
+
+fn prepare_rewards<T: Config + pallet_session::Config>(c: u32) {}
 
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
@@ -575,11 +583,37 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn claim_rewards(
+	fn claim_rewards_old(
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
-		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
+		let (staker, total_rewards, candidates) = prepare_old_rewards::<T>(c, r);
+
+		#[block]
+		{
+			CollatorStaking::<T>::do_claim_rewards_old(&staker)
+				.expect("Should be able to claim old rewards");
+		}
+
+		assert_has_event::<T>(
+			Event::<T>::StakingRewardReceived { account: staker.clone(), amount: total_rewards }
+				.into(),
+		);
+		for candidate in &candidates[..(c as usize)] {
+			assert_has_event::<T>(
+				Event::<T>::StakeAdded {
+					account: staker.clone(),
+					candidate: candidate.clone(),
+					amount: total_rewards / c.into(),
+				}
+				.into(),
+			);
+		}
+	}
+
+	#[benchmark]
+	fn claim_rewards(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+		let (staker, total_rewards, candidates) = prepare_old_rewards::<T>(c, 1);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
