@@ -63,9 +63,8 @@ pub mod pallet {
 	use pallet_session::SessionManager;
 	use sp_runtime::{
 		traits::{AccountIdConversion, Convert, Saturating, Zero},
-		RuntimeDebug,
+		FixedPointNumber, FixedU128, Perbill, Percent, RuntimeDebug,
 	};
-	use sp_runtime::{Perbill, Percent};
 	use sp_staking::SessionIndex;
 	use sp_std::collections::btree_map::BTreeMap;
 
@@ -264,7 +263,7 @@ pub mod pallet {
 		/// The amount staked.
 		pub stake: Balance,
 		/// Checkpoint to track rewards for a given collator.
-		pub checkpoint: Perbill,
+		pub checkpoint: FixedU128,
 	}
 
 	/// Information about a users' stake.
@@ -459,7 +458,7 @@ pub mod pallet {
 
 	#[pallet::storage]
 	pub type Counters<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, Perbill, ValueQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -1266,7 +1265,7 @@ pub mod pallet {
 			duplicates.len() != accounts.len()
 		}
 
-		fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
+		pub(crate) fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let mut candidate_rewards = vec![];
 			let current_session = CurrentSession::<T>::get();
@@ -1274,7 +1273,8 @@ pub mod pallet {
 				for candidate in &user_stake_info.candidates {
 					let counter = Counters::<T>::get(&candidate);
 					CandidateStake::<T>::mutate(candidate, who, |info| {
-						let reward = counter.saturating_sub(info.checkpoint) * info.stake;
+						let reward =
+							counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
 						candidate_rewards.push((candidate.clone(), reward));
 						total_rewards.saturating_accrue(reward);
 						info.checkpoint = counter;
@@ -1379,7 +1379,7 @@ pub mod pallet {
 			for candidate in &user_stake_info.candidates {
 				let counter = Counters::<T>::get(&candidate);
 				let info = CandidateStake::<T>::get(candidate, who);
-				let reward = counter.saturating_sub(info.checkpoint) * info.stake;
+				let reward = counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
 				total_rewards.saturating_accrue(reward);
 			}
 			total_rewards
@@ -1870,30 +1870,6 @@ pub mod pallet {
 			})
 		}
 
-		/// Removes old rewards when a new session starts.
-		fn remove_old_rewards_if_needed(session: SessionIndex) {
-			let rewards_to_remove = PerSessionRewards::<T>::count()
-				.saturating_sub(T::MaxRewardSessions::get().saturating_sub(1));
-			let mut remaining_unclaimed_rewards: BalanceOf<T> = Zero::zero();
-			for i in 0..rewards_to_remove {
-				let reward_to_remove =
-					session.saturating_sub(T::MaxRewardSessions::get().saturating_add(i));
-				PerSessionRewards::<T>::mutate_exists(reward_to_remove, |maybe_reward| {
-					if let Some(reward) = maybe_reward {
-						remaining_unclaimed_rewards.saturating_accrue(
-							reward.rewards.saturating_sub(reward.claimed_rewards),
-						);
-					}
-					*maybe_reward = None;
-				});
-			}
-			if !remaining_unclaimed_rewards.is_zero() {
-				ClaimableRewards::<T>::mutate(|claimable_rewards| {
-					claimable_rewards.saturating_reduce(remaining_unclaimed_rewards)
-				});
-			}
-		}
-
 		/// Rewards all collators for a given session.
 		///
 		/// Returns a tuple with the number of rewardable collators and the total rewards for the
@@ -1962,10 +1938,12 @@ pub mod pallet {
 						}
 
 						// Increase the reward counter for this collator.
-						let session_ratio =
-							Perbill::from_rational(stakers_only_rewards, collator_info.stake);
+						let session_ratio = FixedU128::saturating_from_rational(
+							stakers_only_rewards,
+							collator_info.stake,
+						);
 						Counters::<T>::mutate(&collator, |counter| {
-							counter.saturating_accrue(session_ratio)
+							counter.saturating_accrue(session_ratio.into())
 						})
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
@@ -2276,8 +2254,6 @@ pub mod pallet {
 				}
 			}
 
-			// Firstly remove old rewards. Users that did not claim them will lose the right to do so.
-			Self::remove_old_rewards_if_needed(index);
 			let (total_collators, total_rewards) = Self::reward_collators(index);
 			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 

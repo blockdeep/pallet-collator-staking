@@ -48,8 +48,8 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::{Weight, constants::RocksDbWeight}};
 use core::marker::PhantomData;
+use frame_support::{traits::Get, weights::{constants::RocksDbWeight, Weight}};
 
 /// Weight functions needed for `pallet_collator_staking`.
 pub trait WeightInfo {

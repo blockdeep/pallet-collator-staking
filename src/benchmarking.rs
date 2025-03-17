@@ -28,7 +28,7 @@ use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
 use sp_runtime::traits::Zero;
-use sp_runtime::{Perbill, Percent, Saturating};
+use sp_runtime::{FixedPointNumber, FixedU128, Percent, Saturating};
 use sp_std::prelude::*;
 
 const SEED: u32 = 0;
@@ -189,7 +189,9 @@ fn prepare_old_rewards<T: Config + pallet_session::Config>(
 
 		for (candidate, (_, stake)) in &reward_map {
 			Counters::<T>::mutate(candidate, |counter| {
-				counter.saturating_accrue(Perbill::from_rational(amount, amount * r.into()))
+				counter.saturating_accrue(
+					FixedU128::saturating_from_rational(amount, amount * r.into()).into(),
+				)
 			})
 		}
 	}
