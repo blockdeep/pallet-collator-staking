@@ -259,9 +259,14 @@ pub mod pallet {
 	)]
 	pub struct CandidateStakeInfo<Balance> {
 		/// Session when the user first staked on a given candidate.
+		/// FIXME: no need to store this. From now on we don't care if a user gets rewards for
+		/// whole sessions although they were backing a collator partially.
+		#[deprecated]
 		pub session: SessionIndex,
 		/// The amount staked.
 		pub stake: Balance,
+		/// Checkpoint to track rewards for a given collator.
+		pub checkpoint: Perbill,
 	}
 
 	/// Information about a users' stake.
@@ -440,6 +445,8 @@ pub mod pallet {
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
 	/// Per-session rewards.
+	/// FIXME: we are no longer tracking per-session rewards, but using a counter-checkpoint model…
+	#[deprecated]
 	#[pallet::storage]
 	pub type PerSessionRewards<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, SessionIndex, SessionInfoOf<T>, OptionQuery>;
@@ -455,6 +462,12 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CandidacyBondReleases<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
+
+	/// Counts the accumulated reward ratio for a given candidate.
+	#[pallet::storage]
+	pub type Counters<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, Perbill, ValueQuery>;
+
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -1267,6 +1280,8 @@ pub mod pallet {
 		/// Claims all rewards from previous sessions.
 		///
 		/// Returns the number of collators the users added stake to, and the total sessions with rewards.
+		/// FIXME: this logic has to be refactored to track with the new counter-checkpoint model
+		/// instead of the per-session snapshotting.
 		fn do_claim_rewards(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
 			UserStake::<T>::mutate(who, |user_stake_info| -> Result<(u32, u32), DispatchError> {
 				let mut total_sessions = 0;
@@ -1908,6 +1923,8 @@ pub mod pallet {
 						{
 							stakers_rewards.saturating_accrue(stakers_only_rewards);
 						}
+
+						// FIXME: here we have to increase the reward counter for this collator.
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}
