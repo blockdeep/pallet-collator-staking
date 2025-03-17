@@ -67,7 +67,8 @@ pub trait WeightInfo {
 	fn unstake_from() -> Weight;
 	fn unstake_all(c: u32, ) -> Weight;
 	fn release(c: u32, ) -> Weight;
-	fn claim_rewards(c: u32) -> Weight;
+	fn claim_rewards(c: u32, ) -> Weight;
+	fn claim_rewards_old(c: u32, r: u32, ) -> Weight;
 	fn set_autocompound_percentage() -> Weight;
 	fn set_collator_reward_percentage() -> Weight;
 	fn set_extra_reward() -> Weight;
@@ -367,6 +368,48 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 			.saturating_add(T::DbWeight::get().reads(3_u64))
 			.saturating_add(T::DbWeight::get().writes(2_u64))
 	}
+		/// Storage: `CollatorSelection::UserStake` (r:1 w:1)
+		/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::CandidateStake` (r:5 w:5)
+		/// Proof: `CollatorSelection::CandidateStake` (`max_values`: None, `max_size`: Some(92), added: 2567, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::CurrentSession` (r:1 w:0)
+		/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::PerSessionRewards` (r:367 w:0)
+		/// Proof: `CollatorSelection::PerSessionRewards` (`max_values`: None, `max_size`: Some(5238), added: 7713, mode: `MaxEncodedLen`)
+		/// Storage: `System::Account` (r:2 w:2)
+		/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(116), added: 2591, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::ClaimableRewards` (r:1 w:1)
+		/// Proof: `CollatorSelection::ClaimableRewards` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::AutoCompound` (r:1 w:0)
+		/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+		/// Storage: `Balances::Freezes` (r:1 w:1)
+		/// Proof: `Balances::Freezes` (`max_values`: None, `max_size`: Some(937), added: 3412, mode: `MaxEncodedLen`)
+		/// Storage: `Balances::Locks` (r:1 w:0)
+		/// Proof: `Balances::Locks` (`max_values`: None, `max_size`: Some(1287), added: 3762, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::Candidates` (r:5 w:5)
+		/// Proof: `CollatorSelection::Candidates` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+		/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+		/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+		/// The range of component `c` is `[1, 5]`.
+		/// The range of component `r` is `[1, 365]`.
+		fn claim_rewards_old(c: u32, r: u32, ) -> Weight {
+			// Proof Size summary in bytes:
+			//  Measured:  `2313 + c * (307 ±0) + r * (5245 ±0)`
+			//  Estimated: `16416 + c * (2567 ±0) + r * (7713 ±0)`
+			// Minimum execution time: 210_683_000 picoseconds.
+			Weight::from_parts(214_170_000, 16416)
+				// Standard Error: 2_908_047
+				.saturating_add(Weight::from_parts(25_905_757, 0).saturating_mul(c.into()))
+				// Standard Error: 39_723
+				.saturating_add(Weight::from_parts(8_781_104, 0).saturating_mul(r.into()))
+				.saturating_add(T::DbWeight::get().reads(11_u64))
+				.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(c.into())))
+				.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(r.into())))
+				.saturating_add(T::DbWeight::get().writes(5_u64))
+				.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(c.into())))
+				.saturating_add(Weight::from_parts(0, 2567).saturating_mul(c.into()))
+				.saturating_add(Weight::from_parts(0, 7713).saturating_mul(r.into()))
+		}
 	/// Storage: `CollatorSelection::UserStake` (r:1 w:1)
 	/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)
 	/// Storage: `CollatorSelection::CandidateStake` (r:5 w:5)
@@ -856,6 +899,48 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(150_150, 0).saturating_mul(c.into()))
 			.saturating_add(RocksDbWeight::get().reads(3_u64))
 			.saturating_add(RocksDbWeight::get().writes(2_u64))
+	}
+	/// Storage: `CollatorSelection::UserStake` (r:1 w:1)
+	/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CandidateStake` (r:5 w:5)
+	/// Proof: `CollatorSelection::CandidateStake` (`max_values`: None, `max_size`: Some(92), added: 2567, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::CurrentSession` (r:1 w:0)
+	/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::PerSessionRewards` (r:367 w:0)
+	/// Proof: `CollatorSelection::PerSessionRewards` (`max_values`: None, `max_size`: Some(5238), added: 7713, mode: `MaxEncodedLen`)
+	/// Storage: `System::Account` (r:2 w:2)
+	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(116), added: 2591, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::ClaimableRewards` (r:1 w:1)
+	/// Proof: `CollatorSelection::ClaimableRewards` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::AutoCompound` (r:1 w:0)
+	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
+	/// Storage: `Balances::Freezes` (r:1 w:1)
+	/// Proof: `Balances::Freezes` (`max_values`: None, `max_size`: Some(937), added: 3412, mode: `MaxEncodedLen`)
+	/// Storage: `Balances::Locks` (r:1 w:0)
+	/// Proof: `Balances::Locks` (`max_values`: None, `max_size`: Some(1287), added: 3762, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::Candidates` (r:5 w:5)
+	/// Proof: `CollatorSelection::Candidates` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+	/// Storage: `CollatorSelection::MinStake` (r:1 w:0)
+	/// Proof: `CollatorSelection::MinStake` (`max_values`: Some(1), `max_size`: Some(16), added: 511, mode: `MaxEncodedLen`)
+	/// The range of component `c` is `[1, 5]`.
+	/// The range of component `r` is `[1, 365]`.
+	fn claim_rewards_old(c: u32, r: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `2313 + c * (307 ±0) + r * (5245 ±0)`
+		//  Estimated: `16416 + c * (2567 ±0) + r * (7713 ±0)`
+		// Minimum execution time: 210_683_000 picoseconds.
+		Weight::from_parts(214_170_000, 16416)
+			// Standard Error: 2_908_047
+			.saturating_add(Weight::from_parts(25_905_757, 0).saturating_mul(c.into()))
+			// Standard Error: 39_723
+			.saturating_add(Weight::from_parts(8_781_104, 0).saturating_mul(r.into()))
+			.saturating_add(RocksDbWeight::get().reads(11_u64))
+			.saturating_add(RocksDbWeight::get().reads((2_u64).saturating_mul(c.into())))
+			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(r.into())))
+			.saturating_add(RocksDbWeight::get().writes(5_u64))
+			.saturating_add(RocksDbWeight::get().writes((2_u64).saturating_mul(c.into())))
+			.saturating_add(Weight::from_parts(0, 2567).saturating_mul(c.into()))
+			.saturating_add(Weight::from_parts(0, 7713).saturating_mul(r.into()))
 	}
 	/// Storage: `CollatorSelection::UserStake` (r:1 w:1)
 	/// Proof: `CollatorSelection::UserStake` (`max_values`: None, `max_size`: Some(158), added: 2633, mode: `MaxEncodedLen`)

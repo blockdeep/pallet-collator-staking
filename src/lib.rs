@@ -628,6 +628,11 @@ pub mod pallet {
 		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
 			Self::do_try_state()
 		}
+
+		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+			// TODO
+			Weight::zero()
+		}
 	}
 
 	#[pallet::call]
@@ -1197,6 +1202,26 @@ pub mod pallet {
 
 			let candidates = Self::do_claim_rewards(&who)?;
 			Ok(Some(T::WeightInfo::claim_rewards(candidates).into()).into())
+		}
+
+		/// Claims pending rewards in the old reward system.
+		#[deprecated]
+		#[pallet::call_index(21)]
+		#[pallet::weight(T::WeightInfo::claim_rewards_old(
+			T::MaxStakedCandidates::get(),
+			T::MaxRewardSessions::get()
+		))]
+		pub fn claim_rewards_other(
+			origin: OriginFor<T>,
+			other: T::AccountId,
+		) -> DispatchResultWithPostInfo {
+			ensure_signed(origin)?;
+
+			// Staker can't claim in the same session as there are no rewards.
+			ensure!(!Self::staker_has_claimed(&other), Error::<T>::NoPendingClaim);
+
+			let (candidates, sessions) = Self::do_claim_rewards_old(&other)?;
+			Ok(Some(T::WeightInfo::claim_rewards_old(candidates, sessions).into()).into())
 		}
 	}
 
