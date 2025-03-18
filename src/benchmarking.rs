@@ -141,6 +141,56 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 
 fn prepare_rewards<T: Config + pallet_session::Config>(
 	c: u32,
+) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
+	let amount = T::Currency::minimum_balance();
+	MinStake::<T>::set(amount);
+	MinCandidacyBond::<T>::set(amount);
+
+	let staker = create_funded_user::<T>("staker", 0, 10000000);
+	CollatorStaking::<T>::lock(
+		RawOrigin::Signed(staker.clone()).into(),
+		CollatorStaking::<T>::get_free_balance(&staker),
+	)
+	.unwrap();
+
+	CollatorStaking::<T>::set_autocompound_percentage(
+		RawOrigin::Signed(staker.clone()).into(),
+		Percent::from_parts(100),
+	)
+	.unwrap();
+
+	let total_candidates = T::MaxCandidates::get();
+	let candidates = register_validators::<T>(total_candidates);
+	register_candidates::<T>(total_candidates);
+	for (index, candidate) in candidates.iter().enumerate() {
+		if index < (c as usize) {
+			CollatorStaking::<T>::stake(
+				RawOrigin::Signed(staker.clone()).into(),
+				vec![StakeTarget { candidate: candidate.clone(), stake: amount }]
+					.try_into()
+					.unwrap(),
+			)
+			.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
+			Counters::<T>::mutate(candidate, |counter| {
+				counter
+					.saturating_accrue(FixedU128::saturating_from_rational(amount, amount).into())
+			})
+		}
+	}
+
+	let total_rewards: BalanceOf<T> = amount * c.into();
+	ClaimableRewards::<T>::set(total_rewards);
+	CurrentSession::<T>::set(1);
+	T::Currency::mint_into(
+		&CollatorStaking::<T>::account_id(),
+		T::Currency::minimum_balance() + total_rewards,
+	)
+	.unwrap();
+	(staker, total_rewards, candidates)
+}
+
+fn prepare_rewards_old<T: Config + pallet_session::Config>(
+	c: u32,
 	r: u32,
 ) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
 	let amount = T::Currency::minimum_balance();
@@ -186,14 +236,6 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 				claimed_rewards: Zero::zero(),
 			},
 		);
-
-		for candidate in reward_map.keys() {
-			Counters::<T>::mutate(candidate, |counter| {
-				counter.saturating_accrue(
-					FixedU128::saturating_from_rational(amount, amount * r.into()).into(),
-				)
-			})
-		}
 	}
 
 	let total_rewards = amount * c.into() * r.into();
@@ -587,7 +629,7 @@ mod benchmarks {
 		c: Linear<1, { T::MaxStakedCandidates::get() }>,
 		r: Linear<1, { T::MaxRewardSessions::get() }>,
 	) {
-		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
+		let (staker, total_rewards, candidates) = prepare_rewards_old::<T>(c, r);
 
 		#[block]
 		{
@@ -613,7 +655,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn claim_rewards(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
-		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, 1);
+		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));

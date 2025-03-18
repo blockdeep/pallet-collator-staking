@@ -1240,24 +1240,34 @@ pub mod pallet {
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
 		#[pallet::call_index(20)]
-		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get(),))]
+		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get())
+			.saturating_add(T::WeightInfo::claim_rewards_old(
+				T::MaxStakedCandidates::get(),
+				T::MaxRewardSessions::get()
+		)))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&who), Error::<T>::NoPendingClaim);
 
+			// TODO remove old reward collection.
+			let (candidates_old, sessions) = Self::do_claim_rewards_old(&who)?;
 			let candidates = Self::do_claim_rewards(&who)?;
-			Ok(Some(T::WeightInfo::claim_rewards(candidates).into()).into())
+			Ok(Some(
+				T::WeightInfo::claim_rewards_old(candidates_old, sessions)
+					.saturating_add(T::WeightInfo::claim_rewards(candidates)),
+			)
+			.into())
 		}
 
 		/// Claims pending rewards in the old reward system.
-		#[deprecated]
 		#[pallet::call_index(21)]
-		#[pallet::weight(T::WeightInfo::claim_rewards_old(
-			T::MaxStakedCandidates::get(),
-			T::MaxRewardSessions::get()
-		))]
+		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get())
+			.saturating_add(T::WeightInfo::claim_rewards_old(
+				T::MaxStakedCandidates::get(),
+				T::MaxRewardSessions::get()
+		)))]
 		pub fn claim_rewards_other(
 			origin: OriginFor<T>,
 			other: T::AccountId,
@@ -1267,8 +1277,14 @@ pub mod pallet {
 			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&other), Error::<T>::NoPendingClaim);
 
-			let (candidates, sessions) = Self::do_claim_rewards_old(&other)?;
-			Ok(Some(T::WeightInfo::claim_rewards_old(candidates, sessions).into()).into())
+			// TODO remove old reward collection.
+			let (candidates_old, sessions) = Self::do_claim_rewards_old(&other)?;
+			let candidates = Self::do_claim_rewards(&other)?;
+			Ok(Some(
+				T::WeightInfo::claim_rewards_old(candidates_old, sessions)
+					.saturating_add(T::WeightInfo::claim_rewards(candidates)),
+			)
+			.into())
 		}
 	}
 
