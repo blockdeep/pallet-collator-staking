@@ -1952,8 +1952,8 @@ pub mod pallet {
 				T::Currency::reducible_balance(&Self::account_id(), Preserve, Polite)
 					.saturating_sub(claimable_rewards);
 
-			let mut stakers_rewards: BalanceOf<T> = Zero::zero();
-			let mut reward_map = BoundedBTreeMap::new();
+			let mut stakers_total_rewards: BalanceOf<T> = Zero::zero();
+			let mut rewardable_collators: u32 = Zero::zero();
 			let (_, rewardable_blocks) = TotalBlocks::<T>::get();
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
@@ -1980,7 +1980,7 @@ pub mod pallet {
 						let rewards_all = ratio * total_rewards;
 						let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 						let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
-						// Reward collator. Note these rewards are not autocompounded.
+						// Reward the collator. Note these rewards are not autocompounded.
 						if let Err(error) = Self::do_reward_single(&collator, collator_only_reward)
 						{
 							log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
@@ -1997,17 +1997,8 @@ pub mod pallet {
 						{
 							break;
 						}
-
-						// We should be able to insert it, but in case we cannot, simply ignore this reward.
-						if reward_map
-							.try_insert(
-								collator.clone(),
-								(collator_info.stake, stakers_only_rewards),
-							)
-							.is_ok()
-						{
-							stakers_rewards.saturating_accrue(stakers_only_rewards);
-						}
+						rewardable_collators.saturating_inc();
+						stakers_total_rewards.saturating_accrue(stakers_only_rewards);
 
 						// Increase the reward counter for this collator.
 						let session_ratio = FixedU128::saturating_from_rational(
@@ -2023,17 +2014,9 @@ pub mod pallet {
 				}
 			}
 
-			let rewardable_collators: u32 = reward_map.len() as u32;
-			PerSessionRewards::<T>::insert(
-				session,
-				SessionInfo {
-					rewards: stakers_rewards,
-					candidates: reward_map,
-					claimed_rewards: Zero::zero(),
-				},
-			);
-			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
+			// Start the process to automatically collect the rewards in on_idle.
 			LastRewardedKey::<T>::set((true, None));
+			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_total_rewards));
 			(rewardable_collators, total_rewards)
 		}
 
