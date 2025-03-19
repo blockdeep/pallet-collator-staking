@@ -478,7 +478,8 @@ pub mod pallet {
 	pub type PerSessionRewards<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, SessionIndex, SessionInfoOf<T>, OptionQuery>;
 
-	/// Percentage of rewards to be re-invested in collators.
+	/// AutoCompound storage keeps track of whether auto-compound rewards are enabled for an account
+	/// in a specific layer.
 	#[pallet::storage]
 	pub type AutoCompound<T: Config> = StorageDoubleMap<
 		_,
@@ -685,15 +686,14 @@ pub mod pallet {
 			let mut meter = WeightMeter::with_limit(remaining_weight);
 			meter.consume(T::DbWeight::get().reads_writes(1, 0));
 			match NextSystemOperation::<T>::get() {
+				// Step 1: Reward stakers with autocompound enabled.
 				Operation::RewardStakers { maybe_last_processed_account } => {
-					Self::do_reward_stakers(&mut meter, maybe_last_processed_account);
+					Self::do_reward_stakers(&mut meter, maybe_last_processed_account)
 				},
-				Operation::CommitAutocompound => {
-					Self::do_commit_autocompound(&mut meter);
-				},
-				Operation::Idle => {
-					// Nothing to do
-				},
+				// Step 2: move staging operations to the commit layer.
+				Operation::CommitAutocompound => Self::do_commit_autocompound(&mut meter),
+				// Nothing to do here.
+				Operation::Idle => {},
 			}
 			meter.consumed()
 		}
@@ -1249,7 +1249,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Claims all pending rewards for stakers and candidates.
+		/// Claims all pending rewards for a given staker.
 		///
 		/// Distributes rewards accumulated over previous sessions
 		/// and ensures that rewards are only claimable for sessions where the
@@ -1279,7 +1279,14 @@ pub mod pallet {
 			.into())
 		}
 
-		/// Claims pending rewards in the old reward system.
+		/// Claims all pending rewards for stakers and candidates.
+		///
+		/// Distributes rewards accumulated over previous sessions
+		/// and ensures that rewards are only claimable for sessions where the
+		/// `other` has participated. Rewards for the current session cannot be claimed.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::NoPendingClaim`: `other` has no rewards to claim.
 		#[pallet::call_index(21)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get())
 			.saturating_add(T::WeightInfo::claim_rewards_old(
@@ -1290,6 +1297,7 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			other: T::AccountId,
 		) -> DispatchResultWithPostInfo {
+			// We do not care about the sender.
 			ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
