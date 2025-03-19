@@ -335,6 +335,28 @@ pub mod pallet {
 		Commit,
 	}
 
+	/// The storage layers.
+	#[derive(
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
+		Default,
+	)]
+	pub enum Operation<AccountId> {
+		/// Nothing else to do.
+		#[default]
+		Idle,
+		/// Tracks the rewards to be delivered by the system.
+		RewardStakers { maybe_last_processed_account: Option<AccountId> },
+		/// Tracks the process of migration from the Staging to the Commit layers in Autocompounding.
+		CommitAutocompound,
+	}
+
 	/// Represents a bond release for a collator candidacy.
 	///
 	/// This struct encapsulates crucial information regarding the release of a bond tied to a
@@ -488,7 +510,7 @@ pub mod pallet {
 	/// - `bool`: Indicates if reward distribution was completed for the current session.
 	/// - `Option<T::AccountId>`: The account ID of the last rewarded key, if any.
 	#[pallet::storage]
-	pub type LastRewardedKey<T: Config> = StorageValue<_, (bool, Option<T::AccountId>), ValueQuery>;
+	pub type NextSystemOperation<T: Config> = StorageValue<_, Operation<T::AccountId>, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -662,43 +684,16 @@ pub mod pallet {
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut meter = WeightMeter::with_limit(remaining_weight);
 			meter.consume(T::DbWeight::get().reads_writes(1, 0));
-			let (should_collect, mut maybe_last_key) = LastRewardedKey::<T>::get();
-			if should_collect {
-				let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
-				let mut iter = if let Some(last_key) = &maybe_last_key {
-					let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
-					AutoCompound::<T>::iter_prefix_from(Layer::Commit, key)
-				} else {
-					AutoCompound::<T>::iter_prefix(Layer::Commit)
-				};
-
-				while meter.can_consume(worst_case_weight) {
-					if let Some((staker, enabled)) = iter.next() {
-						if enabled {
-							match Self::do_claim_rewards(&staker) {
-								Ok(explored_candidates) => {
-									meter
-										.consume(T::WeightInfo::claim_rewards(explored_candidates));
-								},
-								Err(e) => {
-									meter.consume(worst_case_weight);
-									log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
-								},
-							};
-						}
-						maybe_last_key = Some(staker);
-					} else {
-						// End of the iteration.
-						meter.consume(T::DbWeight::get().reads_writes(1, 1));
-						maybe_last_key = None;
-						break;
-					}
-				}
-				if let Some(last_key) = maybe_last_key {
-					LastRewardedKey::<T>::set((true, Some(last_key)));
-				} else {
-					LastRewardedKey::<T>::set((false, None));
-				}
+			match NextSystemOperation::<T>::get() {
+				Operation::RewardStakers { maybe_last_processed_account } => {
+					Self::do_reward_stakers(&mut meter, maybe_last_processed_account);
+				},
+				Operation::CommitAutocompound => {
+					Self::do_commit_autocompound(&mut meter);
+				},
+				Operation::Idle => {
+					// Nothing to do
+				},
 			}
 			meter.consumed()
 		}
@@ -1376,6 +1371,85 @@ pub mod pallet {
 			duplicates.len() != accounts.len()
 		}
 
+		/// Processes staking rewards for stakers who have enabled auto-compounding,
+		/// while respecting weight limits. It iterates through the stakers, claims rewards,
+		/// and tracks the last processed account for continuation in subsequent executions.
+		/// If all accounts are processed, it sets the next system operation to commit auto-compounding.
+		pub(crate) fn do_reward_stakers(
+			meter: &mut WeightMeter,
+			mut maybe_last_processed_account: Option<T::AccountId>,
+		) {
+			let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
+			let mut iter = if let Some(last_key) = &maybe_last_processed_account {
+				let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
+				AutoCompound::<T>::iter_prefix_from(Layer::Commit, key)
+			} else {
+				AutoCompound::<T>::iter_prefix(Layer::Commit)
+			};
+
+			while meter.can_consume(worst_case_weight) {
+				if let Some((staker, enabled)) = iter.next() {
+					if enabled {
+						match Self::do_claim_rewards(&staker) {
+							Ok(explored_candidates) => {
+								meter.consume(T::WeightInfo::claim_rewards(explored_candidates));
+							},
+							Err(e) => {
+								meter.consume(worst_case_weight);
+								log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
+							},
+						};
+					}
+					maybe_last_processed_account = Some(staker);
+				} else {
+					// End of the iteration.
+					meter.consume(T::DbWeight::get().reads_writes(1, 1));
+					maybe_last_processed_account = None;
+					break;
+				}
+			}
+			if let Some(last_key) = maybe_last_processed_account {
+				NextSystemOperation::<T>::set(Operation::RewardStakers {
+					maybe_last_processed_account: Some(last_key),
+				});
+			} else {
+				NextSystemOperation::<T>::set(Operation::CommitAutocompound);
+			}
+		}
+
+		/// Commits the auto-compounding options for stakers.
+		///
+		/// This function processes a batch of stakers' auto-compounding preferences
+		/// from the staging layer and commits them to the active layer while consuming
+		/// weight for each processed item. If the iteration completes, it sets the next
+		/// system operation to `Idle`.
+		pub(crate) fn do_commit_autocompound(meter: &mut WeightMeter) {
+			let mut iter = AutoCompound::<T>::drain_prefix(Layer::Staging);
+			let worst_case_weight = T::DbWeight::get().reads_writes(1, 2);
+			while meter.can_consume(worst_case_weight) {
+				meter.consume(worst_case_weight);
+				if let Some((staker, enabled)) = iter.next() {
+					if enabled {
+						AutoCompound::<T>::set(Layer::Commit, &staker, true);
+					} else {
+						AutoCompound::<T>::remove(Layer::Commit, &staker);
+					}
+				} else {
+					NextSystemOperation::<T>::set(Operation::Idle);
+					break;
+				}
+			}
+		}
+
+		/// Claims staking rewards for the provided account.
+		///
+		/// - Iterates over all candidates the account has staked and calculates rewards.
+		/// - Updates reward-related states such as `checkpoint` and `maybe_last_reward_session`.
+		/// - Transfers rewards to the account. If auto-compounding is enabled, locks and stakes
+		///   the rewards with the respective candidates.
+		///
+		/// Returns:
+		/// - The number of candidates whose rewards were claimed.
 		pub(crate) fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let mut candidate_rewards = vec![];
@@ -1479,7 +1553,7 @@ pub mod pallet {
 		}
 
 		/// Computes pending rewards for a given user.
-		/// This function is intended to be used in the runtime implementation.
+		/// This function is intended to be used in the runtime API implementation.
 		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
@@ -1492,6 +1566,9 @@ pub mod pallet {
 			total_rewards
 		}
 
+		/// Calculates per-session rewards for a given account.
+		///
+		/// This method is deprecated and will be removed.
 		#[deprecated]
 		pub(crate) fn calculate_unclaimed_rewards_old(who: &T::AccountId) -> BalanceOf<T> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
@@ -1977,8 +2054,7 @@ pub mod pallet {
 
 		/// Checks whether rewards are currently being delivered by the system or not.
 		fn is_delivering_rewards() -> bool {
-			let (delivering, _) = LastRewardedKey::<T>::get();
-			delivering
+			matches!(NextSystemOperation::<T>::get(), Operation::RewardStakers { .. })
 		}
 
 		/// Rewards all collators for a given session.
@@ -2054,7 +2130,9 @@ pub mod pallet {
 			}
 
 			// Start the process to automatically collect the rewards in on_idle.
-			LastRewardedKey::<T>::set((true, None));
+			NextSystemOperation::<T>::set(Operation::RewardStakers {
+				maybe_last_processed_account: None,
+			});
 			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_total_rewards));
 			(rewardable_collators, total_rewards)
 		}
