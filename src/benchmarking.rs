@@ -23,11 +23,9 @@ use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
 use frame_support::traits::fungible::{Inspect, Mutate};
 use frame_support::traits::{EnsureOrigin, Get};
-use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
-use sp_runtime::traits::Zero;
 use sp_runtime::{FixedPointNumber, FixedU128, Percent, Saturating};
 use sp_std::prelude::*;
 
@@ -177,62 +175,6 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	let total_rewards: BalanceOf<T> = amount * c.into();
 	ClaimableRewards::<T>::set(total_rewards);
 	CurrentSession::<T>::set(1);
-	T::Currency::mint_into(
-		&CollatorStaking::<T>::account_id(),
-		T::Currency::minimum_balance() + total_rewards,
-	)
-	.unwrap();
-	(staker, total_rewards, candidates)
-}
-
-fn prepare_rewards_old<T: Config + pallet_session::Config>(
-	c: u32,
-	r: u32,
-) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
-	let amount = T::Currency::minimum_balance();
-	MinStake::<T>::set(amount);
-	MinCandidacyBond::<T>::set(amount);
-
-	let staker = create_funded_user::<T>("staker", 0, 10000000);
-	CollatorStaking::<T>::lock(
-		RawOrigin::Signed(staker.clone()).into(),
-		CollatorStaking::<T>::get_free_balance(&staker),
-	)
-	.unwrap();
-
-	CollatorStaking::<T>::set_autocompound(RawOrigin::Signed(staker.clone()).into(), true).unwrap();
-
-	let mut reward_map = BoundedBTreeMap::new();
-	let total_candidates = T::MaxCandidates::get();
-	let candidates = register_validators::<T>(total_candidates);
-	register_candidates::<T>(total_candidates);
-	for (index, candidate) in candidates.iter().enumerate() {
-		if index < (c as usize) {
-			CollatorStaking::<T>::stake(
-				RawOrigin::Signed(staker.clone()).into(),
-				vec![StakeTarget { candidate: candidate.clone(), stake: amount * r.into() }]
-					.try_into()
-					.unwrap(),
-			)
-			.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
-		}
-		reward_map.try_insert(candidate.clone(), (amount, amount)).unwrap();
-	}
-
-	for session in 1..(r + 1) {
-		PerSessionRewards::<T>::insert(
-			session,
-			SessionInfo {
-				candidates: reward_map.clone(),
-				rewards: amount * c.into(),
-				claimed_rewards: Zero::zero(),
-			},
-		);
-	}
-
-	let total_rewards = amount * c.into() * r.into();
-	ClaimableRewards::<T>::set(total_rewards);
-	CurrentSession::<T>::set(r + 1);
 	T::Currency::mint_into(
 		&CollatorStaking::<T>::account_id(),
 		T::Currency::minimum_balance() + total_rewards,
@@ -614,35 +556,6 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()));
 
 		assert_eq!(0, ReleaseQueues::<T>::get(&caller).len());
-	}
-
-	#[benchmark]
-	fn claim_rewards_old(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxRewardSessions::get() }>,
-	) {
-		let (staker, total_rewards, candidates) = prepare_rewards_old::<T>(c, r);
-
-		#[block]
-		{
-			CollatorStaking::<T>::do_claim_rewards_old(&staker)
-				.expect("Should be able to claim old rewards");
-		}
-
-		assert_has_event::<T>(
-			Event::<T>::StakingRewardReceived { account: staker.clone(), amount: total_rewards }
-				.into(),
-		);
-		for candidate in &candidates[..(c as usize)] {
-			assert_has_event::<T>(
-				Event::<T>::StakeAdded {
-					account: staker.clone(),
-					candidate: candidate.clone(),
-					amount: total_rewards / c.into(),
-				}
-				.into(),
-			);
-		}
 	}
 
 	#[benchmark]

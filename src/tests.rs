@@ -418,12 +418,12 @@ mod add_invulnerable {
 
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &4), 10);
 
@@ -557,7 +557,7 @@ mod set_min_candidacy_bond {
 			assert_eq!(candidate_list(), vec![(3, candidate_3.clone())]);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			// can decrease with one candidate
@@ -764,7 +764,7 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			// but no more
@@ -816,12 +816,12 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance(&4), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			register_candidates(3..=4);
@@ -829,12 +829,12 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &4), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			assert_eq!(Candidates::<Test>::count(), 2);
@@ -856,13 +856,13 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
@@ -880,7 +880,7 @@ mod register_as_candidate {
 			));
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 60, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 60, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 60, stakers: 1 }));
 
@@ -893,7 +893,7 @@ mod register_as_candidate {
 			// the stake remains the same
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 60, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 60, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 0);
 
@@ -904,7 +904,7 @@ mod register_as_candidate {
 			));
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 60, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 60, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 60, stakers: 1 }));
@@ -926,13 +926,13 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
@@ -972,13 +972,13 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
@@ -1010,14 +1010,14 @@ mod register_as_candidate {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			register_candidates(3..=3);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
@@ -1122,7 +1122,7 @@ mod leave_intent {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			// register too so can leave above min candidates
@@ -1130,7 +1130,7 @@ mod leave_intent {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &5), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(5, 5),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
 			// cannot leave if not candidate.
@@ -1158,7 +1158,7 @@ mod leave_intent {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Releasing.into(), &3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(LastAuthoredBlock::<Test>::get(3), 0);
 			assert_eq!(
@@ -1317,7 +1317,7 @@ mod stake {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 2, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 2, checkpoint: FixedU128::zero() }
 			);
 
 			// After adding MinStake it should work
@@ -1328,7 +1328,7 @@ mod stake {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &4), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 3, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 3, checkpoint: FixedU128::zero() }
 			);
 		});
 	}
@@ -1347,7 +1347,7 @@ mod stake {
 
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				UserStake::<Test>::get(3),
@@ -1383,11 +1383,11 @@ mod stake {
 			}));
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 20, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 20, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::iter_values().next().unwrap().stake, 20);
 			assert_eq!(
@@ -1413,11 +1413,11 @@ mod stake {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				UserStake::<Test>::get(3),
@@ -1450,11 +1450,11 @@ mod stake {
 			}));
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 3),
-				CandidateStakeInfo { stake: 20, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 20, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 20, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 20, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				UserStake::<Test>::get(3),
@@ -1479,11 +1479,11 @@ mod stake {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				UserStake::<Test>::get(3),
@@ -2153,11 +2153,11 @@ mod unstake_from {
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 5),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 5),
-				CandidateStakeInfo { stake: 10, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 10, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
 			assert_eq!(ReleaseQueues::<Test>::get(5), vec![]);
@@ -2257,11 +2257,11 @@ mod unstake_from {
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 3),
-				CandidateStakeInfo { stake: 10, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 10, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &3), 90);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
@@ -2306,11 +2306,11 @@ mod unstake_from {
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 5),
-				CandidateStakeInfo { stake: 20, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 20, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 5),
-				CandidateStakeInfo { stake: 10, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 10, checkpoint: FixedU128::zero() }
 			);
 
 			// unstake from ex-candidate.
@@ -2528,11 +2528,11 @@ mod unstake_all {
 			assert_eq!(ReleaseQueues::<Test>::get(5), vec![]);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 5),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 5),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(
 				UserStake::<Test>::get(5),
@@ -3144,17 +3144,17 @@ mod general_tests {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance(&4), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(5, 5),
-				CandidateStakeInfo { stake: 0, session: 0, checkpoint: FixedU128::zero() }
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=5);
 			lock_for_staking(3..=5);
