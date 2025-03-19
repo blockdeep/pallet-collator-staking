@@ -1357,6 +1357,7 @@ pub mod pallet {
 		///   - The unclaimable rewards. These are the rewards that were generated for stakers
 		///     that joined during the session rewards are being distributed for. Stakers do not
 		///     receive rewards for the session they joined in.
+		#[deprecated]
 		fn calculate_rewards_for_session(
 			index: SessionIndex,
 			session_rewards: &SessionInfoOf<T>,
@@ -2497,6 +2498,7 @@ sp_api::decl_runtime_apis! {
 	/// - The extra rewards pot account.
 	/// - Accumulated rewards for an account.
 	/// - Whether a given account has rewards pending to be claimed or not.
+	/// - The current candidates and their corresponding stake.
 	///
 	/// Sample implementation:
 	/// ```ignore

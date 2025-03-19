@@ -110,6 +110,13 @@ mod extra {
 	fn staking_pot_should_work() {
 		assert_eq!(StakingPotAccountId::<Test>::get(), CollatorStaking::account_id());
 	}
+
+	#[test]
+	fn try_state_with_initial_setup_should_work() {
+		new_test_ext().execute_with(|| {
+			assert_ok!(CollatorStaking::do_try_state());
+		});
+	}
 }
 
 mod set_invulnerables {
@@ -1894,6 +1901,80 @@ mod stake {
 			);
 		});
 	}
+
+	#[test]
+	fn cannot_claim_if_on_same_session() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+			let pre_stake_session = CurrentSession::<Test>::get();
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Attempt claim in same session
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
+			assert_noop!(
+				CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)),
+				Error::<Test>::NoPendingClaim
+			);
+
+			// Time travel to next session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
+		});
+	}
+
+	#[test]
+	fn cannot_claim_if_on_same_session_for_other() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+			let pre_stake_session = CurrentSession::<Test>::get();
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Attempt claim in same session
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
+			assert_noop!(
+				CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(4), 5),
+				Error::<Test>::NoPendingClaim
+			);
+
+			// Time travel to next session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
+			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(4), 5));
+		});
+	}
 }
 
 mod edge_case_tests {
@@ -1997,47 +2078,6 @@ mod edge_case_tests {
 					maybe_last_reward_session: Some(0),
 				}
 			);
-		});
-	}
-}
-
-mod claim_rewards {
-	use super::*;
-
-	#[test]
-	fn cannot_claim_if_on_same_session() {
-		new_test_ext().execute_with(|| {
-			initialize_to_block(1);
-
-			register_candidates(3..=4);
-			lock_for_staking(5..=5);
-			assert_eq!(
-				UserStake::<Test>::get(5),
-				UserStakeInfo {
-					stake: 0,
-					candidates: bbtreeset![],
-					maybe_last_unstake: None,
-					maybe_last_reward_session: None,
-				}
-			);
-			let pre_stake_session = CurrentSession::<Test>::get();
-
-			assert_ok!(CollatorStaking::stake(
-				RuntimeOrigin::signed(5),
-				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
-			));
-
-			// Attempt claim in same session
-			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session);
-			assert_noop!(
-				CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)),
-				Error::<Test>::NoPendingClaim
-			);
-
-			// Time travel to next session
-			initialize_to_block(10);
-			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
-			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
 		});
 	}
 }
@@ -2612,6 +2652,18 @@ mod set_autocompound {
 
 mod lock_unlock_and_release {
 	use super::*;
+
+	#[test]
+	fn lock_zero_should_fail() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			assert_noop!(
+				CollatorStaking::lock(RuntimeOrigin::signed(5), 0),
+				Error::<Test>::InvalidFundingAmount
+			);
+		});
+	}
 
 	#[test]
 	fn lock() {
