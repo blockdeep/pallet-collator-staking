@@ -96,6 +96,7 @@ pub mod pallet {
 	>;
 	pub type CandidateStakeInfoOf<T> = CandidateStakeInfo<BalanceOf<T>>;
 	pub type CandidacyBondReleaseOf<T> = CandidacyBondRelease<BalanceOf<T>, BlockNumberFor<T>>;
+	pub type OperationFor<T> = Operation<<T as frame_system::Config>::AccountId>;
 
 	/// A convertor from collators id. Since this pallet does not have stash/controller, this is
 	/// just identity.
@@ -511,7 +512,7 @@ pub mod pallet {
 	/// - `bool`: Indicates if reward distribution was completed for the current session.
 	/// - `Option<T::AccountId>`: The account ID of the last rewarded key, if any.
 	#[pallet::storage]
-	pub type NextSystemOperation<T: Config> = StorageValue<_, Operation<T::AccountId>, ValueQuery>;
+	pub type NextSystemOperation<T: Config> = StorageValue<_, OperationFor<T>, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -684,16 +685,28 @@ pub mod pallet {
 
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut meter = WeightMeter::with_limit(remaining_weight);
-			meter.consume(T::DbWeight::get().reads_writes(1, 0));
-			match NextSystemOperation::<T>::get() {
-				// Step 1: Reward stakers with autocompound enabled.
-				Operation::RewardStakers { maybe_last_processed_account } => {
-					Self::do_reward_stakers(&mut meter, maybe_last_processed_account)
-				},
-				// Step 2: move staging operations to the commit layer.
-				Operation::CommitAutocompound => Self::do_commit_autocompound(&mut meter),
-				// Nothing to do here.
-				Operation::Idle => {},
+			if let Err(_) = meter.try_consume(T::DbWeight::get().reads_writes(1, 0)) {
+				return remaining_weight;
+			}
+			let mut next_operation = NextSystemOperation::<T>::get();
+			loop {
+				next_operation = match next_operation {
+					// Step 1: Reward stakers with autocompound enabled.
+					Operation::RewardStakers { maybe_last_processed_account } => {
+						match Self::do_reward_stakers(&mut meter, maybe_last_processed_account) {
+							Ok(op) => op,
+							Err(_) => break,
+						}
+					},
+					// Step 2: move staging operations to the commit layer.
+					Operation::CommitAutocompound => match Self::do_commit_autocompound(&mut meter)
+					{
+						Ok(op) => op,
+						Err(_) => break,
+					},
+					// Nothing to do here.
+					Operation::Idle => break,
+				}
 			}
 			meter.consumed()
 		}
@@ -1386,7 +1399,14 @@ pub mod pallet {
 		pub(crate) fn do_reward_stakers(
 			meter: &mut WeightMeter,
 			mut maybe_last_processed_account: Option<T::AccountId>,
-		) {
+		) -> Result<OperationFor<T>, ()> {
+			// This is the weight of the final operation in this function where we set
+			// `NextSystemOperation`.
+			let write = T::DbWeight::get().reads_writes(0, 1);
+			if !meter.can_consume(write) {
+				return Err(());
+			}
+			meter.consume(write);
 			let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
 			let mut iter = if let Some(last_key) = &maybe_last_processed_account {
 				let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
@@ -1395,8 +1415,10 @@ pub mod pallet {
 				AutoCompound::<T>::iter_prefix(Layer::Commit)
 			};
 
-			while meter.can_consume(worst_case_weight) {
+			let read = T::DbWeight::get().reads_writes(1, 0);
+			while meter.can_consume(worst_case_weight.saturating_add(read)) {
 				if let Some((staker, enabled)) = iter.next() {
+					meter.consume(read);
 					if enabled {
 						match Self::do_claim_rewards(&staker) {
 							Ok(explored_candidates) => {
@@ -1417,11 +1439,18 @@ pub mod pallet {
 				}
 			}
 			if let Some(last_key) = maybe_last_processed_account {
+				// In this branch we did not manage to finish traversing the whole map, so we save
+				// the progress and return an error.
 				NextSystemOperation::<T>::set(Operation::RewardStakers {
 					maybe_last_processed_account: Some(last_key),
 				});
+				Err(())
 			} else {
-				NextSystemOperation::<T>::set(Operation::CommitAutocompound);
+				// Managed to finish iterating the map, so we save the progress and continue with
+				// the next step.
+				let op = Operation::CommitAutocompound;
+				NextSystemOperation::<T>::set(op.clone());
+				Ok(op)
 			}
 		}
 
@@ -1431,7 +1460,9 @@ pub mod pallet {
 		/// from the staging layer and commits them to the active layer while consuming
 		/// weight for each processed item. If the iteration completes, it sets the next
 		/// system operation to `Idle`.
-		pub(crate) fn do_commit_autocompound(meter: &mut WeightMeter) {
+		pub(crate) fn do_commit_autocompound(
+			meter: &mut WeightMeter,
+		) -> Result<OperationFor<T>, ()> {
 			let mut iter = AutoCompound::<T>::drain_prefix(Layer::Staging);
 			let worst_case_weight = T::DbWeight::get().reads_writes(1, 2);
 			while meter.can_consume(worst_case_weight) {
@@ -1443,10 +1474,12 @@ pub mod pallet {
 						AutoCompound::<T>::remove(Layer::Commit, &staker);
 					}
 				} else {
-					NextSystemOperation::<T>::set(Operation::Idle);
-					break;
+					let op = Operation::Idle;
+					NextSystemOperation::<T>::set(op.clone());
+					return Ok(op);
 				}
 			}
+			Err(())
 		}
 
 		/// Claims staking rewards for the provided account.
