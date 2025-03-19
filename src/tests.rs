@@ -18,7 +18,7 @@ use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
-	Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables, LastAuthoredBlock,
+	Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables, LastAuthoredBlock, Layer,
 	MinCandidacyBond, MinStake, ProducedBlocks, ReleaseQueues, ReleaseRequest,
 	SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks, UserStake,
 	UserStakeInfo,
@@ -2545,41 +2545,29 @@ mod unstake_all {
 	}
 }
 
-mod set_autocompound_percentage {
+mod set_autocompound {
 	use super::*;
 
 	#[test]
-	fn set_autocompound_percentage() {
+	fn set_autocompound() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
 			assert_noop!(
-				CollatorStaking::set_autocompound_percentage(
-					RuntimeOrigin::signed(5),
-					Percent::from_parts(50)
-				),
+				CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true),
 				Error::<Test>::InsufficientStake
 			);
 
 			lock_for_staking(5..=5);
-			assert_ok!(CollatorStaking::set_autocompound_percentage(
-				RuntimeOrigin::signed(5),
-				Percent::from_parts(50)
-			));
-			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(50));
-			System::assert_last_event(RuntimeEvent::CollatorStaking(
-				Event::AutoCompoundPercentageSet {
-					account: 5,
-					percentage: Percent::from_parts(50),
-				},
-			));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true));
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundEnabled {
+				account: 5,
+			}));
 			// Set it back to zero.
-			assert_ok!(CollatorStaking::set_autocompound_percentage(
-				RuntimeOrigin::signed(5),
-				Percent::from_parts(0)
-			));
-			assert_eq!(AutoCompound::<Test>::get(5), Percent::from_parts(0));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
 			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
 				account: 5,
 			}));
@@ -2587,7 +2575,7 @@ mod set_autocompound_percentage {
 	}
 
 	#[test]
-	fn must_claim_before_set_autocompound_percentage() {
+	fn must_claim_before_set_autocompound() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
@@ -2611,19 +2599,13 @@ mod set_autocompound_percentage {
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_noop!(
-				CollatorStaking::set_autocompound_percentage(
-					RuntimeOrigin::signed(5),
-					Percent::from_parts(50)
-				),
+				CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true),
 				Error::<Test>::PreviousRewardsNotClaimed
 			);
 
 			// Claim and retry operation
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
-			assert_ok!(CollatorStaking::set_autocompound_percentage(
-				RuntimeOrigin::signed(5),
-				Percent::from_parts(50)
-			));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true));
 		});
 	}
 }
@@ -2672,10 +2654,7 @@ mod lock_unlock_and_release {
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
 			// We have now enough balance to be able to enable autocompounding
-			assert_ok!(CollatorStaking::set_autocompound_percentage(
-				RuntimeOrigin::signed(5),
-				Percent::from_parts(50),
-			));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true,));
 
 			// we cannot unlock more funds than what we currently have
 			assert_noop!(
@@ -3653,8 +3632,8 @@ mod collator_rewards {
 				]
 			);
 
-			// Staker 3 will autocompound 40% of its earnings
-			AutoCompound::<Test>::insert(3, Percent::from_parts(40));
+			// Staker 3 will autocompound all of its earnings
+			AutoCompound::<Test>::insert(Layer::Commit, 3, true);
 			ExtraReward::<Test>::set(1);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
@@ -3757,17 +3736,17 @@ mod collator_rewards {
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
 				account: 3,
 				candidate: 4,
-				amount: 6,
+				amount: 15,
 			}));
-			// Staker 3 autocompounded 6 in the previous round.
-			assert_eq!(CollatorStaking::get_staked_balance(&3), 96);
+			// Staker 3 autocompounded 15 in the previous round.
+			assert_eq!(CollatorStaking::get_staked_balance(&3), 105);
 
 			// Check after adding the stake via autocompound the candidate list is sorted.
 			assert_eq!(
 				candidate_list(),
 				vec![
 					(3, CandidateInfo { stake: 91, stakers: 1 }),
-					(4, CandidateInfo { stake: 96, stakers: 2 }),
+					(4, CandidateInfo { stake: 105, stakers: 2 }),
 				]
 			);
 		});

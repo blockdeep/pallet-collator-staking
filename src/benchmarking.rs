@@ -153,11 +153,7 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	)
 	.unwrap();
 
-	CollatorStaking::<T>::set_autocompound_percentage(
-		RawOrigin::Signed(staker.clone()).into(),
-		Percent::from_parts(100),
-	)
-	.unwrap();
+	CollatorStaking::<T>::set_autocompound(RawOrigin::Signed(staker.clone()).into(), true).unwrap();
 
 	let total_candidates = T::MaxCandidates::get();
 	let candidates = register_validators::<T>(total_candidates);
@@ -204,11 +200,7 @@ fn prepare_rewards_old<T: Config + pallet_session::Config>(
 	)
 	.unwrap();
 
-	CollatorStaking::<T>::set_autocompound_percentage(
-		RawOrigin::Signed(staker.clone()).into(),
-		Percent::from_parts(100),
-	)
-	.unwrap();
+	CollatorStaking::<T>::set_autocompound(RawOrigin::Signed(staker.clone()).into(), true).unwrap();
 
 	let mut reward_map = BoundedBTreeMap::new();
 	let total_candidates = T::MaxCandidates::get();
@@ -678,7 +670,7 @@ mod benchmarks {
 
 	// Worst case is if stake exists
 	#[benchmark]
-	fn set_autocompound_percentage() {
+	fn set_autocompound() {
 		let caller = prepare_staker::<T>();
 		let amount = T::AutoCompoundingThreshold::get();
 		let candidate = register_single_validator::<T>(0);
@@ -690,12 +682,10 @@ mod benchmarks {
 		)
 		.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
 
-		let percent = Percent::from_parts(50);
-
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), percent);
+		_(RawOrigin::Signed(caller.clone()), true);
 
-		assert_eq!(AutoCompound::<T>::get(&caller), percent);
+		assert_eq!(AutoCompound::<T>::get(Layer::Commit, &caller), true);
 	}
 
 	#[benchmark]

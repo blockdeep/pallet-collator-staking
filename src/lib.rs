@@ -324,6 +324,17 @@ pub mod pallet {
 		Replaced,
 	}
 
+	/// The storage layers.
+	#[derive(
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+	)]
+	pub enum Layer {
+		/// Changes yet to be commited.
+		Staging,
+		/// Changes already being applied.
+		Commit,
+	}
+
 	/// Represents a bond release for a collator candidacy.
 	///
 	/// This struct encapsulates crucial information regarding the release of a bond tied to a
@@ -447,8 +458,15 @@ pub mod pallet {
 
 	/// Percentage of rewards to be re-invested in collators.
 	#[pallet::storage]
-	pub type AutoCompound<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
+	pub type AutoCompound<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		Layer,
+		Blake2_128Concat,
+		T::AccountId,
+		bool,
+		ValueQuery,
+	>;
 
 	/// Time (in blocks) to release an ex-candidate's locked candidacy bond.
 	/// If a candidate leaves the candidacy before its bond is released, the waiting period
@@ -544,8 +562,8 @@ pub mod pallet {
 		StakeRemoved { account: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
 		StakingRewardReceived { account: T::AccountId, amount: BalanceOf<T> },
-		/// Autocompound percentage was set.
-		AutoCompoundPercentageSet { account: T::AccountId, percentage: Percent },
+		/// Autocompounding was enabled.
+		AutoCompoundEnabled { account: T::AccountId },
 		/// Autocompounding was disabled.
 		AutoCompoundDisabled { account: T::AccountId },
 		/// Collator reward percentage was set.
@@ -648,22 +666,26 @@ pub mod pallet {
 			if should_collect {
 				let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
 				let mut iter = if let Some(last_key) = &maybe_last_key {
-					AutoCompound::<T>::iter_keys_from_key(last_key)
+					let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
+					AutoCompound::<T>::iter_prefix_from(Layer::Commit, key)
 				} else {
-					AutoCompound::<T>::iter_keys()
+					AutoCompound::<T>::iter_prefix(Layer::Commit)
 				};
 
 				while meter.can_consume(worst_case_weight) {
-					if let Some(staker) = iter.next() {
-						match Self::do_claim_rewards(&staker) {
-							Ok(explored_candidates) => {
-								meter.consume(T::WeightInfo::claim_rewards(explored_candidates));
-							},
-							Err(e) => {
-								meter.consume(worst_case_weight);
-								log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
-							},
-						};
+					if let Some((staker, enabled)) = iter.next() {
+						if enabled {
+							match Self::do_claim_rewards(&staker) {
+								Ok(explored_candidates) => {
+									meter
+										.consume(T::WeightInfo::claim_rewards(explored_candidates));
+								},
+								Err(e) => {
+									meter.consume(worst_case_weight);
+									log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
+								},
+							};
+						}
 						maybe_last_key = Some(staker);
 					} else {
 						// End of the iteration.
@@ -1024,28 +1046,29 @@ pub mod pallet {
 		/// This operation will also claim all pending rewards.
 		/// Rewards will be autocompounded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
-		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
-		pub fn set_autocompound_percentage(
-			origin: OriginFor<T>,
-			percent: Percent,
-		) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::set_autocompound())]
+		pub fn set_autocompound(origin: OriginFor<T>, enable: bool) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			ensure!(Self::staker_has_claimed(&who), Error::<T>::PreviousRewardsNotClaimed);
 
-			if percent.is_zero() {
-				AutoCompound::<T>::remove(&who);
-				Self::deposit_event(Event::AutoCompoundDisabled { account: who });
+			let is_delivering_rewards = Self::is_delivering_rewards();
+			let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
+			if !enable {
+				AutoCompound::<T>::remove(layer, &who);
+				Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
 			} else {
 				ensure!(
 					Self::get_staked_balance(&who) >= T::AutoCompoundingThreshold::get(),
 					Error::<T>::InsufficientStake
 				);
-				AutoCompound::<T>::insert(&who, percent);
-				Self::deposit_event(Event::AutoCompoundPercentageSet {
-					account: who,
-					percentage: percent,
-				});
+				AutoCompound::<T>::insert(layer, &who, true);
+				Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
+			}
+
+			// If we could write directly into the commit layer then we can safely remove the staging one.
+			if !is_delivering_rewards {
+				AutoCompound::<T>::remove(Layer::Staging, &who);
 			}
 
 			Ok(())
@@ -1374,14 +1397,12 @@ pub mod pallet {
 					ClaimableRewards::<T>::mutate(|claimable_rewards| {
 						claimable_rewards.saturating_reduce(total_rewards);
 					});
-					let autocompound_percentage = AutoCompound::<T>::get(who);
-					let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
-					if !autocompound_amount.is_zero() {
-						Self::do_lock(who, autocompound_amount)?;
+					let autocompound = AutoCompound::<T>::get(Layer::Commit, who);
+					if autocompound {
+						Self::do_lock(who, total_rewards)?;
 						for (candidate, rewards) in &candidate_rewards {
-							let amount = autocompound_percentage.mul_floor(*rewards);
-							if !amount.is_zero() {
-								Self::do_stake(who, candidate, amount)?;
+							if !rewards.is_zero() {
+								Self::do_stake(who, candidate, *rewards)?;
 							}
 						}
 					}
@@ -1442,14 +1463,12 @@ pub mod pallet {
 							total_rewards.saturating_add(total_unclaimable_rewards),
 						);
 					});
-					let autocompound_percentage = AutoCompound::<T>::get(who);
-					let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
-					if !autocompound_amount.is_zero() {
-						Self::do_lock(who, autocompound_amount)?;
+					let autocompound = AutoCompound::<T>::get(Layer::Commit, who);
+					if autocompound {
+						Self::do_lock(who, total_rewards)?;
 						for (candidate, (_, rewards)) in candidate_rewards.iter() {
-							let amount = autocompound_percentage.mul_floor(*rewards);
-							if !amount.is_zero() {
-								Self::do_stake(who, candidate, amount)?;
+							if !rewards.is_zero() {
+								Self::do_stake(who, candidate, *rewards)?;
 							}
 						}
 					}
@@ -1758,14 +1777,12 @@ pub mod pallet {
 		/// Disable autocompounding if staked balance dropped below the threshold.
 		fn adjust_autocompound_percentage(staker: &T::AccountId) {
 			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
-				AutoCompound::<T>::mutate(staker, |percentage| {
-					if !percentage.is_zero() {
-						*percentage = Percent::from_parts(0);
-						Self::deposit_event(Event::AutoCompoundDisabled {
-							account: staker.clone(),
-						});
-					}
-				});
+				let was_autocompounding = AutoCompound::<T>::get(Layer::Commit, staker);
+				AutoCompound::<T>::remove(Layer::Staging, staker);
+				AutoCompound::<T>::remove(Layer::Commit, staker);
+				if was_autocompounding {
+					Self::deposit_event(Event::AutoCompoundDisabled { account: staker.clone() });
+				}
 			}
 		}
 
@@ -1956,6 +1973,12 @@ pub mod pallet {
 				// is not ready to be claimed yet.
 				Ok(())
 			})
+		}
+
+		/// Checks whether rewards are currently being delivered by the system or not.
+		fn is_delivering_rewards() -> bool {
+			let (delivering, _) = LastRewardedKey::<T>::get();
+			delivering
 		}
 
 		/// Rewards all collators for a given session.

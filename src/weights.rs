@@ -69,7 +69,7 @@ pub trait WeightInfo {
 	fn release(c: u32, ) -> Weight;
 	fn claim_rewards(c: u32, ) -> Weight;
 	fn claim_rewards_old(c: u32, r: u32, ) -> Weight;
-	fn set_autocompound_percentage() -> Weight;
+	fn set_autocompound() -> Weight;
 	fn set_collator_reward_percentage() -> Weight;
 	fn set_extra_reward() -> Weight;
 	fn set_minimum_stake() -> Weight;
@@ -455,7 +455,7 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 	/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `CollatorSelection::AutoCompound` (r:0 w:1)
 	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
-	fn set_autocompound_percentage() -> Weight {
+	fn set_autocompound() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `405`
 		//  Estimated: `3623`
@@ -987,7 +987,7 @@ impl WeightInfo for () {
 	/// Proof: `CollatorSelection::CurrentSession` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `CollatorSelection::AutoCompound` (r:0 w:1)
 	/// Proof: `CollatorSelection::AutoCompound` (`max_values`: None, `max_size`: Some(37), added: 2512, mode: `MaxEncodedLen`)
-	fn set_autocompound_percentage() -> Weight {
+	fn set_autocompound() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `405`
 		//  Estimated: `3623`
