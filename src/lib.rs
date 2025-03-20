@@ -1945,9 +1945,10 @@ pub mod pallet {
 			let mut stakers_total_rewards: BalanceOf<T> = Zero::zero();
 			let mut rewardable_collators: u32 = Zero::zero();
 			let (_, rewardable_blocks) = TotalBlocks::<T>::get();
+			let produced_blocks: Vec<_> = ProducedBlocks::<T>::drain().collect();
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
-				for (collator, blocks) in ProducedBlocks::<T>::drain() {
+				for (collator, blocks) in produced_blocks {
 					// Get the collator info of a candidate, in the case that the collator was removed from the
 					// candidate list during the session, the collator and its stakers must still be rewarded
 					// for the produced blocks in the session so the info can be obtained from SessionRemovedCandidates.
@@ -2002,13 +2003,14 @@ pub mod pallet {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}
 				}
+
+				// Start the process to automatically collect the rewards in on_idle.
+				NextSystemOperation::<T>::set(Operation::RewardStakers {
+					maybe_last_processed_account: None,
+				});
+				ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_total_rewards));
 			}
 
-			// Start the process to automatically collect the rewards in on_idle.
-			NextSystemOperation::<T>::set(Operation::RewardStakers {
-				maybe_last_processed_account: None,
-			});
-			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_total_rewards));
 			(rewardable_collators, total_rewards)
 		}
 
