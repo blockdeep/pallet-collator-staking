@@ -362,7 +362,7 @@ mod add_invulnerable {
 			for ii in 3..=21 {
 				// only keys were registered in mock for 1 to 5
 				if ii > 5 {
-					Balances::mint_into(&ii, 100).unwrap();
+					assert_ok!(Balances::mint_into(&ii, 100));
 					let key = MockSessionKeys { aura: UintAuthorityId(ii) };
 					Session::set_keys(RuntimeOrigin::signed(ii), key, Vec::new()).unwrap();
 				}
@@ -3331,8 +3331,10 @@ mod collator_rewards {
 			));
 			assert_eq!(ExtraReward::<Test>::get(), 0);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
-			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-				.unwrap();
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
@@ -3691,8 +3693,10 @@ mod collator_rewards {
 			AutoCompound::<Test>::insert(Layer::Commit, 3, true);
 			ExtraReward::<Test>::set(1);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
-			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-				.unwrap();
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
 			fund_account(CollatorStaking::extra_reward_account_id());
 
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
@@ -3837,6 +3841,62 @@ mod collator_rewards {
 				receiver: Some(40),
 			}));
 			assert_eq!(ExtraReward::<Test>::get(), 0);
+		});
+	}
+
+	#[test]
+	fn claim_rewards_other_should_work() {
+		new_test_ext().execute_with(|| {
+			// Starting at session 1 because there are no rewards for session 0.
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(4..=4);
+			lock_for_staking(3..=3);
+
+			// Staker 3 stakes on candidate 4
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+			));
+
+			// Check the collator counter and staker's checkpoint. Both should be zero, as no
+			// rewards were distributed.
+			assert_eq!(Counters::<Test>::get(&3), FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(&3, &4).checkpoint, FixedU128::zero());
+
+			// Skip session 0, as there are no rewards for this session.
+			initialize_to_block(10);
+
+			// Generate 100 as rewards on the pot generated during session 1.
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 10
+			));
+
+			// Move to session 2.
+			initialize_to_block(20);
+
+			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
+			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
+			// between the rewards obtained and the total stake deposited in it.
+			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
+
+			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+
+			// Now a random user claims the rewards on behalf of the staker.
+			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(1), 3));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 3,
+				amount: 8,
+			}));
+
+			// And the checkpoint should be updated to the candidate's current counter.
+			assert_eq!(
+				CandidateStake::<Test>::get(&4, &3).checkpoint,
+				FixedU128::from_rational(8, 40)
+			);
 		});
 	}
 }
