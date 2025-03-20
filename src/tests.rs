@@ -55,12 +55,12 @@ macro_rules! bbtreeset {
 }
 
 fn fund_account(acc: AccountId) {
-	Balances::mint_into(&acc, 100).unwrap();
+	assert_ok!(Balances::mint_into(&acc, 100));
 }
 
 fn register_keys(acc: AccountId) {
 	let key = MockSessionKeys { aura: UintAuthorityId(acc) };
-	Session::set_keys(RuntimeOrigin::signed(acc), key, Vec::new()).unwrap();
+	assert_ok!(Session::set_keys(RuntimeOrigin::signed(acc), key, Vec::new()));
 }
 
 fn register_candidates(range: RangeInclusive<AccountId>) {
@@ -364,7 +364,7 @@ mod add_invulnerable {
 				if ii > 5 {
 					assert_ok!(Balances::mint_into(&ii, 100));
 					let key = MockSessionKeys { aura: UintAuthorityId(ii) };
-					Session::set_keys(RuntimeOrigin::signed(ii), key, Vec::new()).unwrap();
+					assert_ok!(Session::set_keys(RuntimeOrigin::signed(ii), key, Vec::new()));
 				}
 				assert_eq!(Balances::balance(&ii), 100);
 				if ii < 21 {
@@ -3191,8 +3191,10 @@ mod general_tests {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-				.unwrap();
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
 
 			// Nothing panics, no reward when no ED in balance
 			Authorship::on_initialize(1);
@@ -3293,8 +3295,10 @@ mod collator_rewards {
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, 1));
 
 				// Transfer the ED first
-				Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-					.unwrap();
+				assert_ok!(Balances::mint_into(
+					&CollatorStaking::account_id(),
+					Balances::minimum_balance()
+				));
 
 				// Assume we collected one unit in fees per block
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
@@ -3454,8 +3458,10 @@ mod collator_rewards {
 			));
 			ExtraReward::<Test>::set(1);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
-			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-				.unwrap();
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
 			fund_account(CollatorStaking::extra_reward_account_id());
 
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
@@ -3561,8 +3567,10 @@ mod collator_rewards {
 			// This account has no funds
 			ExtraReward::<Test>::set(1);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
-			Balances::mint_into(&CollatorStaking::account_id(), Balances::minimum_balance())
-				.unwrap();
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance()
+			));
 
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
