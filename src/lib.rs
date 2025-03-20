@@ -1639,6 +1639,7 @@ pub mod pallet {
 							candidate_info.stakers.saturating_inc();
 						}
 						candidate_stake_info.stake = final_staker_stake;
+						candidate_stake_info.checkpoint = Counters::<T>::get(candidate);
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
 							// In case the user recently unstaked we cannot allow those funds to be quickly
