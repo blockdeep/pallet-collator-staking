@@ -1213,15 +1213,15 @@ pub mod pallet {
 		))]
 		pub fn claim_rewards_other(
 			origin: OriginFor<T>,
-			other: T::AccountId,
+			target: T::AccountId,
 		) -> DispatchResultWithPostInfo {
 			// We do not care about the sender.
 			ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
-			ensure!(!Self::staker_has_claimed(&other), Error::<T>::NoPendingClaim);
+			ensure!(!Self::staker_has_claimed(&target), Error::<T>::NoPendingClaim);
 
-			let (candidates, rewards) = Self::do_claim_rewards(&other)?;
+			let (candidates, rewards) = Self::do_claim_rewards(&target)?;
 			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
 		}
 	}
