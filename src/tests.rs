@@ -3861,7 +3861,7 @@ mod collator_rewards {
 			register_candidates(4..=4);
 			lock_for_staking(3..=3);
 
-			// Staker 3 stakes on candidate 4
+			// Staker 3 stakes on candidate 4.
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(3),
 				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
@@ -3902,6 +3902,22 @@ mod collator_rewards {
 			// And the checkpoint should be updated to the candidate's current counter.
 			assert_eq!(
 				CandidateStake::<Test>::get(&4, &3).checkpoint,
+				FixedU128::from_rational(8, 40)
+			);
+
+			// Now let's imagine staker 5 also joins.
+			lock_for_staking(5..=5);
+
+			// Staker 5 stakes on candidate 4.
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+			));
+
+			// The checkpoint should be equal to the candidate's current counter.
+			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
+			assert_eq!(
+				CandidateStake::<Test>::get(&4, &5).checkpoint,
 				FixedU128::from_rational(8, 40)
 			);
 		});
