@@ -3855,7 +3855,6 @@ mod collator_rewards {
 	#[test]
 	fn claim_rewards_other_should_work() {
 		new_test_ext().execute_with(|| {
-			// Starting at session 1 because there are no rewards for session 0.
 			initialize_to_block(1);
 
 			// Register a candidate
@@ -3868,7 +3867,7 @@ mod collator_rewards {
 				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
 			));
 
-			// Check the collator counter and staker's checkpoint. Both should be zero, as no
+			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
 			// rewards were distributed.
 			assert_eq!(Counters::<Test>::get(&3), FixedU128::zero());
 			assert_eq!(CandidateStake::<Test>::get(&3, &4).checkpoint, FixedU128::zero());
@@ -3876,7 +3875,7 @@ mod collator_rewards {
 			// Skip session 0, as there are no rewards for this session.
 			initialize_to_block(10);
 
-			// Generate 100 as rewards on the pot generated during session 1.
+			// Generate 10 as rewards on the pot generated during session 1.
 			assert_ok!(Balances::mint_into(
 				&CollatorStaking::account_id(),
 				Balances::minimum_balance() + 10
