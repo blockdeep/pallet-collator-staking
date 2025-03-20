@@ -17,11 +17,11 @@ use crate as collator_staking;
 use crate::{
 	mock::*, AutoCompound, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
-	ClaimableRewards, CollatorRewardPercentage, Config, CurrentSession, DesiredCandidates, Error,
-	Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables, LastAuthoredBlock, Layer,
-	MinCandidacyBond, MinStake, ProducedBlocks, ReleaseQueues, ReleaseRequest,
-	SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks, UserStake,
-	UserStakeInfo,
+	ClaimableRewards, CollatorRewardPercentage, Config, Counters, CurrentSession,
+	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables,
+	LastAuthoredBlock, Layer, MinCandidacyBond, MinStake, ProducedBlocks, ReleaseQueues,
+	ReleaseRequest, SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks,
+	UserStake, UserStakeInfo,
 };
 use frame_support::pallet_prelude::TypedGet;
 use frame_support::{
@@ -3426,6 +3426,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
+			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			// Now we can see the reward.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
@@ -3532,6 +3533,7 @@ mod collator_rewards {
 			// Reward for staker when claiming.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 28);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
+			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3639,6 +3641,7 @@ mod collator_rewards {
 			// Reward for staker.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
+			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3771,6 +3774,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&2), 12);
 			assert_ok!(CollatorStaking::do_claim_rewards(&2));
+			assert_eq!(CandidateStake::<Test>::get(&4, &2).checkpoint, Counters::<Test>::get(&4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 16); // this remains to staker 3.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 2,
@@ -3778,6 +3782,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&3));
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, Counters::<Test>::get(&4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 1); // rounding issue
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 3,
