@@ -1198,14 +1198,14 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
 		}
 
-		/// Claims all pending rewards for `other`.
+		/// Claims all pending rewards for `target`.
 		///
 		/// Distributes rewards accumulated over previous sessions
 		/// and ensures that rewards are only claimable for sessions where the
-		/// `other` has participated. Rewards for the current session cannot be claimed.
+		/// `target` has participated. Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
-		/// - `Error::<T>::NoPendingClaim`: `other` has no rewards to claim.
+		/// - `Error::<T>::NoPendingClaim`: `target` has no rewards to claim.
 		#[pallet::call_index(21)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(
 			T::MaxStakedCandidates::get(),
