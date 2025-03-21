@@ -1427,7 +1427,7 @@ pub mod pallet {
 		/// - The number of candidates whose rewards were claimed.
 		pub(crate) fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
-			let mut candidate_rewards = vec![];
+			let mut candidate_rewards = Vec::new();
 			let current_session = CurrentSession::<T>::get();
 			UserStake::<T>::try_mutate(who, |user_stake_info| {
 				for candidate in &user_stake_info.candidates {
