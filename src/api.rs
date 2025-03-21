@@ -59,6 +59,6 @@ sp_api::decl_runtime_apis! {
 		fn should_claim(account: AccountId) -> bool;
 
 		/// Returns a list with all candidates and their stake.
-		fn candidates() -> Vec<(AccountId, Balance)>;
+		fn candidates() -> sp_std::vec::Vec<(AccountId, Balance)>;
 	}
 }
