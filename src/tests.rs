@@ -4660,7 +4660,7 @@ mod on_idle {
 				CollatorStaking::on_idle(block_num, Weight::from_parts(50_000_000_000, 250_000));
 				let current_op = NextSystemOperation::<Test>::get();
 
-				// If we've reached Idle state, we're done
+				// Once on Idle state, rewards are fully distributed
 				if matches!(current_op, Operation::Idle) {
 					println!("Reached Idle state at block {}", block_num);
 					break;
@@ -4669,9 +4669,6 @@ mod on_idle {
 				println!("Block {}: Operation state {:?}", block_num, current_op);
 				block_num = block_num + 1;
 			}
-
-			// Final block with maximum weight to ensure completion
-			CollatorStaking::on_idle(block_num, Weight::from_parts(u64::MAX, u64::MAX));
 
 			// Verify final operation state is Idle
 			assert!(
@@ -4690,7 +4687,7 @@ mod on_idle {
 			for (i, (staker, initial_stake)) in initial_stakes.iter().enumerate() {
 				let final_stake = final_stakes[i].1;
 
-				// Stake should have increased due to autocompounding
+				// Stake must have increased due to autocompounding
 				assert!(
 					final_stake > *initial_stake,
 					"Staker {} should have received autocompounded rewards. Initial: {}, Final: {}",
@@ -4708,8 +4705,6 @@ mod on_idle {
 				// );
 			}
 
-			// If block_num is still within our loop range, it means we finished at that block
-			// Otherwise, we might have finished at block 30 or with the final max-weight call
 			let total_processing_blocks = (block_num - processing_start_block) + 1;
 
 			println!(
