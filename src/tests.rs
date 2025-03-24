@@ -4394,4 +4394,143 @@ mod on_idle {
 			}));
 		});
 	}
+
+	#[test]
+	fn auto_compound_with_multiple_stakers() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(4..=4);
+
+			// Fund and set up multiple stakers
+			for staker in [3, 5, 6].iter() {
+				fund_account(*staker);
+				lock_for_staking(*staker..=*staker);
+			}
+
+			// Staker 3 stakes 40 with autocompound enabled
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+			));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(3), true));
+
+			// Staker 5 stakes 60 with autocompound enabled
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 4, stake: 60 }].try_into().unwrap()
+			));
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true));
+
+			// Staker 6 stakes 100 without autocompound
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(6),
+				vec![StakeTarget { candidate: 4, stake: 100 }].try_into().unwrap()
+			));
+
+			// Record & check initial stakes
+			let initial_stake_3 = CandidateStake::<Test>::get(&4, &3).stake;
+			let initial_stake_5 = CandidateStake::<Test>::get(&4, &5).stake;
+			let initial_stake_6 = CandidateStake::<Test>::get(&4, &6).stake;
+
+			// Skip session 0, as there are no rewards for this session
+			initialize_to_block(10);
+
+			// Add funds to reward pot for session 1
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 500
+			));
+
+			// Simulate block production
+			ProducedBlocks::<Test>::insert(4, 10);
+			TotalBlocks::<Test>::set((10, 10));
+
+			// Move to session 2
+			initialize_to_block(20);
+
+			// Process on_idle to trigger reward distribution and auto-compounding
+			let weight = Weight::from_parts(u64::MAX, u64::MAX);
+			CollatorStaking::on_idle(21, weight);
+
+			// Total stake: 40 + 60 + 100 = 200
+			// Rewards: 500 * 0.8 = 400 (20% to collator, 80% to stakers)
+			// Staker 3 share: 40/200 * 400 = 80
+			// Staker 5 share: 60/200 * 400 = 120
+			// Staker 6 share: 100/200 * 400 = 200 (with no autocompounding)
+
+			// Get final stakes
+			let final_stake_3 = CandidateStake::<Test>::get(&4, &3).stake;
+			let final_stake_5 = CandidateStake::<Test>::get(&4, &5).stake;
+			let final_stake_6 = CandidateStake::<Test>::get(&4, &6).stake;
+
+			// For stakers with autocompound, stake should increase by their share
+			assert_eq!(final_stake_3, initial_stake_3 + 80);
+			assert_eq!(final_stake_5, initial_stake_5 + 120);
+
+			// For staker without autocompound, stake should remain the same
+			assert_eq!(final_stake_6, initial_stake_6);
+
+			// Verify events for stakers with autocompound
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 3,
+				amount: 80,
+			}));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+				account: 3,
+				candidate: 4,
+				amount: 80,
+			}));
+
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 5,
+				amount: 120,
+			}));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+				account: 5,
+				candidate: 4,
+				amount: 120,
+			}));
+
+			// No StakingRewardReceived event for staker without autocompound
+			// They need to manually claim rewards
+
+			// Verify staker 6 can claim rewards manually
+			let unclaimed_rewards = CollatorStaking::calculate_unclaimed_rewards(&6);
+			assert_eq!(
+				unclaimed_rewards, 200,
+				"Staker without autocompound should have unclaimed rewards"
+			);
+
+			// Now manually claim rewards for staker 6
+			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(6)));
+
+			// After claiming, event should be emitted
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 6,
+				amount: 200,
+			}));
+
+			println!(
+				"Staker 3: Initial={}, Final={}, Increase={}",
+				initial_stake_3,
+				final_stake_3,
+				final_stake_3 - initial_stake_3
+			);
+			println!(
+				"Staker 5: Initial={}, Final={}, Increase={}",
+				initial_stake_5,
+				final_stake_5,
+				final_stake_5 - initial_stake_5
+			);
+			println!(
+				"Staker 6: Initial={}, Final={}, Increase={}, Unclaimed={}",
+				initial_stake_6,
+				final_stake_6,
+				final_stake_6 - initial_stake_6,
+				unclaimed_rewards
+			);
+		});
+	}
 }
