@@ -19,9 +19,9 @@ use crate::{
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, Counters, CurrentSession,
 	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables,
-	LastAuthoredBlock, Layer, MinCandidacyBond, MinStake, ProducedBlocks, ReleaseQueues,
-	ReleaseRequest, SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks,
-	UserStake, UserStakeInfo,
+	LastAuthoredBlock, Layer, MinCandidacyBond, MinStake, NextSystemOperation, Operation,
+	ProducedBlocks, ReleaseQueues, ReleaseRequest, SessionRemovedCandidates, StakeTarget,
+	StakingPotAccountId, TotalBlocks, UserStake, UserStakeInfo,
 };
 use frame_support::pallet_prelude::{TypedGet, Weight};
 use frame_support::{
@@ -4530,6 +4530,191 @@ mod on_idle {
 				final_stake_6,
 				final_stake_6 - initial_stake_6,
 				unclaimed_rewards
+			);
+		});
+	}
+
+	#[test]
+	fn autocompound_across_multiple_blocks() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(4..=4);
+
+			// Set up a large number of stakers (25 is the max allowed per the test config)
+			let staker_count = 25usize;
+			let staker_accounts: Vec<_> = (5..(5 + staker_count as u64)).collect();
+
+			for staker in &staker_accounts {
+				fund_account(*staker);
+				lock_for_staking(*staker..=*staker);
+
+				// Each staker stakes 20 tokens on candidate 4
+				assert_ok!(CollatorStaking::stake(
+					RuntimeOrigin::signed(*staker),
+					vec![StakeTarget { candidate: 4, stake: 20 }].try_into().unwrap()
+				));
+
+				// Enable autocompound for each staker
+				assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(*staker), true));
+			}
+
+			// Skip session 0
+			initialize_to_block(10);
+
+			// Add rewards to the pot
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 5000
+			));
+
+			// Simulate block production
+			ProducedBlocks::<Test>::insert(4, 10);
+			TotalBlocks::<Test>::set((10, 10));
+
+			// Move to session 2 to trigger reward calculation
+			initialize_to_block(20);
+
+			// Record initial stakes before processing
+			let initial_stakes: Vec<_> = staker_accounts
+				.iter()
+				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.collect();
+
+			// Verify initial operation state is to reward stakers
+			assert!(matches!(
+				NextSystemOperation::<Test>::get(),
+				Operation::RewardStakers { maybe_last_processed_account: None }
+			));
+
+			// Process with very limited weight for the first block
+			// This should only allow processing a subset of stakers
+			// Weight value is arbitrary and should be less than the total weight required
+			// to process all stakers
+			CollatorStaking::on_idle(21, Weight::from_parts(50_000_000_000, 250_000));
+
+			// Get the current operation state
+			let op_after_first_block = NextSystemOperation::<Test>::get();
+
+			let stakes_after_first_block: Vec<_> = staker_accounts
+				.iter()
+				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.collect();
+
+			// Count the number of stakers processed after the first block
+			// If the stake is greater than 20 (initial stake), it should have been processed
+			let processed_after_first_block =
+				stakes_after_first_block.iter().filter(|&&(_, stake)| stake > 20).count();
+
+			let unprocessed_after_first_block = staker_count - processed_after_first_block;
+
+			println!(
+				"After first block: Processed {}/{} stakers",
+				processed_after_first_block, staker_count
+			);
+			println!("Operation state: {:?}", op_after_first_block);
+
+			// Verify we're still in the RewardStakers state with a last_processed_account
+			assert!(matches!(
+				op_after_first_block,
+				Operation::RewardStakers { maybe_last_processed_account: Some(_) }
+			));
+
+			// If we still have unprocessed stakers and are in RewardStakers state,
+			// process another block
+			if unprocessed_after_first_block > 0
+				&& matches!(op_after_first_block, Operation::RewardStakers { .. })
+			{
+				// Process second block
+				CollatorStaking::on_idle(22, Weight::from_parts(50_000_000_000, 250_000));
+
+				// Check second block progress
+				let op_after_second_block = NextSystemOperation::<Test>::get();
+				println!("Operation after second block: {:?}", op_after_second_block);
+
+				let stakes_after_second_block: Vec<_> = staker_accounts
+					.iter()
+					.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+					.collect();
+
+				let processed_after_second_block =
+					stakes_after_second_block.iter().filter(|&&(_, stake)| stake > 20).count();
+
+				println!(
+					"After second block: Processed {}/{} stakers",
+					processed_after_second_block, staker_count
+				);
+
+				// More stackers should have been processed on the second block
+				assert!(
+					processed_after_second_block >= processed_after_first_block,
+					"Should have processed at least as many stakers after second block"
+				);
+			}
+
+			// Continue processing with multiple blocks until all rewards are distributed
+			let mut block_num = 23;
+			let processing_start_block = 21; // First block where processing started
+			while block_num < 30 {
+				CollatorStaking::on_idle(block_num, Weight::from_parts(50_000_000_000, 250_000));
+				let current_op = NextSystemOperation::<Test>::get();
+
+				// If we've reached Idle state, we're done
+				if matches!(current_op, Operation::Idle) {
+					println!("Reached Idle state at block {}", block_num);
+					break;
+				}
+
+				println!("Block {}: Operation state {:?}", block_num, current_op);
+				block_num = block_num + 1;
+			}
+
+			// Final block with maximum weight to ensure completion
+			CollatorStaking::on_idle(block_num, Weight::from_parts(u64::MAX, u64::MAX));
+
+			// Verify final operation state is Idle
+			assert!(
+				matches!(NextSystemOperation::<Test>::get(), Operation::Idle),
+				"Final operation state should be Idle, got: {:?}",
+				NextSystemOperation::<Test>::get()
+			);
+
+			// Now verify all stakers had their rewards autocompounded
+			let final_stakes: Vec<_> = staker_accounts
+				.iter()
+				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.collect();
+
+			// Check that all stakers received increased stake through autocompounding
+			for (i, (staker, initial_stake)) in initial_stakes.iter().enumerate() {
+				let final_stake = final_stakes[i].1;
+
+				// Stake should have increased due to autocompounding
+				assert!(
+					final_stake > *initial_stake,
+					"Staker {} should have received autocompounded rewards. Initial: {}, Final: {}",
+					staker,
+					initial_stake,
+					final_stake
+				);
+
+				// println!(
+				// 	"Staker {}: Initial stake = {}, Final stake = {}, Increase = {}",
+				// 	staker,
+				// 	initial_stake,
+				// 	final_stake,
+				// 	final_stake - *initial_stake
+				// );
+			}
+
+			// If block_num is still within our loop range, it means we finished at that block
+			// Otherwise, we might have finished at block 30 or with the final max-weight call
+			let total_processing_blocks = (block_num - processing_start_block) + 1;
+
+			println!(
+				"Successfully verified autocompound processing across {} blocks",
+				total_processing_blocks
 			);
 		});
 	}
