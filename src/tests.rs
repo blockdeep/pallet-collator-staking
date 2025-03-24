@@ -4374,11 +4374,6 @@ mod on_idle {
 			let expected_final_stake = initial_stake + 80;
 			let actual_final_stake = CandidateStake::<Test>::get(&4, &3).stake;
 
-			println!("Initial stake: {}", initial_stake);
-			println!("Expected final stake: {}", expected_final_stake);
-			println!("Actual final stake: {}", actual_final_stake);
-			println!("Checkpoint: {}", expected_checkpoint);
-
 			// Verify stake increased correctly
 			assert_eq!(actual_final_stake, expected_final_stake);
 
@@ -4511,26 +4506,6 @@ mod on_idle {
 				account: 6,
 				amount: 200,
 			}));
-
-			println!(
-				"Staker 3: Initial={}, Final={}, Increase={}",
-				initial_stake_3,
-				final_stake_3,
-				final_stake_3 - initial_stake_3
-			);
-			println!(
-				"Staker 5: Initial={}, Final={}, Increase={}",
-				initial_stake_5,
-				final_stake_5,
-				final_stake_5 - initial_stake_5
-			);
-			println!(
-				"Staker 6: Initial={}, Final={}, Increase={}, Unclaimed={}",
-				initial_stake_6,
-				final_stake_6,
-				final_stake_6 - initial_stake_6,
-				unclaimed_rewards
-			);
 		});
 	}
 
@@ -4609,12 +4584,6 @@ mod on_idle {
 
 			let unprocessed_after_first_block = staker_count - processed_after_first_block;
 
-			println!(
-				"After first block: Processed {}/{} stakers",
-				processed_after_first_block, staker_count
-			);
-			println!("Operation state: {:?}", op_after_first_block);
-
 			// Verify we're still in the RewardStakers state with a last_processed_account
 			assert!(matches!(
 				op_after_first_block,
@@ -4629,10 +4598,6 @@ mod on_idle {
 				// Process second block
 				CollatorStaking::on_idle(22, Weight::from_parts(50_000_000_000, 250_000));
 
-				// Check second block progress
-				let op_after_second_block = NextSystemOperation::<Test>::get();
-				println!("Operation after second block: {:?}", op_after_second_block);
-
 				let stakes_after_second_block: Vec<_> = staker_accounts
 					.iter()
 					.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
@@ -4640,11 +4605,6 @@ mod on_idle {
 
 				let processed_after_second_block =
 					stakes_after_second_block.iter().filter(|&&(_, stake)| stake > 20).count();
-
-				println!(
-					"After second block: Processed {}/{} stakers",
-					processed_after_second_block, staker_count
-				);
 
 				// More stackers should have been processed on the second block
 				assert!(
@@ -4662,11 +4622,8 @@ mod on_idle {
 
 				// Once on Idle state, rewards are fully distributed
 				if matches!(current_op, Operation::Idle) {
-					println!("Reached Idle state at block {}", block_num);
 					break;
 				}
-
-				println!("Block {}: Operation state {:?}", block_num, current_op);
 				block_num = block_num + 1;
 			}
 
@@ -4695,22 +4652,9 @@ mod on_idle {
 					initial_stake,
 					final_stake
 				);
-
-				// println!(
-				// 	"Staker {}: Initial stake = {}, Final stake = {}, Increase = {}",
-				// 	staker,
-				// 	initial_stake,
-				// 	final_stake,
-				// 	final_stake - *initial_stake
-				// );
 			}
 
-			let total_processing_blocks = (block_num - processing_start_block) + 1;
-
-			println!(
-				"Successfully verified autocompound processing across {} blocks",
-				total_processing_blocks
-			);
+			let _total_processing_blocks = (block_num - processing_start_block) + 1;
 		});
 	}
 }
