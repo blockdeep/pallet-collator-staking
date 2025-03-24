@@ -23,13 +23,13 @@ use crate::{
 	ReleaseRequest, SessionRemovedCandidates, StakeTarget, StakingPotAccountId, TotalBlocks,
 	UserStake, UserStakeInfo,
 };
-use frame_support::pallet_prelude::TypedGet;
+use frame_support::pallet_prelude::{TypedGet, Weight};
 use frame_support::{
 	assert_noop, assert_ok,
 	traits::{
 		fungible::{Inspect, InspectFreeze, Mutate},
 		tokens::Preservation::Preserve,
-		OnInitialize,
+		OnIdle, OnInitialize,
 	},
 };
 use sp_runtime::{
@@ -4303,6 +4303,95 @@ mod session_management {
 					reason: CandidacyBondReleaseReason::Idle
 				})
 			);
+		});
+	}
+}
+
+mod on_idle {
+	use super::*;
+
+	#[test]
+	fn auto_compound_rewards_processed_on_idle() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(4..=4);
+
+			// Setup staker with autocompound enabled
+			lock_for_staking(3..=3);
+
+			// Staker 3 stakes on candidate 4
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+			));
+			let initial_stake = CandidateStake::<Test>::get(&4, &3).stake;
+
+			// Enable autocompound for staker 3
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(3), true));
+
+			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
+			// rewards were distributed.
+			assert_eq!(Counters::<Test>::get(&4), FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+
+			// Skip session 0, as there are no rewards for this session
+			initialize_to_block(10);
+
+			// Add funds to reward pot for session 1
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 100
+			));
+
+			// Simulate block production, forcing all block to be produced by candidates
+			// Since only candidate 4 is registered, all blocks should be produced by it
+			ProducedBlocks::<Test>::insert(4, 10);
+			TotalBlocks::<Test>::set((10, 10));
+
+			// Move to session 2
+			initialize_to_block(20);
+
+			// At this point, rewards from session 1 should have been calculated
+			// Check counter is updated as expected with 20% to collator, 80% to stakers
+			let expected_checkpoint = FixedU128::from_rational(80, 40);
+			assert_eq!(Counters::<Test>::get(&4), expected_checkpoint);
+
+			// The checkpoint should still be zero, as rewards aren't claimed
+			// or distributed yet
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+
+			// Process on_idle with sufficient weight
+			let weight = Weight::from_parts(u64::MAX, u64::MAX);
+			CollatorStaking::on_idle(21, weight);
+
+			// The checkpoint should now be updated to match the counter as
+			// rewards have been distributed
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, expected_checkpoint);
+
+			// The stake should have increased by the reward amount (40 * 80/40 = 80)
+			let expected_final_stake = initial_stake + 80;
+			let actual_final_stake = CandidateStake::<Test>::get(&4, &3).stake;
+
+			println!("Initial stake: {}", initial_stake);
+			println!("Expected final stake: {}", expected_final_stake);
+			println!("Actual final stake: {}", actual_final_stake);
+			println!("Checkpoint: {}", expected_checkpoint);
+
+			// Verify stake increased correctly
+			assert_eq!(actual_final_stake, expected_final_stake);
+
+			// Event should have been emitted
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 3,
+				amount: 80,
+			}));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeAdded {
+				account: 3,
+				candidate: 4,
+				amount: 80,
+			}));
 		});
 	}
 }
