@@ -4653,8 +4653,6 @@ mod on_idle {
 					final_stake
 				);
 			}
-
-			let _total_processing_blocks = (block_num - processing_start_block) + 1;
 		});
 	}
 }
