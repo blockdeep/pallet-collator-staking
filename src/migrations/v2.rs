@@ -16,7 +16,7 @@
 //! Collator Staking Pallet migration from v1 to v2.
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
-use crate::{CandidateStake, CandidateStakeInfo, Config};
+use crate::{BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Pallet};
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
 use frame_support::weights::WeightMeter;
@@ -29,7 +29,6 @@ use std::collections::BTreeMap;
 
 mod v1 {
 	use super::*;
-	use crate::{BalanceOf, Pallet};
 	use frame_support::{storage_alias, Blake2_128Concat};
 	use sp_staking::SessionIndex;
 
@@ -62,6 +61,26 @@ mod v1 {
 	>;
 }
 
+/// Operations to be performed during this migration.
+#[derive(
+	PartialEq,
+	Eq,
+	Clone,
+	Encode,
+	Decode,
+	RuntimeDebug,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub enum MigrationSteps<T: Config> {
+	/// The stake has to be migrated form the old storage layout.
+	MigrateStake { cursor: Option<(T::AccountId, T::AccountId)> },
+	/// [`crate::ClaimableRewards`] are to be set to zero, resetting all rewards.
+	ResetClaimableRewards,
+	/// No more operations to be performed.
+	Noop,
+}
+
 /// Migrates the items of the [`crate::CandidateStake`] map to the counter-checkpoint
 /// reward-tracking system.
 ///
@@ -69,8 +88,64 @@ mod v1 {
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
 /// try to make maximal progress per step, so that the total time it takes to migrate stays low.
 pub struct LazyMigrationV2<T: Config>(PhantomData<T>);
+
+impl<T: Config> LazyMigrationV2<T> {
+	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
+		let required = T::DbWeight::get().reads_writes(0, 1);
+		if meter.try_consume(required).is_ok() {
+			ClaimableRewards::<T>::set(Zero::zero());
+			MigrationSteps::Noop
+		} else {
+			MigrationSteps::ResetClaimableRewards
+		}
+	}
+
+	pub(crate) fn migrate_stake(
+		meter: &mut WeightMeter,
+		mut cursor: Option<(T::AccountId, T::AccountId)>,
+	) -> MigrationSteps<T> {
+		// A single operation reads and removes one element from the old map and inserts it in the new one.
+		let required = T::DbWeight::get().reads_writes(1, 1);
+
+		let mut iter = if let Some((candidate, staker)) = cursor.clone() {
+			// If a cursor is provided, start iterating from the stored value
+			// corresponding to the last key processed in the previous step.
+			// Note that this only works if the old and the new map use the same way to hash
+			// storage keys.
+			v1::CandidateStake::<T>::iter_from(v1::CandidateStake::<T>::hashed_key_for(
+				candidate, staker,
+			))
+		} else {
+			// If no cursor is provided, start iterating from the beginning.
+			v1::CandidateStake::<T>::iter()
+		};
+
+		// We loop here to do as much progress as possible per step.
+		while meter.try_consume(required).is_ok() {
+			// If there's a next item in the iterator, perform the migration.
+			if let Some((candidate, staker, value)) = iter.next() {
+				// We can just insert here since the old and the new map share the same key-space.
+				// Otherwise, it would have to invert the concat hash function and re-hash it.
+				CandidateStake::<T>::insert(
+					candidate.clone(),
+					staker.clone(),
+					CandidateStakeInfo { stake: value.stake, checkpoint: FixedU128::zero() },
+				);
+				cursor = Some((candidate, staker)) // Return the processed key as the new cursor.
+			} else {
+				cursor = None; // No more items to process.
+				break;
+			}
+		}
+		match cursor {
+			None => MigrationSteps::ResetClaimableRewards,
+			Some(checkpoint) => MigrationSteps::MigrateStake { cursor: Some(checkpoint) },
+		}
+	}
+}
+
 impl<T: Config> SteppedMigration for LazyMigrationV2<T> {
-	type Cursor = (T::AccountId, T::AccountId);
+	type Cursor = MigrationSteps<T>;
 	// Without the explicit length here the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
 
@@ -86,43 +161,17 @@ impl<T: Config> SteppedMigration for LazyMigrationV2<T> {
 	/// step consumes as much weight as possible. However, this is simplified to perform one stored
 	/// value mutation per block.
 	fn step(
-		mut cursor: Option<Self::Cursor>,
+		maybe_cursor: Option<Self::Cursor>,
 		meter: &mut WeightMeter,
 	) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-		// A single operation reads and removes one element from the old map and inserts it in the new one.
-		let required = T::DbWeight::get().reads_writes(1, 1);
+		let cursor = maybe_cursor.unwrap_or_else(|| MigrationSteps::MigrateStake { cursor: None });
+		let new_cursor = match cursor {
+			MigrationSteps::MigrateStake { cursor: checkpoint } => Some(Self::migrate_stake(meter, checkpoint)),
+			MigrationSteps::ResetClaimableRewards => Some(Self::reset_rewards(meter)),
+			MigrationSteps::Noop => None,
+		};
 
-		// We loop here to do as much progress as possible per step.
-		while meter.try_consume(required).is_ok() {
-			let mut iter = if let Some((candidate, staker)) = cursor {
-				// If a cursor is provided, start iterating from the stored value
-				// corresponding to the last key processed in the previous step.
-				// Note that this only works if the old and the new map use the same way to hash
-				// storage keys.
-				v1::CandidateStake::<T>::iter_from(v1::CandidateStake::<T>::hashed_key_for(
-					candidate, staker,
-				))
-			} else {
-				// If no cursor is provided, start iterating from the beginning.
-				v1::CandidateStake::<T>::iter()
-			};
-
-			// If there's a next item in the iterator, perform the migration.
-			if let Some((candidate, staker, value)) = iter.next() {
-				// We can just insert here since the old and the new map share the same key-space.
-				// Otherwise, it would have to invert the concat hash function and re-hash it.
-				CandidateStake::<T>::insert(
-					candidate.clone(),
-					staker.clone(),
-					CandidateStakeInfo { stake: value.stake, checkpoint: FixedU128::zero() },
-				);
-				cursor = Some((candidate, staker)) // Return the processed key as the new cursor.
-			} else {
-				cursor = None; // Signal that the migration is complete (no more items to process).
-				break;
-			}
-		}
-		Ok(cursor)
+		Ok(new_cursor)
 	}
 
 	#[cfg(feature = "try-runtime")]
