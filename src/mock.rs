@@ -15,6 +15,8 @@
 
 use core::marker::PhantomData;
 
+use frame_support::migrations::MultiStepMigrator;
+use frame_support::traits::OnInitialize;
 use frame_support::{
 	derive_impl, ord_parameter_types, parameter_types,
 	traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
@@ -49,6 +51,7 @@ frame_support::construct_runtime!(
 		Balances: pallet_balances,
 		CollatorStaking: collator_staking,
 		Authorship: pallet_authorship,
+		Migrator: pallet_migrations,
 	}
 );
 
@@ -77,6 +80,7 @@ impl system::Config for Test {
 	type SystemWeightInfo = ();
 	type SS58Prefix = SS58Prefix;
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+	type MultiBlockMigrator = Migrator;
 }
 
 parameter_types! {
@@ -240,6 +244,14 @@ impl Config for Test {
 	type WeightInfo = ();
 }
 
+#[derive_impl(pallet_migrations::config_preludes::TestDefaultConfig)]
+impl pallet_migrations::Config for Test {
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = (crate::migrations::v2::LazyMigrationV2<Test>,);
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+}
+
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	sp_tracing::try_init_simple();
 	let mut t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
@@ -270,8 +282,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 }
 
 pub fn initialize_to_block(n: u64) {
-	for i in System::block_number() + 1..=n {
-		System::set_block_number(i);
-		<AllPalletsWithSystem as frame_support::traits::OnInitialize<u64>>::on_initialize(i);
+	assert!(System::block_number() < n);
+	while System::block_number() < n {
+		let b = System::block_number();
+		<Test as frame_system::Config>::MultiBlockMigrator::step();
+		System::set_block_number(b + 1);
+		AllPalletsWithSystem::on_initialize(b + 1);
 	}
 }

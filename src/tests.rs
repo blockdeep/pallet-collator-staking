@@ -3280,19 +3280,17 @@ mod collator_rewards {
 	#[test]
 	fn should_not_reward_invulnerables() {
 		new_test_ext().execute_with(|| {
-			initialize_to_block(1);
-
 			assert_ok!(CollatorStaking::add_invulnerable(
 				RuntimeOrigin::signed(RootAccount::get()),
 				4
 			));
 			assert_eq!(ExtraReward::<Test>::get(), 0);
-			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
+			assert_eq!(TotalBlocks::<Test>::get(), (0, 0));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
 				initialize_to_block(block);
 				assert_eq!(CurrentSession::<Test>::get(), 0);
-				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, 1));
+				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, 0));
 
 				// Transfer the ED first
 				assert_ok!(Balances::mint_into(
@@ -3304,7 +3302,7 @@ mod collator_rewards {
 				assert_ok!(Balances::transfer(&1, &CollatorStaking::account_id(), 1, Preserve));
 			}
 
-			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
+			assert_eq!(ProducedBlocks::<Test>::get(4), 0);
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 0));
@@ -3339,11 +3337,11 @@ mod collator_rewards {
 				&CollatorStaking::account_id(),
 				Balances::minimum_balance()
 			));
-			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
-			assert_eq!(CurrentSession::<Test>::get(), 0);
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 0);
 			for block in 1..=9 {
-				initialize_to_block(block);
+				if block > 1 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 0);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, block as u32));
 
@@ -3380,7 +3378,9 @@ mod collator_rewards {
 			System::reset_events();
 
 			for block in 10..=19 {
-				initialize_to_block(block);
+				if block > 10 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 1);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32 - 9, block as u32 - 9));
 
@@ -3467,7 +3467,9 @@ mod collator_rewards {
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
-				initialize_to_block(block);
+				if block > 1 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 0);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, block as u32));
 
@@ -3501,7 +3503,9 @@ mod collator_rewards {
 			System::reset_events();
 
 			for block in 10..=19 {
-				initialize_to_block(block);
+				if block > 10 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 1);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32 - 9, block as u32 - 9));
 
@@ -3575,7 +3579,9 @@ mod collator_rewards {
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
-				initialize_to_block(block);
+				if block > 1 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 0);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, block as u32));
 
@@ -3609,7 +3615,9 @@ mod collator_rewards {
 			System::reset_events();
 
 			for block in 10..=19 {
-				initialize_to_block(block);
+				if block > 10 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 1);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32 - 9, block as u32 - 9));
 
@@ -3710,7 +3718,9 @@ mod collator_rewards {
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 			assert_eq!(CurrentSession::<Test>::get(), 0);
 			for block in 1..=9 {
-				initialize_to_block(block);
+				if block > 1 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 0);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32, block as u32));
 
@@ -3744,7 +3754,9 @@ mod collator_rewards {
 			System::reset_events();
 
 			for block in 10..=19 {
-				initialize_to_block(block);
+				if block > 10 {
+					initialize_to_block(block);
+				}
 				assert_eq!(CurrentSession::<Test>::get(), 1);
 				assert_eq!(TotalBlocks::<Test>::get(), (block as u32 - 9, block as u32 - 9));
 
@@ -4182,7 +4194,7 @@ mod session_management {
 				vec![StakeTarget { candidate: 3, stake: 70 }].try_into().unwrap()
 			));
 
-			initialize_to_block(5);
+			initialize_to_block(6);
 
 			// candidate 5 saw it was outbid and wants to take back its bid, but
 			// not entirely so, they still keep their place in the candidate list
@@ -4615,7 +4627,6 @@ mod on_idle {
 
 			// Continue processing with multiple blocks until all rewards are distributed
 			let mut block_num = 23;
-			let processing_start_block = 21; // First block where processing started
 			while block_num < 30 {
 				CollatorStaking::on_idle(block_num, Weight::from_parts(50_000_000_000, 250_000));
 				let current_op = NextSystemOperation::<Test>::get();

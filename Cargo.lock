@@ -1731,6 +1731,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-migrations",
  "pallet-session",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -1744,6 +1745,24 @@ dependencies = [
  "sp-staking",
  "sp-std",
  "sp-tracing",
+]
+
+[[package]]
+name = "pallet-migrations"
+version = "9.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk?tag=polkadot-stable2412-2#863f353d20749caccfd1ccd548cc0cd85291f3a8"
+dependencies = [
+ "cfg-if",
+ "docify",
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "impl-trait-for-tuples",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-runtime",
 ]
 
 [[package]]
