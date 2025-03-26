@@ -271,15 +271,17 @@ mod tests {
 	fn migration_of_single_element_should_work() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
+			ClaimableRewards::<Test>::set(100);
+			
 			v1::CandidateStake::<Test>::insert(
 				&1,
 				&1,
 				v1::CandidateStakeInfo { session: 10, stake: 50 },
 			);
 			v1::AutoCompound::<Test>::insert(&1, Percent::from_percent(100));
-			ClaimableRewards::<Test>::set(100);
 
 			// Trigger the runtime upgrade
+			assert_eq!(ClaimableRewards::<Test>::get(), 100);
 			AllPalletsWithSystem::on_runtime_upgrade();
 			initialize_to_block(2);
 
@@ -296,7 +298,8 @@ mod tests {
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
-
+			ClaimableRewards::<Test>::set(100);
+			
 			for i in 1..=100 {
 				v1::CandidateStake::<Test>::insert(
 					&i,
@@ -307,6 +310,7 @@ mod tests {
 			}
 
 			// Trigger the runtime upgrade
+			assert_eq!(ClaimableRewards::<Test>::get(), 100);
 			AllPalletsWithSystem::on_runtime_upgrade();
 			initialize_to_block(2);
 
