@@ -16,7 +16,10 @@
 //! Collator Staking Pallet migration from v1 to v2.
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
-use crate::{BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Pallet};
+use crate::{
+	AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Layer,
+	Pallet,
+};
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
 use frame_support::weights::WeightMeter;
@@ -30,6 +33,7 @@ use std::collections::BTreeMap;
 mod v1 {
 	use super::*;
 	use frame_support::{storage_alias, Blake2_128Concat};
+	use sp_runtime::Percent;
 	use sp_staking::SessionIndex;
 
 	/// Old `CandidateStakeInfo` struct.
@@ -59,22 +63,26 @@ mod v1 {
 		CandidateStakeInfo<BalanceOf<T>>,
 		ValueQuery,
 	>;
+
+	#[storage_alias]
+	pub type AutoCompound<T: Config> = StorageMap<
+		Pallet<T>,
+		Blake2_128Concat,
+		<T as frame_system::Config>::AccountId,
+		Percent,
+		ValueQuery,
+	>;
 }
 
 /// Operations to be performed during this migration.
 #[derive(
-	PartialEq,
-	Eq,
-	Clone,
-	Encode,
-	Decode,
-	RuntimeDebug,
-	scale_info::TypeInfo,
-	MaxEncodedLen,
+	PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub enum MigrationSteps<T: Config> {
 	/// The stake has to be migrated form the old storage layout.
 	MigrateStake { cursor: Option<(T::AccountId, T::AccountId)> },
+	/// Migrate autocompounding.
+	MigrateAutocompounding { cursor: Option<T::AccountId> },
 	/// [`crate::ClaimableRewards`] are to be set to zero, resetting all rewards.
 	ResetClaimableRewards,
 	/// No more operations to be performed.
@@ -97,6 +105,38 @@ impl<T: Config> LazyMigrationV2<T> {
 			MigrationSteps::Noop
 		} else {
 			MigrationSteps::ResetClaimableRewards
+		}
+	}
+
+	pub(crate) fn migrate_autocompounding(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		// A single operation reads and removes one element from the old map and inserts it in the new one.
+		let required = T::DbWeight::get().reads_writes(1, 1);
+
+		let mut iter = if let Some(staker) = cursor.clone() {
+			v1::AutoCompound::<T>::iter_from(v1::AutoCompound::<T>::hashed_key_for(staker))
+		} else {
+			v1::AutoCompound::<T>::iter()
+		};
+
+		while meter.try_consume(required).is_ok() {
+			if let Some((staker, value)) = iter.next() {
+				if !value.is_zero() {
+					AutoCompound::<T>::insert(Layer::Commit, staker.clone(), true);
+				} else {
+					v1::AutoCompound::<T>::remove(staker.clone());
+				}
+				cursor = Some(staker);
+			} else {
+				cursor = None;
+				break;
+			}
+		}
+		match cursor {
+			None => Self::reset_rewards(meter),
+			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
 		}
 	}
 
@@ -138,7 +178,7 @@ impl<T: Config> LazyMigrationV2<T> {
 			}
 		}
 		match cursor {
-			None => MigrationSteps::ResetClaimableRewards,
+			None => Self::migrate_autocompounding(meter, None),
 			Some(checkpoint) => MigrationSteps::MigrateStake { cursor: Some(checkpoint) },
 		}
 	}
@@ -166,7 +206,12 @@ impl<T: Config> SteppedMigration for LazyMigrationV2<T> {
 	) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
 		let cursor = maybe_cursor.unwrap_or_else(|| MigrationSteps::MigrateStake { cursor: None });
 		let new_cursor = match cursor {
-			MigrationSteps::MigrateStake { cursor: checkpoint } => Some(Self::migrate_stake(meter, checkpoint)),
+			MigrationSteps::MigrateStake { cursor: checkpoint } => {
+				Some(Self::migrate_stake(meter, checkpoint))
+			},
+			MigrationSteps::MigrateAutocompounding { cursor: checkpoint } => {
+				Some(Self::migrate_autocompounding(meter, checkpoint))
+			},
 			MigrationSteps::ResetClaimableRewards => Some(Self::reset_rewards(meter)),
 			MigrationSteps::Noop => None,
 		};
@@ -220,6 +265,7 @@ mod tests {
 	use super::*;
 	use crate::mock::*;
 	use frame_support::traits::OnRuntimeUpgrade;
+	use sp_runtime::Percent;
 
 	#[test]
 	fn migration_of_single_element_should_work() {
@@ -230,6 +276,8 @@ mod tests {
 				&1,
 				v1::CandidateStakeInfo { session: 10, stake: 50 },
 			);
+			v1::AutoCompound::<Test>::insert(&1, Percent::from_percent(100));
+			ClaimableRewards::<Test>::set(100);
 
 			// Trigger the runtime upgrade
 			AllPalletsWithSystem::on_runtime_upgrade();
@@ -239,6 +287,8 @@ mod tests {
 				CandidateStake::<Test>::get(&1, &1),
 				CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 			);
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &1), true);
+			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 		});
 	}
 
@@ -253,6 +303,7 @@ mod tests {
 					&i,
 					v1::CandidateStakeInfo { session: 10, stake: 50 },
 				);
+				v1::AutoCompound::<Test>::insert(&i, Percent::from_percent(100));
 			}
 
 			// Trigger the runtime upgrade
@@ -264,7 +315,9 @@ mod tests {
 					CandidateStake::<Test>::get(&i, &i),
 					CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 				);
+				assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &i), true);
 			}
+			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 		});
 	}
 }
