@@ -95,9 +95,9 @@ pub enum MigrationSteps<T: Config> {
 /// The `step` function will be called once per block. It is very important that this function
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
 /// try to make maximal progress per step, so that the total time it takes to migrate stays low.
-pub struct LazyMigrationV2<T: Config>(PhantomData<T>);
+pub struct Migration<T: Config>(PhantomData<T>);
 
-impl<T: Config> LazyMigrationV2<T> {
+impl<T: Config> Migration<T> {
 	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
 		let required = T::DbWeight::get().reads_writes(0, 1);
 		if meter.try_consume(required).is_ok() {
@@ -184,7 +184,7 @@ impl<T: Config> LazyMigrationV2<T> {
 	}
 }
 
-impl<T: Config> SteppedMigration for LazyMigrationV2<T> {
+impl<T: Config> SteppedMigration for Migration<T> {
 	type Cursor = MigrationSteps<T>;
 	// Without the explicit length here the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
