@@ -17,8 +17,8 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Layer,
-	Pallet,
+	weights, AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config,
+	Layer, Pallet,
 };
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
@@ -95,10 +95,11 @@ pub enum MigrationSteps<T: Config> {
 /// The `step` function will be called once per block. It is very important that this function
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
 /// try to make maximal progress per step, so that the total time it takes to migrate stays low.
-pub struct LazyMigrationV1ToV2<T: Config>(PhantomData<T>);
+pub struct LazyMigrationV1ToV2<T: Config, W: weights::WeightInfo>(PhantomData<T>, PhantomData<W>);
 
-impl<T: Config> LazyMigrationV1ToV2<T> {
+impl<T: Config, W: weights::WeightInfo> LazyMigrationV1ToV2<T, W> {
 	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
+		// This step can be manually calculated.
 		let required = T::DbWeight::get().reads_writes(0, 1);
 		if meter.try_consume(required).is_ok() {
 			ClaimableRewards::<T>::set(Zero::zero());
@@ -113,7 +114,7 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 		mut cursor: Option<T::AccountId>,
 	) -> MigrationSteps<T> {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
-		let required = T::DbWeight::get().reads_writes(1, 1);
+		let required = W::migration_from_v1_to_v2_migrate_autocompound_step();
 
 		let mut iter = if let Some(staker) = cursor.clone() {
 			v1::AutoCompound::<T>::iter_from(v1::AutoCompound::<T>::hashed_key_for(staker))
@@ -145,7 +146,7 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 		mut cursor: Option<(T::AccountId, T::AccountId)>,
 	) -> MigrationSteps<T> {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
-		let required = T::DbWeight::get().reads_writes(1, 1);
+		let required = W::migration_from_v1_to_v2_migrate_stake_step();
 
 		let mut iter = if let Some((candidate, staker)) = cursor.clone() {
 			// If a cursor is provided, start iterating from the stored value
@@ -184,7 +185,7 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 	}
 }
 
-impl<T: Config + core::fmt::Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
+impl<T: Config, W: weights::WeightInfo> SteppedMigration for LazyMigrationV1ToV2<T, W> {
 	type Cursor = MigrationSteps<T>;
 	// Without the explicit length here the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
