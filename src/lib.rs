@@ -196,11 +196,6 @@ pub mod pallet {
 		#[pallet::constant]
 		type RestakeUnlockDelay: Get<BlockNumberFor<Self>>;
 
-		/// Maximum number of rewards to keep in storage. Non-claimed rewards will not be claimable
-		/// after they have been removed.
-		#[pallet::constant]
-		type MaxRewardSessions: Get<u32>;
-
 		/// Minimum stake needed to enable autocompounding.
 		#[pallet::constant]
 		type AutoCompoundingThreshold: Get<BalanceOf<Self>>;

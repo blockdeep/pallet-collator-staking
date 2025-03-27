@@ -89,7 +89,6 @@ auto-compounded if the user sets an auto-compound percentage greater than zero.
 | `StakeUnlockDelay`         | Number of blocks to wait before unlocking the stake by a user.                                       |
 | `BondUnlockDelay`          | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `RestakeUnlockDelay`       | Number of blocks to wait before reusing funds previously assigned to a candidate.                    |
-| `MaxRewardSessions`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `AutoCompoundingThreshold` | Minimum stake needed to enable autocompounding.                                                      |
 | `WeightInfo`               | Information on runtime weights.                                                                      |
 
