@@ -247,7 +247,7 @@ impl Config for Test {
 #[derive_impl(pallet_migrations::config_preludes::TestDefaultConfig)]
 impl pallet_migrations::Config for Test {
 	#[cfg(not(feature = "runtime-benchmarks"))]
-	type Migrations = (crate::migrations::v2::Migration<Test>,);
+	type Migrations = (crate::migrations::v2::LazyMigrationV1ToV2<Test>,);
 	#[cfg(feature = "runtime-benchmarks")]
 	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
 }

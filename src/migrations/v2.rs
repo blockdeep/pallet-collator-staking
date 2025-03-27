@@ -24,6 +24,7 @@ use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationE
 use frame_support::pallet_prelude::*;
 use frame_support::weights::WeightMeter;
 use sp_runtime::FixedU128;
+use sp_runtime::Percent;
 
 #[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
@@ -33,7 +34,6 @@ use std::collections::BTreeMap;
 mod v1 {
 	use super::*;
 	use frame_support::{storage_alias, Blake2_128Concat};
-	use sp_runtime::Percent;
 	use sp_staking::SessionIndex;
 
 	/// Old `CandidateStakeInfo` struct.
@@ -95,9 +95,9 @@ pub enum MigrationSteps<T: Config> {
 /// The `step` function will be called once per block. It is very important that this function
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
 /// try to make maximal progress per step, so that the total time it takes to migrate stays low.
-pub struct Migration<T: Config>(PhantomData<T>);
+pub struct LazyMigrationV1ToV2<T: Config>(PhantomData<T>);
 
-impl<T: Config> Migration<T> {
+impl<T: Config> LazyMigrationV1ToV2<T> {
 	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
 		let required = T::DbWeight::get().reads_writes(0, 1);
 		if meter.try_consume(required).is_ok() {
@@ -184,7 +184,7 @@ impl<T: Config> Migration<T> {
 	}
 }
 
-impl<T: Config> SteppedMigration for Migration<T> {
+impl<T: Config + core::fmt::Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 	type Cursor = MigrationSteps<T>;
 	// Without the explicit length here the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
@@ -204,6 +204,10 @@ impl<T: Config> SteppedMigration for Migration<T> {
 		maybe_cursor: Option<Self::Cursor>,
 		meter: &mut WeightMeter,
 	) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+		if Pallet::<T>::on_chain_storage_version() != Self::id().version_from as u16 {
+			return Ok(None);
+		}
+
 		let cursor = maybe_cursor.unwrap_or_else(|| MigrationSteps::MigrateStake { cursor: None });
 		let new_cursor = match cursor {
 			MigrationSteps::MigrateStake { cursor: checkpoint } => {
@@ -224,9 +228,15 @@ impl<T: Config> SteppedMigration for Migration<T> {
 		use codec::Encode;
 
 		// Return the state of the storage before the migration.
+		assert_ne!(
+			Pallet::<T>::on_chain_storage_version(),
+			Self::id().version_from as u16,
+			"Migration pre-upgrade failed: the storage version is not the expected one"
+		);
 		let map: BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>> =
 			v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
-		Ok(map.encode())
+		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
+		Ok((map, autocompound).encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -234,11 +244,16 @@ impl<T: Config> SteppedMigration for Migration<T> {
 		use codec::Decode;
 
 		// Check the state of the storage after the migration.
-		let prev_map =
-			BTreeMap::<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>::decode(
-				&mut &prev[..],
-			)
-			.expect("Failed to decode the previous storage state");
+		assert_ne!(
+			Pallet::<T>::on_chain_storage_version(),
+			Self::id().version_to as u16,
+			"Migration post-upgrade failed: the storage version is not the expected one"
+		);
+		let (prev_map, prev_autocompound) = <(
+			BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
+			Vec<(T::AccountId, Percent)>,
+		)>::decode(&mut &prev[..])
+		.expect("Failed to decode the previous storage state");
 
 		// Check the len of prev and post are the same.
 		assert_eq!(prev_map.len(), CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the storage after the migration is not the same as before");
@@ -256,6 +271,17 @@ impl<T: Config> SteppedMigration for Migration<T> {
 			);
 		}
 
+		for (staker, percentage) in prev_autocompound {
+			let value = !percentage.is_zero();
+			assert_eq!(AutoCompound::<T>::get(Layer::Commit, &staker), value);
+		}
+
+		assert_eq!(
+			ClaimableRewards::<T>::get(),
+			0,
+			"Migration failed: the claimable rewards after the migration is not zero"
+		);
+
 		Ok(())
 	}
 }
@@ -265,14 +291,14 @@ mod tests {
 	use super::*;
 	use crate::mock::*;
 	use frame_support::traits::OnRuntimeUpgrade;
-	use sp_runtime::Percent;
 
 	#[test]
 	fn migration_of_single_element_should_work() {
 		new_test_ext().execute_with(|| {
+			StorageVersion::new(1).put::<Pallet<Test>>();
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
-			
+
 			v1::CandidateStake::<Test>::insert(
 				&1,
 				&1,
@@ -297,9 +323,10 @@ mod tests {
 	#[test]
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
+			StorageVersion::new(1).put::<Pallet<Test>>();
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
-			
+
 			for i in 1..=100 {
 				v1::CandidateStake::<Test>::insert(
 					&i,
