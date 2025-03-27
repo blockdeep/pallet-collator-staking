@@ -794,17 +794,18 @@ mod benchmarks {
 			crate::migrations::v2::v1::CandidateStakeInfo { stake: 50u32.into(), session: 15 },
 		);
 		let mut meter = WeightMeter::new();
+		let mut cursor = None;
 
 		#[block]
 		{
-			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_stake(&mut meter, None);
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_stake(&mut meter, &mut cursor);
 		}
 
-		// Check that the new storage is decodable:
 		assert_eq!(
 			CandidateStake::<T>::get(&acc1, &acc2),
 			CandidateStakeInfo { stake: 50u32.into(), checkpoint: FixedU128::zero() }
 		);
+		assert_eq!(cursor, None);
 	}
 
 	#[benchmark]
@@ -812,16 +813,17 @@ mod benchmarks {
 		let acc: T::AccountId = account("user1", 0, SEED);
 		crate::migrations::v2::v1::AutoCompound::<T>::insert(&acc, Percent::from_parts(10));
 		let mut meter = WeightMeter::new();
+		let mut cursor = None;
 
 		#[block]
 		{
-			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_autocompounding(
-				&mut meter, None,
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_autocompounding(
+				&mut meter, &mut cursor,
 			);
 		}
 
-		// Check that the new storage is decodable:
 		assert_eq!(AutoCompound::<T>::get(Layer::Commit, &acc), true);
+		assert_eq!(cursor, None);
 	}
 
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);

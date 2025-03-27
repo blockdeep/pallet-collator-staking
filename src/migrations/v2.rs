@@ -108,11 +108,8 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 			MigrationSteps::ResetClaimableRewards
 		}
 	}
-
-	pub(crate) fn migrate_autocompounding(
-		meter: &mut WeightMeter,
-		mut cursor: Option<T::AccountId>,
-	) -> MigrationSteps<T> {
+	
+	pub(crate) fn do_migrate_autocompounding(meter: &mut WeightMeter, cursor: &mut Option<T::AccountId>) {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
 		let required =
 			<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_autocompound_step();
@@ -130,22 +127,26 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 				} else {
 					v1::AutoCompound::<T>::remove(staker.clone());
 				}
-				cursor = Some(staker);
+				*cursor = Some(staker);
 			} else {
-				cursor = None;
+				*cursor = None;
 				break;
 			}
 		}
+	}
+
+	pub(crate) fn migrate_autocompounding(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_autocompounding(meter, &mut cursor);
 		match cursor {
 			None => Self::reset_rewards(meter),
 			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
 		}
 	}
-
-	pub(crate) fn migrate_stake(
-		meter: &mut WeightMeter,
-		mut cursor: Option<(T::AccountId, T::AccountId)>,
-	) -> MigrationSteps<T> {
+	
+	pub(crate) fn do_migrate_stake(meter: &mut WeightMeter, cursor: &mut Option<(T::AccountId, T::AccountId)>) {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
 		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_stake_step();
 
@@ -173,12 +174,19 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 					staker.clone(),
 					CandidateStakeInfo { stake: value.stake, checkpoint: FixedU128::zero() },
 				);
-				cursor = Some((candidate, staker)) // Return the processed key as the new cursor.
+				*cursor = Some((candidate, staker)) // Return the processed key as the new cursor.
 			} else {
-				cursor = None; // No more items to process.
+				*cursor = None; // No more items to process.
 				break;
 			}
 		}
+	}
+
+	pub(crate) fn migrate_stake(
+		meter: &mut WeightMeter,
+		mut cursor: Option<(T::AccountId, T::AccountId)>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_stake(meter, &mut cursor);
 		match cursor {
 			None => Self::migrate_autocompounding(meter, None),
 			Some(checkpoint) => MigrationSteps::MigrateStake { cursor: Some(checkpoint) },
