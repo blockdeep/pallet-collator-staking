@@ -21,6 +21,7 @@ use super::*;
 use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
+use frame_support::pallet_prelude::Zero;
 use frame_support::traits::fungible::{Inspect, Mutate};
 use frame_support::traits::{EnsureOrigin, Get};
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
@@ -187,6 +188,7 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
+	use frame_support::weights::WeightMeter;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -780,6 +782,46 @@ mod benchmarks {
 			T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller),
 			T::Currency::minimum_balance()
 		);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_stake_step() {
+		let acc1: T::AccountId = account("user1", 0, SEED);
+		let acc2: T::AccountId = account("user2", 1, SEED);
+		crate::migrations::v2::v1::CandidateStake::<T>::insert(
+			&acc1,
+			&acc2,
+			crate::migrations::v2::v1::CandidateStakeInfo { stake: 50u32.into(), session: 15 },
+		);
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_stake(&mut meter, None);
+		}
+
+		// Check that the new storage is decodable:
+		assert_eq!(
+			CandidateStake::<T>::get(&acc1, &acc2),
+			CandidateStakeInfo { stake: 50u32.into(), checkpoint: FixedU128::zero() }
+		);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_autocompound_step() {
+		let acc: T::AccountId = account("user1", 0, SEED);
+		crate::migrations::v2::v1::AutoCompound::<T>::insert(&acc, Percent::from_parts(10));
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_autocompounding(
+				&mut meter, None,
+			);
+		}
+
+		// Check that the new storage is decodable:
+		assert_eq!(AutoCompound::<T>::get(Layer::Commit, &acc), true);
 	}
 
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);

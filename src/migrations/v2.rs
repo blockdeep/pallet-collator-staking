@@ -31,7 +31,7 @@ use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
 use std::collections::BTreeMap;
 
-mod v1 {
+pub(crate) mod v1 {
 	use super::*;
 	use frame_support::{storage_alias, Blake2_128Concat};
 	use sp_staking::SessionIndex;
@@ -278,7 +278,7 @@ impl<T: Config + core::fmt::Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 
 		assert_eq!(
 			ClaimableRewards::<T>::get(),
-			0,
+			0u32.into(),
 			"Migration failed: the claimable rewards after the migration is not zero"
 		);
 
