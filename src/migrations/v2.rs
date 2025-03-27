@@ -17,8 +17,8 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	weights, AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config,
-	Layer, Pallet, WeightInfo,
+	AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Layer,
+	Pallet, WeightInfo,
 };
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
