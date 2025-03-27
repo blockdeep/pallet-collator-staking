@@ -797,7 +797,7 @@ mod benchmarks {
 
 		#[block]
 		{
-			crate::migrations::v2::LazyMigrationV1ToV2::<T, weights::SubstrateWeight<T>>::migrate_stake(&mut meter, None);
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_stake(&mut meter, None);
 		}
 
 		// Check that the new storage is decodable:
@@ -815,7 +815,7 @@ mod benchmarks {
 
 		#[block]
 		{
-			crate::migrations::v2::LazyMigrationV1ToV2::<T, weights::SubstrateWeight<T>>::migrate_autocompounding(
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::migrate_autocompounding(
 				&mut meter, None,
 			);
 		}
