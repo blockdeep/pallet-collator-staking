@@ -108,8 +108,11 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 			MigrationSteps::ResetClaimableRewards
 		}
 	}
-	
-	pub(crate) fn do_migrate_autocompounding(meter: &mut WeightMeter, cursor: &mut Option<T::AccountId>) {
+
+	pub(crate) fn do_migrate_autocompounding(
+		meter: &mut WeightMeter,
+		cursor: &mut Option<T::AccountId>,
+	) {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
 		let required =
 			<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_autocompound_step();
@@ -145,8 +148,11 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
 		}
 	}
-	
-	pub(crate) fn do_migrate_stake(meter: &mut WeightMeter, cursor: &mut Option<(T::AccountId, T::AccountId)>) {
+
+	pub(crate) fn do_migrate_stake(
+		meter: &mut WeightMeter,
+		cursor: &mut Option<(T::AccountId, T::AccountId)>,
+	) {
 		// A single operation reads and removes one element from the old map and inserts it in the new one.
 		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_stake_step();
 

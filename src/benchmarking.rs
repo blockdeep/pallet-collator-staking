@@ -798,7 +798,10 @@ mod benchmarks {
 
 		#[block]
 		{
-			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_stake(&mut meter, &mut cursor);
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_stake(
+				&mut meter,
+				&mut cursor,
+			);
 		}
 
 		assert_eq!(
@@ -818,7 +821,8 @@ mod benchmarks {
 		#[block]
 		{
 			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_autocompounding(
-				&mut meter, &mut cursor,
+				&mut meter,
+				&mut cursor,
 			);
 		}
 

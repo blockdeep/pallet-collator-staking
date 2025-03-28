@@ -672,7 +672,7 @@ pub mod pallet {
 
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut meter = WeightMeter::with_limit(remaining_weight);
-			if let Err(_) = meter.try_consume(T::DbWeight::get().reads_writes(1, 0)) {
+			if meter.try_consume(T::DbWeight::get().reads_writes(1, 0)).is_err() {
 				return remaining_weight;
 			}
 			let mut next_operation = NextSystemOperation::<T>::get();
@@ -1333,10 +1333,9 @@ pub mod pallet {
 			// This is the weight of the final operation in this function where we set
 			// `NextSystemOperation`.
 			let write = T::DbWeight::get().reads_writes(0, 1);
-			if !meter.can_consume(write) {
+			if meter.try_consume(write).is_err() {
 				return Err(());
 			}
-			meter.consume(write);
 			let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
 			let mut iter = if let Some(last_key) = &maybe_last_processed_account {
 				let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
@@ -1395,8 +1394,7 @@ pub mod pallet {
 		) -> Result<OperationFor<T>, ()> {
 			let mut iter = AutoCompound::<T>::drain_prefix(Layer::Staging);
 			let worst_case_weight = T::DbWeight::get().reads_writes(1, 2);
-			while meter.can_consume(worst_case_weight) {
-				meter.consume(worst_case_weight);
+			while meter.try_consume(worst_case_weight).is_ok() {
 				if let Some((staker, enabled)) = iter.next() {
 					if enabled {
 						AutoCompound::<T>::set(Layer::Commit, &staker, true);
