@@ -4847,10 +4847,6 @@ mod on_idle {
 			// Staker 5 should now be back in the staging layer with enabled = false
 			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), false);
 
-			// // Check the events for auto-compound disabled for staker 5
-			// System::assert_has_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
-			// 	account: 5,
-			// }));
 		});
 	}
 
