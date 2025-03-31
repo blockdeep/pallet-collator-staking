@@ -2726,7 +2726,6 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
 			assert_noop!(CollatorStaking::lock(RuntimeOrigin::root(), 60), BadOrigin);
-
 		});
 	}
 
@@ -2792,10 +2791,7 @@ mod lock_unlock_and_release {
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
 			// Invalid Origin
-			assert_noop!(
-				CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)),
-				BadOrigin
-			);
+			assert_noop!(CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)), BadOrigin);
 		});
 	}
 
@@ -3124,8 +3120,10 @@ mod top_up_extra_rewards {
 			assert_eq!(Balances::balance(&CollatorStaking::extra_reward_account_id()), 0);
 
 			// Invalid Origin
-			assert_noop!(CollatorStaking::top_up_extra_rewards(RuntimeOrigin::root(), 10), BadOrigin);
-
+			assert_noop!(
+				CollatorStaking::top_up_extra_rewards(RuntimeOrigin::root(), 10),
+				BadOrigin
+			);
 		});
 	}
 }
@@ -4061,7 +4059,6 @@ mod collator_rewards {
 
 			// Invalid Origin
 			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 3), BadOrigin);
-
 		});
 	}
 }
