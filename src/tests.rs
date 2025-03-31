@@ -4099,7 +4099,7 @@ mod collator_rewards {
 			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
 			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
 
-			// Now a random user claims the rewards on behalf of the staker.
+			// Invalid Origin
 			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 3), BadOrigin);
 
 		});
