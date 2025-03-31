@@ -1718,28 +1718,31 @@ pub mod pallet {
 		///
 		/// Emits `AutoCompoundEnabled` or `AutoCompoundDisabled` event based on the action.
 		fn do_set_autocompound(who: &T::AccountId, enable: bool) -> DispatchResult {
-			let current_value = AutoCompound::<T>::get(Layer::Commit, who);
-			if current_value != enable {
-				let is_delivering_rewards = Self::is_delivering_rewards();
-				let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
+			let already_enabled = AutoCompound::<T>::get(Layer::Commit, who);
+			let is_delivering_rewards = Self::is_delivering_rewards();
+			let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
 
-				if !enable {
-					AutoCompound::<T>::remove(layer, who);
+			if !enable {
+				AutoCompound::<T>::remove(layer, who);
+				if already_enabled {
 					Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
-				} else {
-					ensure!(
-						Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
-						Error::<T>::InsufficientStake
-					);
-					AutoCompound::<T>::insert(layer, who, true);
+				}
+			} else {
+				ensure!(
+					Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
+					Error::<T>::InsufficientStake
+				);
+				AutoCompound::<T>::insert(layer, who, true);
+				if !already_enabled {
 					Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
 				}
-
-				// If we could write directly into the commit layer then we can safely remove the staging one.
-				if !is_delivering_rewards {
-					AutoCompound::<T>::remove(Layer::Staging, who);
-				}
 			}
+
+			// If we could write directly into the commit layer then we can safely remove the staging one.
+			if !is_delivering_rewards {
+				AutoCompound::<T>::remove(Layer::Staging, who);
+			}
+
 			Ok(())
 		}
 
