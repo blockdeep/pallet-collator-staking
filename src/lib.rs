@@ -458,11 +458,13 @@ pub mod pallet {
 	pub type ProducedBlocks<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
 
-	/// Current session index.
+	/// Current session index. Obtained from `pallet-session`.
 	#[pallet::storage]
 	pub type CurrentSession<T: Config> = StorageValue<_, SessionIndex, ValueQuery>;
 
-	/// Claimable rewards.
+	/// Claimable rewards. This represents the portion of the main pallet's pot account that belong
+	/// to user rewards. The rest of the funds are those generated during the current session that
+	/// will become actual rewards when the session ends.
 	#[pallet::storage]
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
@@ -623,11 +625,11 @@ pub mod pallet {
 		TooManyDesiredCandidates,
 		/// Too many unstaking requests. Claim some of them first.
 		TooManyReleaseRequests,
-		/// Invalid value for MinStake. It must be lower than or equal to `MinStake`.
+		/// Invalid value for MinStake. It must be lower than or equal to [`MinStake`].
 		InvalidMinStake,
-		/// Invalid value for CandidacyBond. It must be higher than or equal to `MinCandidacyBond`.
+		/// Invalid value for CandidacyBond. It must be higher than or equal to [`MinCandidacyBond`].
 		InvalidCandidacyBond,
-		/// Number of staked candidates is greater than `MaxStakedCandidates`.
+		/// Number of staked candidates is greater than [`MaxStakedCandidates`].
 		TooManyStakedCandidates,
 		/// Extra reward cannot be zero.
 		InvalidExtraReward,
@@ -670,6 +672,9 @@ pub mod pallet {
 			Self::do_try_state()
 		}
 
+		/// Performs operations in a loop based on the current state of the [`NextSystemOperation`].
+		/// Specifically, it processes rewards for stakers with auto-compound enabled and commits
+		/// auto-compound operations to the appropriate storage.
 		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
 			let mut meter = WeightMeter::with_limit(remaining_weight);
 			if meter.try_consume(T::DbWeight::get().reads_writes(1, 0)).is_err() {
@@ -1047,24 +1052,7 @@ pub mod pallet {
 
 			ensure!(Self::staker_has_claimed(&who), Error::<T>::PreviousRewardsNotClaimed);
 
-			let is_delivering_rewards = Self::is_delivering_rewards();
-			let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
-			if !enable {
-				AutoCompound::<T>::remove(layer, &who);
-				Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
-			} else {
-				ensure!(
-					Self::get_staked_balance(&who) >= T::AutoCompoundingThreshold::get(),
-					Error::<T>::InsufficientStake
-				);
-				AutoCompound::<T>::insert(layer, &who, true);
-				Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
-			}
-
-			// If we could write directly into the commit layer then we can safely remove the staging one.
-			if !is_delivering_rewards {
-				AutoCompound::<T>::remove(Layer::Staging, &who);
-			}
+			Self::do_set_autocompound(&who, enable)?;
 
 			Ok(())
 		}
@@ -1217,7 +1205,7 @@ pub mod pallet {
 				staked_balance.saturating_sub(amount),
 			)?;
 			Self::add_to_release_queue(&who, amount, T::StakeUnlockDelay::get())?;
-			Self::adjust_autocompound_percentage(&who);
+			Self::adjust_autocompound(&who);
 
 			Ok(())
 		}
@@ -1720,15 +1708,46 @@ pub mod pallet {
 			Ok((stake, is_candidate))
 		}
 
-		/// Disable autocompounding if staked balance dropped below the threshold.
-		fn adjust_autocompound_percentage(staker: &T::AccountId) {
-			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
-				let was_autocompounding = AutoCompound::<T>::get(Layer::Commit, staker);
-				AutoCompound::<T>::remove(Layer::Staging, staker);
-				AutoCompound::<T>::remove(Layer::Commit, staker);
-				if was_autocompounding {
-					Self::deposit_event(Event::AutoCompoundDisabled { account: staker.clone() });
+		/// Enables or disables autocompounding for the given staker.
+		///
+		/// Autocompounding automatically reinvests rewards if the staked balance
+		/// is above the required threshold.
+		///
+		/// - `who`: The account to enable or disable autocompounding for.
+		/// - `enable`: Boolean indicating whether to enable or disable autocompounding.
+		///
+		/// Emits `AutoCompoundEnabled` or `AutoCompoundDisabled` event based on the action.
+		fn do_set_autocompound(who: &T::AccountId, enable: bool) -> DispatchResult {
+			let current_value = AutoCompound::<T>::get(Layer::Commit, who);
+			if current_value != enable {
+				let is_delivering_rewards = Self::is_delivering_rewards();
+				let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
+
+				if !enable {
+					AutoCompound::<T>::remove(layer, who);
+					Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
+				} else {
+					ensure!(
+						Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
+						Error::<T>::InsufficientStake
+					);
+					AutoCompound::<T>::insert(layer, who, true);
+					Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
 				}
+
+				// If we could write directly into the commit layer then we can safely remove the staging one.
+				if !is_delivering_rewards {
+					AutoCompound::<T>::remove(Layer::Staging, who);
+				}
+			}
+			Ok(())
+		}
+
+		/// Disable autocompounding if staked balance dropped below the threshold.
+		fn adjust_autocompound(staker: &T::AccountId) {
+			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
+				// This cannot fail if setting to `false`.
+				let _ = Self::do_set_autocompound(staker, false);
 			}
 		}
 
