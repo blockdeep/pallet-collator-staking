@@ -138,10 +138,9 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 
 		while meter.try_consume(required).is_ok() {
 			if let Some((staker, value)) = iter.next() {
+				v1::AutoCompound::<T>::remove(staker.clone());
 				if !value.is_zero() {
 					AutoCompound::<T>::insert(Layer::Commit, staker.clone(), true);
-				} else {
-					v1::AutoCompound::<T>::remove(staker.clone());
 				}
 				*cursor = Some(staker);
 			} else {
