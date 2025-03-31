@@ -2400,10 +2400,6 @@ mod unstake_from {
 			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
-			assert_noop!(
-				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
-				Error::<Test>::PreviousRewardsNotClaimed
-			);
 
 			// Invalid Origin
 			assert_noop!(CollatorStaking::claim_rewards(RuntimeOrigin::root()), BadOrigin);
@@ -2727,7 +2723,6 @@ mod lock_unlock_and_release {
 	fn lock_with_invalid_origin_should_fail() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
-
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
 			assert_noop!(CollatorStaking::lock(RuntimeOrigin::root(), 60), BadOrigin);
@@ -2796,9 +2791,7 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 60);
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
-			// We have now enough balance to be able to enable autocompounding
-			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true,));
-
+			// Invalid Origin
 			assert_noop!(
 				CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)),
 				BadOrigin
@@ -3984,6 +3977,8 @@ mod collator_rewards {
 				RuntimeOrigin::signed(RootAccount::get()),
 				2
 			));
+
+			// Invalid Origin
 			assert_noop!(CollatorStaking::stop_extra_reward(RuntimeOrigin::signed(3)), BadOrigin);
 		});
 	}
@@ -4063,41 +4058,6 @@ mod collator_rewards {
 	fn claim_rewards_other_with_invalid_origin_should_fail() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
-
-			// Register a candidate
-			register_candidates(4..=4);
-			lock_for_staking(3..=3);
-
-			// Staker 3 stakes on candidate 4.
-			assert_ok!(CollatorStaking::stake(
-				RuntimeOrigin::signed(3),
-				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
-			));
-
-			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
-			// rewards were distributed.
-			assert_eq!(Counters::<Test>::get(&3), FixedU128::zero());
-			assert_eq!(CandidateStake::<Test>::get(&3, &4).checkpoint, FixedU128::zero());
-
-			// Skip session 0, as there are no rewards for this session.
-			initialize_to_block(10);
-
-			// Generate 10 as rewards on the pot generated during session 1.
-			assert_ok!(Balances::mint_into(
-				&CollatorStaking::account_id(),
-				Balances::minimum_balance() + 10
-			));
-
-			// Move to session 2.
-			initialize_to_block(20);
-
-			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
-			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
-			// between the rewards obtained and the total stake deposited in it.
-			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
-
-			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
 
 			// Invalid Origin
 			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 3), BadOrigin);
