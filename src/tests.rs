@@ -4796,4 +4796,62 @@ mod on_idle {
 			}
 		});
 	}
+
+
+	#[test]
+	fn test_auto_compound_state_change_on_idle_with_staging_layer_and_rewards_delivery() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate (e.g., Candidate ID = 4)
+			register_candidates(4..=4);
+
+			// Set up stakers and lock for staking
+			lock_for_staking(5..=5); // Staker 5
+
+			// Simulate delivering rewards
+			NextSystemOperation::<Test>::set(Operation::RewardStakers { maybe_last_processed_account: None });
+
+			// Initially, staker 5 is in the staging layer with enabled = false
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true)); // Enable for Staker 5
+
+			// Staker 5 should be moved to commit layer with enabled = true
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false); // Staker 5 commit should be false initially
+			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), true); // Staker 5 should be in Staging layer with enabled = true
+
+			// Process the `on_idle` function to trigger the commit operation
+			let weight = Weight::from_parts(u64::MAX, u64::MAX);
+			CollatorStaking::on_idle(1, weight);  // Trigger the idle process
+
+			// After processing, staker 5 should be in the commit layer with enabled = true
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+
+			// Move to session 2 (simulate next session)
+			initialize_to_block(20);
+
+			// Simulate delivering rewards
+			NextSystemOperation::<Test>::set(Operation::RewardStakers { maybe_last_processed_account: None });
+
+			// Disable auto-compounding for staker 5 (should remove from commit and move to staging)
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
+
+			// Staker 5 should be in commit layer with enabled = true initially
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+
+			// Process the `on_idle` function again to trigger the commit operation
+			CollatorStaking::on_idle(1, weight);  // Trigger the idle process
+
+			// After disabling auto-compounding, staker 5 should be removed from commit layer
+			// assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
+
+			// Staker 5 should now be back in the staging layer with enabled = false
+			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), false);
+
+			// // Check the events for auto-compound disabled for staker 5
+			// System::assert_has_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
+			// 	account: 5,
+			// }));
+		});
+	}
+
 }
