@@ -2377,6 +2377,40 @@ mod unstake_from {
 	}
 
 	#[test]
+	fn claim_should_fail_from_invalid_origin() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=4);
+			lock_for_staking(5..=5);
+			assert_eq!(
+				UserStake::<Test>::get(5),
+				UserStakeInfo {
+					stake: 0,
+					candidates: bbtreeset![],
+					maybe_last_unstake: None,
+					maybe_last_reward_session: None,
+				}
+			);
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(5),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			// Time travel to the next Session
+			initialize_to_block(10);
+			assert_eq!(CurrentSession::<Test>::get(), 1);
+			assert_noop!(
+				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
+				Error::<Test>::PreviousRewardsNotClaimed
+			);
+
+			// Invalid Origin
+			assert_noop!(CollatorStaking::claim_rewards(RuntimeOrigin::root()), BadOrigin);
+		});
+	}
+
+	#[test]
 	fn unstakes_accumulates_amount() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
@@ -2690,6 +2724,18 @@ mod lock_unlock_and_release {
 	}
 
 	#[test]
+	fn lock_with_invalid_origin_should_fail() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			assert_eq!(Balances::balance(&5), 100);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_noop!(CollatorStaking::lock(RuntimeOrigin::root(), 60), BadOrigin);
+
+		});
+	}
+
+	#[test]
 	fn unlock() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
@@ -2731,6 +2777,32 @@ mod lock_unlock_and_release {
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
 				account: 5,
 			}));
+		});
+	}
+
+	#[test]
+	fn unlock_with_invalid_origin_should_fail() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			assert_eq!(Balances::balance(&5), 100);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
+			assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(5), 60));
+			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+				account: 5,
+				amount: 60,
+			}));
+			assert_eq!(Balances::balance(&5), 100);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 60);
+			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
+
+			// We have now enough balance to be able to enable autocompounding
+			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true,));
+
+			assert_noop!(
+				CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)),
+				BadOrigin
+			);
 		});
 	}
 
@@ -3050,6 +3122,19 @@ mod top_up_extra_rewards {
 			assert_eq!(Balances::balance(&CollatorStaking::extra_reward_account_id()), 10);
 		});
 	}
+
+	#[test]
+	fn top_up_extra_rewards_with_wrong_origin_should_not_work() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			assert_eq!(Balances::balance(&CollatorStaking::extra_reward_account_id()), 0);
+
+			// Invalid Origin
+			assert_noop!(CollatorStaking::top_up_extra_rewards(RuntimeOrigin::root(), 10), BadOrigin);
+
+		});
+	}
 }
 
 mod update_candidacy_bond {
@@ -3087,6 +3172,22 @@ mod update_candidacy_bond {
 				Event::<Test>::CandidacyBondUpdated { candidate: 3, new_bond: 20 },
 			));
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 20);
+		});
+	}
+
+	#[test]
+	fn update_candidacy_bond_with_invalid_origin_should_fail() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+
+			// Invalid Origin
+			assert_noop!(
+				CollatorStaking::update_candidacy_bond(RuntimeOrigin::root(), 5),
+				BadOrigin
+			);
 		});
 	}
 }
@@ -3865,6 +3966,29 @@ mod collator_rewards {
 	}
 
 	#[test]
+	fn stop_extra_reward_with_wrong_origin_should_not_work() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			fund_account(CollatorStaking::extra_reward_account_id());
+			assert_eq!(ExtraReward::<Test>::get(), 0);
+
+			// Cannot stop if already zero
+			assert_noop!(
+				CollatorStaking::stop_extra_reward(RuntimeOrigin::signed(RootAccount::get())),
+				Error::<Test>::ExtraRewardAlreadyDisabled
+			);
+
+			// Now we can stop it
+			assert_ok!(CollatorStaking::set_extra_reward(
+				RuntimeOrigin::signed(RootAccount::get()),
+				2
+			));
+			assert_noop!(CollatorStaking::stop_extra_reward(RuntimeOrigin::signed(3)), BadOrigin);
+		});
+	}
+
+	#[test]
 	fn claim_rewards_other_should_work() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
@@ -3932,6 +4056,52 @@ mod collator_rewards {
 				CandidateStake::<Test>::get(&4, &5).checkpoint,
 				FixedU128::from_rational(8, 40)
 			);
+		});
+	}
+
+	#[test]
+	fn claim_rewards_other_with_invalid_origin_should_fail() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(4..=4);
+			lock_for_staking(3..=3);
+
+			// Staker 3 stakes on candidate 4.
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(3),
+				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
+			));
+
+			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
+			// rewards were distributed.
+			assert_eq!(Counters::<Test>::get(&3), FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(&3, &4).checkpoint, FixedU128::zero());
+
+			// Skip session 0, as there are no rewards for this session.
+			initialize_to_block(10);
+
+			// Generate 10 as rewards on the pot generated during session 1.
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 10
+			));
+
+			// Move to session 2.
+			initialize_to_block(20);
+
+			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
+			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
+			// between the rewards obtained and the total stake deposited in it.
+			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
+
+			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
+			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+
+			// Now a random user claims the rewards on behalf of the staker.
+			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 3), BadOrigin);
+
 		});
 	}
 }
