@@ -2726,7 +2726,6 @@ mod lock_unlock_and_release {
 			assert_eq!(Balances::balance(&5), 100);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 0);
 			assert_noop!(CollatorStaking::lock(RuntimeOrigin::root(), 60), BadOrigin);
-
 		});
 	}
 
@@ -2792,10 +2791,7 @@ mod lock_unlock_and_release {
 			assert_eq!(CollatorStaking::get_free_balance(&5), 40);
 
 			// Invalid Origin
-			assert_noop!(
-				CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)),
-				BadOrigin
-			);
+			assert_noop!(CollatorStaking::unlock(RuntimeOrigin::root(), Some(10)), BadOrigin);
 		});
 	}
 
@@ -3124,8 +3120,10 @@ mod top_up_extra_rewards {
 			assert_eq!(Balances::balance(&CollatorStaking::extra_reward_account_id()), 0);
 
 			// Invalid Origin
-			assert_noop!(CollatorStaking::top_up_extra_rewards(RuntimeOrigin::root(), 10), BadOrigin);
-
+			assert_noop!(
+				CollatorStaking::top_up_extra_rewards(RuntimeOrigin::root(), 10),
+				BadOrigin
+			);
 		});
 	}
 }
@@ -4061,7 +4059,6 @@ mod collator_rewards {
 
 			// Invalid Origin
 			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 3), BadOrigin);
-
 		});
 	}
 }
@@ -4797,7 +4794,6 @@ mod on_idle {
 		});
 	}
 
-
 	#[test]
 	fn test_auto_compound_state_change_on_idle_with_staging_layer_and_rewards_delivery() {
 		new_test_ext().execute_with(|| {
@@ -4810,7 +4806,9 @@ mod on_idle {
 			lock_for_staking(5..=5); // Staker 5
 
 			// Simulate delivering rewards
-			NextSystemOperation::<Test>::set(Operation::RewardStakers { maybe_last_processed_account: None });
+			NextSystemOperation::<Test>::set(Operation::RewardStakers {
+				maybe_last_processed_account: None,
+			});
 
 			// Initially, staker 5 is in the staging layer with enabled = false
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true)); // Enable for Staker 5
@@ -4821,7 +4819,7 @@ mod on_idle {
 
 			// Process the `on_idle` function to trigger the commit operation
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
-			CollatorStaking::on_idle(1, weight);  // Trigger the idle process
+			CollatorStaking::on_idle(1, weight); // Trigger the idle process
 
 			// After processing, staker 5 should be in the commit layer with enabled = true
 			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
@@ -4830,24 +4828,30 @@ mod on_idle {
 			initialize_to_block(20);
 
 			// Simulate delivering rewards
-			NextSystemOperation::<Test>::set(Operation::RewardStakers { maybe_last_processed_account: None });
+			NextSystemOperation::<Test>::set(Operation::RewardStakers {
+				maybe_last_processed_account: None,
+			});
 
 			// Disable auto-compounding for staker 5 (should remove from commit and move to staging)
+			assert!(CollatorStaking::is_delivering_rewards());
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
 
 			// Staker 5 should be in commit layer with enabled = true initially
 			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
 
 			// Process the `on_idle` function again to trigger the commit operation
-			CollatorStaking::on_idle(1, weight);  // Trigger the idle process
+			matches!(
+				NextSystemOperation::<Test>::get(),
+				Operation::RewardStakers { maybe_last_processed_account: None }
+			);
+			CollatorStaking::on_idle(1, weight); // Trigger the idle process
+			assert!(!CollatorStaking::is_delivering_rewards());
 
 			// After disabling auto-compounding, staker 5 should be removed from commit layer
-			// assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
+			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
 
 			// Staker 5 should now be back in the staging layer with enabled = false
 			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), false);
-
 		});
 	}
-
 }
