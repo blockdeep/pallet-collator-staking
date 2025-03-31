@@ -26,12 +26,11 @@ use frame_support::weights::WeightMeter;
 use sp_runtime::{FixedU128, Percent};
 
 #[cfg(feature = "try-runtime")]
-use sp_std::vec::Vec;
+use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
 use sp_std::collections::btree_map::BTreeMap;
 #[cfg(feature = "try-runtime")]
-use sp_runtime::TryRuntimeError;
-
+use sp_std::vec::Vec;
 
 pub(crate) mod v1 {
 	use super::*;
@@ -87,6 +86,8 @@ pub enum MigrationSteps<T: Config> {
 	MigrateAutocompounding { cursor: Option<T::AccountId> },
 	/// [`crate::ClaimableRewards`] are to be set to zero, resetting all rewards.
 	ResetClaimableRewards,
+	/// Changes the storage version to 2.
+	ChangeStorageVersion,
 	/// No more operations to be performed.
 	Noop,
 }
@@ -100,12 +101,22 @@ pub enum MigrationSteps<T: Config> {
 pub struct LazyMigrationV1ToV2<T: Config>(PhantomData<T>);
 
 impl<T: Config> LazyMigrationV1ToV2<T> {
+	pub(crate) fn set_storage_version(meter: &mut WeightMeter) -> MigrationSteps<T> {
+		let required = T::DbWeight::get().reads_writes(0, 1);
+		if meter.try_consume(required).is_ok() {
+			StorageVersion::new(Self::id().version_to as u16).put::<Pallet<T>>();
+			MigrationSteps::Noop
+		} else {
+			MigrationSteps::ChangeStorageVersion
+		}
+	}
+
 	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
 		// This step can be manually calculated.
 		let required = T::DbWeight::get().reads_writes(0, 1);
 		if meter.try_consume(required).is_ok() {
 			ClaimableRewards::<T>::set(Zero::zero());
-			MigrationSteps::Noop
+			Self::set_storage_version(meter)
 		} else {
 			MigrationSteps::ResetClaimableRewards
 		}
@@ -235,6 +246,7 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 				Some(Self::migrate_autocompounding(meter, checkpoint))
 			},
 			MigrationSteps::ResetClaimableRewards => Some(Self::reset_rewards(meter)),
+			MigrationSteps::ChangeStorageVersion => Some(Self::set_storage_version(meter)),
 			MigrationSteps::Noop => None,
 		};
 
@@ -246,11 +258,6 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 		use codec::Encode;
 
 		// Return the state of the storage before the migration.
-		assert_ne!(
-			Pallet::<T>::on_chain_storage_version(),
-			Self::id().version_from as u16,
-			"Migration pre-upgrade failed: the storage version is not the expected one"
-		);
 		let map: BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>> =
 			v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
 		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
@@ -260,11 +267,10 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 	#[cfg(feature = "try-runtime")]
 	fn post_upgrade(prev: Vec<u8>) -> Result<(), TryRuntimeError> {
 		use codec::Decode;
-
 		// Check the state of the storage after the migration.
-		assert_ne!(
+		assert_eq!(
 			Pallet::<T>::on_chain_storage_version(),
-			Self::id().version_to as u16,
+			StorageVersion::new(Self::id().version_to as u16),
 			"Migration post-upgrade failed: the storage version is not the expected one"
 		);
 		let (prev_map, prev_autocompound) = <(
@@ -314,6 +320,7 @@ mod tests {
 	fn migration_of_single_element_should_work() {
 		new_test_ext().execute_with(|| {
 			StorageVersion::new(1).put::<Pallet<Test>>();
+			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
 
@@ -335,6 +342,7 @@ mod tests {
 			);
 			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &1), true);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
+			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 2);
 		});
 	}
 
@@ -342,6 +350,7 @@ mod tests {
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
 			StorageVersion::new(1).put::<Pallet<Test>>();
+			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
 
@@ -367,6 +376,7 @@ mod tests {
 				assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &i), true);
 			}
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
+			assert_eq!(Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(2));
 		});
 	}
 }
