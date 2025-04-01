@@ -1720,14 +1720,19 @@ pub mod pallet {
 		fn do_set_autocompound(who: &T::AccountId, enable: bool) -> DispatchResult {
 			let already_enabled = AutoCompound::<T>::get(Layer::Commit, who);
 			let is_delivering_rewards = Self::is_delivering_rewards();
-			let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
 
 			if !enable {
-				AutoCompound::<T>::remove(layer, who);
+				if is_delivering_rewards {
+					AutoCompound::<T>::insert(Layer::Staging, who, false);
+				} else {
+					AutoCompound::<T>::remove(Layer::Staging, who);
+					AutoCompound::<T>::remove(Layer::Commit, who);
+				}
 				if already_enabled {
 					Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
 				}
 			} else {
+				let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
 				ensure!(
 					Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
 					Error::<T>::InsufficientStake
@@ -1944,7 +1949,7 @@ pub mod pallet {
 		}
 
 		/// Checks whether rewards are currently being delivered by the system or not.
-		fn is_delivering_rewards() -> bool {
+		pub(crate) fn is_delivering_rewards() -> bool {
 			matches!(NextSystemOperation::<T>::get(), Operation::RewardStakers { .. })
 		}
 
