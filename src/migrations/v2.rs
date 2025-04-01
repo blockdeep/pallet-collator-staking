@@ -375,6 +375,7 @@ mod tests {
 				assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &i), true);
 			}
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
+			assert_eq!(AutoCompoundSettings::<Test>::iter_prefix(Layer::Commit).count(), 100);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(2));
 		});
 	}
