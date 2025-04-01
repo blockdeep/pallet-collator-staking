@@ -15,7 +15,7 @@
 
 use crate as collator_staking;
 use crate::{
-	mock::*, AutoCompound, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
+	mock::*, AutoCompoundSettings, BalanceOf, CandidacyBondRelease, CandidacyBondReleaseReason,
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
 	ClaimableRewards, CollatorRewardPercentage, Config, Counters, CurrentSession,
 	DesiredCandidates, Error, Event, ExtraReward, FreezeReason, IdentityCollator, Invulnerables,
@@ -898,10 +898,13 @@ mod register_as_candidate {
 			assert_eq!(Candidates::<Test>::count(), 0);
 
 			// Invalid Origin
-			assert_noop!(CollatorStaking::register_as_candidate(
-				RuntimeOrigin::root(),
-				MinCandidacyBond::<Test>::get()
-			), BadOrigin);
+			assert_noop!(
+				CollatorStaking::register_as_candidate(
+					RuntimeOrigin::root(),
+					MinCandidacyBond::<Test>::get()
+				),
+				BadOrigin
+			);
 
 			// and finally rejoins and the stake should remain
 			assert_ok!(CollatorStaking::register_as_candidate(
@@ -1146,10 +1149,7 @@ mod leave_intent {
 			);
 
 			// Invalid Origin
-			assert_noop!(
-				CollatorStaking::leave_intent(RuntimeOrigin::root()),
-				BadOrigin
-			);
+			assert_noop!(CollatorStaking::leave_intent(RuntimeOrigin::root()), BadOrigin);
 
 			// Unstake request is created
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
@@ -1385,10 +1385,13 @@ mod stake {
 			lock_for_staking(4..=4);
 
 			// Invalid Origin
-			assert_noop!(CollatorStaking::stake(
-				RuntimeOrigin::root(),
-				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
-			), BadOrigin);
+			assert_noop!(
+				CollatorStaking::stake(
+					RuntimeOrigin::root(),
+					vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+				),
+				BadOrigin
+			);
 
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(4),
@@ -2386,10 +2389,7 @@ mod unstake_from {
 			assert_eq!(CurrentSession::<Test>::get(), 1);
 
 			// Invalid Origin
-			assert_noop!(
-				CollatorStaking::unstake_from(RuntimeOrigin::root(), 3),
-				BadOrigin
-			);
+			assert_noop!(CollatorStaking::unstake_from(RuntimeOrigin::root(), 3), BadOrigin);
 
 			assert_noop!(
 				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
@@ -2652,27 +2652,24 @@ mod set_autocompound {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
 
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
 			assert_noop!(
 				CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true),
 				Error::<Test>::InsufficientStake
 			);
 
 			// Invalid Origin
-			assert_noop!(
-				CollatorStaking::set_autocompound(RuntimeOrigin::root(), true),
-				BadOrigin
-			);
+			assert_noop!(CollatorStaking::set_autocompound(RuntimeOrigin::root(), true), BadOrigin);
 
 			lock_for_staking(5..=5);
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true));
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
 			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundEnabled {
 				account: 5,
 			}));
 			// Set it back to zero.
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
 			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
 				account: 5,
 			}));
@@ -3837,7 +3834,7 @@ mod collator_rewards {
 			);
 
 			// Staker 3 will autocompound all of its earnings
-			AutoCompound::<Test>::insert(Layer::Commit, 3, true);
+			AutoCompoundSettings::<Test>::insert(Layer::Commit, 3, true);
 			ExtraReward::<Test>::set(1);
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 0);
 			assert_ok!(Balances::mint_into(
@@ -4853,15 +4850,15 @@ mod on_idle {
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true)); // Enable for Staker 5
 
 			// Staker 5 should be moved to commit layer with enabled = true
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false); // Staker 5 commit should be false initially
-			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), true); // Staker 5 should be in Staging layer with enabled = true
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false); // Staker 5 commit should be false initially
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5), true); // Staker 5 should be in Staging layer with enabled = true
 
 			// Process the `on_idle` function to trigger the commit operation
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
 			CollatorStaking::on_idle(1, weight); // Trigger the idle process
 
 			// After processing, staker 5 should be in the commit layer with enabled = true
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
 
 			// Move to session 2 (simulate next session)
 			initialize_to_block(20);
@@ -4876,7 +4873,7 @@ mod on_idle {
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
 
 			// Staker 5 should be in commit layer with enabled = true initially
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), true);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
 
 			// Process the `on_idle` function again to trigger the commit operation
 			matches!(
@@ -4887,11 +4884,10 @@ mod on_idle {
 			assert!(!CollatorStaking::is_delivering_rewards());
 
 			// After disabling auto-compounding, staker 5 should be removed from commit layer
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, 5), false);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
 
 			// Staker 5 should now be back in the staging layer with enabled = false
-			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), false);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5), false);
 		});
 	}
-
 }

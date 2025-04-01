@@ -17,8 +17,8 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompound, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config, Layer,
-	Pallet, WeightInfo,
+	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config,
+	Layer, Pallet, WeightInfo,
 };
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
@@ -140,7 +140,7 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 			if let Some((staker, value)) = iter.next() {
 				v1::AutoCompound::<T>::remove(staker.clone());
 				if !value.is_zero() {
-					AutoCompound::<T>::insert(Layer::Commit, staker.clone(), true);
+					AutoCompoundSettings::<T>::insert(Layer::Commit, staker.clone(), true);
 				}
 				*cursor = Some(staker);
 			} else {
@@ -296,7 +296,7 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 
 		for (staker, percentage) in prev_autocompound {
 			let value = !percentage.is_zero();
-			assert_eq!(AutoCompound::<T>::get(Layer::Commit, &staker), value);
+			assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &staker), value);
 		}
 
 		assert_eq!(
@@ -339,7 +339,7 @@ mod tests {
 				CandidateStake::<Test>::get(&1, &1),
 				CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 			);
-			assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &1), true);
+			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &1), true);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 2);
 		});
@@ -372,7 +372,7 @@ mod tests {
 					CandidateStake::<Test>::get(&i, &i),
 					CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 				);
-				assert_eq!(AutoCompound::<Test>::get(Layer::Commit, &i), true);
+				assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &i), true);
 			}
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(2));

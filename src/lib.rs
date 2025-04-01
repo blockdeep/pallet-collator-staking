@@ -468,10 +468,10 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// AutoCompound storage keeps track of whether auto-compound rewards are enabled for an account
+	/// Keeps track of whether auto-compound rewards are enabled for an account
 	/// in a specific layer.
 	#[pallet::storage]
-	pub type AutoCompound<T: Config> = StorageDoubleMap<
+	pub type AutoCompoundSettings<T: Config> = StorageDoubleMap<
 		_,
 		Blake2_128Concat,
 		Layer,
@@ -1326,10 +1326,10 @@ pub mod pallet {
 			}
 			let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
 			let mut iter = if let Some(last_key) = &maybe_last_processed_account {
-				let key = AutoCompound::<T>::hashed_key_for(Layer::Commit, last_key);
-				AutoCompound::<T>::iter_prefix_from(Layer::Commit, key)
+				let key = AutoCompoundSettings::<T>::hashed_key_for(Layer::Commit, last_key);
+				AutoCompoundSettings::<T>::iter_prefix_from(Layer::Commit, key)
 			} else {
-				AutoCompound::<T>::iter_prefix(Layer::Commit)
+				AutoCompoundSettings::<T>::iter_prefix(Layer::Commit)
 			};
 
 			let read = T::DbWeight::get().reads_writes(1, 0);
@@ -1380,14 +1380,14 @@ pub mod pallet {
 		pub(crate) fn do_commit_autocompound(
 			meter: &mut WeightMeter,
 		) -> Result<OperationFor<T>, ()> {
-			let mut iter = AutoCompound::<T>::drain_prefix(Layer::Staging);
+			let mut iter = AutoCompoundSettings::<T>::drain_prefix(Layer::Staging);
 			let worst_case_weight = T::DbWeight::get().reads_writes(1, 2);
 			while meter.try_consume(worst_case_weight).is_ok() {
 				if let Some((staker, enabled)) = iter.next() {
 					if enabled {
-						AutoCompound::<T>::set(Layer::Commit, &staker, true);
+						AutoCompoundSettings::<T>::set(Layer::Commit, &staker, true);
 					} else {
-						AutoCompound::<T>::remove(Layer::Commit, &staker);
+						AutoCompoundSettings::<T>::remove(Layer::Commit, &staker);
 					}
 				} else {
 					let op = Operation::Idle;
@@ -1428,7 +1428,7 @@ pub mod pallet {
 					ClaimableRewards::<T>::mutate(|claimable_rewards| {
 						claimable_rewards.saturating_reduce(total_rewards);
 					});
-					let autocompound = AutoCompound::<T>::get(Layer::Commit, who);
+					let autocompound = AutoCompoundSettings::<T>::get(Layer::Commit, who);
 					if autocompound {
 						Self::do_lock(who, total_rewards)?;
 						for (candidate, rewards) in &candidate_rewards {
@@ -1718,15 +1718,15 @@ pub mod pallet {
 		///
 		/// Emits `AutoCompoundEnabled` or `AutoCompoundDisabled` event based on the action.
 		fn do_set_autocompound(who: &T::AccountId, enable: bool) -> DispatchResult {
-			let already_enabled = AutoCompound::<T>::get(Layer::Commit, who);
+			let already_enabled = AutoCompoundSettings::<T>::get(Layer::Commit, who);
 			let is_delivering_rewards = Self::is_delivering_rewards();
 
 			if !enable {
 				if is_delivering_rewards {
-					AutoCompound::<T>::insert(Layer::Staging, who, false);
+					AutoCompoundSettings::<T>::insert(Layer::Staging, who, false);
 				} else {
-					AutoCompound::<T>::remove(Layer::Staging, who);
-					AutoCompound::<T>::remove(Layer::Commit, who);
+					AutoCompoundSettings::<T>::remove(Layer::Staging, who);
+					AutoCompoundSettings::<T>::remove(Layer::Commit, who);
 				}
 				if already_enabled {
 					Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
@@ -1737,7 +1737,7 @@ pub mod pallet {
 					Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
 					Error::<T>::InsufficientStake
 				);
-				AutoCompound::<T>::insert(layer, who, true);
+				AutoCompoundSettings::<T>::insert(layer, who, true);
 				if !already_enabled {
 					Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
 				}
@@ -1745,7 +1745,7 @@ pub mod pallet {
 
 			// If we could write directly into the commit layer then we can safely remove the staging one.
 			if !is_delivering_rewards {
-				AutoCompound::<T>::remove(Layer::Staging, who);
+				AutoCompoundSettings::<T>::remove(Layer::Staging, who);
 			}
 
 			Ok(())

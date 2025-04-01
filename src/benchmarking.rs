@@ -600,7 +600,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), true);
 
-		assert_eq!(AutoCompound::<T>::get(Layer::Commit, &caller), true);
+		assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &caller), true);
 	}
 
 	#[benchmark]
@@ -826,7 +826,7 @@ mod benchmarks {
 			);
 		}
 
-		assert_eq!(AutoCompound::<T>::get(Layer::Commit, &acc), true);
+		assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &acc), true);
 		assert_eq!(cursor, None);
 	}
 
