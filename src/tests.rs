@@ -2882,6 +2882,83 @@ mod lock_unlock_and_release {
 	}
 
 	#[test]
+	fn test_bond_release_after_block() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// registration
+			// Ensure preconditions
+			assert_eq!(Balances::balance(&3), 100);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
+			);
+
+			register_candidates(3..=3);
+			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
+			assert_eq!(
+				CandidateStake::<Test>::get(3, 3),
+				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
+			);
+			assert_eq!(Candidates::<Test>::count(), 1);
+			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
+			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
+
+			// leave
+			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
+			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
+			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
+			// Simulate reaching block 7
+			initialize_to_block(7);
+
+			// Process the release for staker 3
+			assert_ok!(CollatorStaking::release(RuntimeOrigin::signed(3)));
+		});
+	}
+
+	#[test]
+	fn test_candidates_function() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			register_candidates(3..=3);
+			lock_for_staking(3..=3);
+			register_candidates(5..=5);
+			lock_for_staking(5..=5);
+
+			lock_for_staking(4..=4);
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			));
+
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 5, stake: 30 }].try_into().unwrap()
+			));
+
+			let candidate_list = CollatorStaking::candidates();
+			assert_eq!(candidate_list.len(), 2);
+			assert_eq!(candidate_list[0].0, 5);
+			assert_eq!(candidate_list[0].1, 30);
+			assert_eq!(candidate_list[1].0, 3);
+			assert_eq!(candidate_list[1].1, 20);
+		});
+	}
+
+
+	#[test]
 	fn lock_stake_unstake_unlock() {
 		new_test_ext().execute_with(|| {
 			initialize_to_block(1);
