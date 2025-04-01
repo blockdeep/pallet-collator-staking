@@ -897,6 +897,12 @@ mod register_as_candidate {
 			);
 			assert_eq!(Candidates::<Test>::count(), 0);
 
+			// Invalid Origin
+			assert_noop!(CollatorStaking::register_as_candidate(
+				RuntimeOrigin::root(),
+				MinCandidacyBond::<Test>::get()
+			), BadOrigin);
+
 			// and finally rejoins and the stake should remain
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(3),
@@ -1139,6 +1145,12 @@ mod leave_intent {
 				Error::<Test>::NotCandidate
 			);
 
+			// Invalid Origin
+			assert_noop!(
+				CollatorStaking::leave_intent(RuntimeOrigin::root()),
+				BadOrigin
+			);
+
 			// Unstake request is created
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::CandidacyBond.into(), &3), 10);
@@ -1371,6 +1383,13 @@ mod stake {
 				}
 			);
 			lock_for_staking(4..=4);
+
+			// Invalid Origin
+			assert_noop!(CollatorStaking::stake(
+				RuntimeOrigin::root(),
+				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
+			), BadOrigin);
+
 			assert_ok!(CollatorStaking::stake(
 				RuntimeOrigin::signed(4),
 				vec![StakeTarget { candidate: 3, stake: 20 }].try_into().unwrap()
@@ -2544,6 +2563,9 @@ mod unstake_all {
 				}
 			);
 			assert_eq!(Balances::balance_frozen(&FreezeReason::Staking.into(), &5), 100);
+			// Invalid Origin
+			assert_noop!(CollatorStaking::unstake_all(RuntimeOrigin::root()), BadOrigin);
+
 			assert_ok!(CollatorStaking::unstake_all(RuntimeOrigin::signed(5)));
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakeRemoved {
 				account: 5,
@@ -2627,6 +2649,12 @@ mod set_autocompound {
 			assert_noop!(
 				CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true),
 				Error::<Test>::InsufficientStake
+			);
+
+			// Invalid Origin
+			assert_noop!(
+				CollatorStaking::set_autocompound(RuntimeOrigin::root(), true),
+				BadOrigin
 			);
 
 			lock_for_staking(5..=5);
