@@ -2384,6 +2384,13 @@ mod unstake_from {
 			// Time travel to the next Session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), 1);
+
+			// Invalid Origin
+			assert_noop!(
+				CollatorStaking::unstake_from(RuntimeOrigin::root(), 3),
+				BadOrigin
+			);
+
 			assert_noop!(
 				CollatorStaking::unstake_from(RuntimeOrigin::signed(5), 3),
 				Error::<Test>::PreviousRewardsNotClaimed
@@ -2854,6 +2861,10 @@ mod lock_unlock_and_release {
 				ReleaseQueues::<Test>::get(5),
 				vec![ReleaseRequest { block: 3, amount: 20 }]
 			);
+
+			// Invalid Origin
+			assert_noop!(CollatorStaking::release(RuntimeOrigin::root()), BadOrigin);
+
 			assert_ok!(CollatorStaking::release(RuntimeOrigin::signed(5)));
 			assert_eq!(
 				ReleaseQueues::<Test>::get(5),
@@ -4882,4 +4893,5 @@ mod on_idle {
 			assert_eq!(AutoCompound::<Test>::get(Layer::Staging, 5), false);
 		});
 	}
+
 }
