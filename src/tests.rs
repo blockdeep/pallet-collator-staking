@@ -2918,11 +2918,28 @@ mod lock_unlock_and_release {
 				})
 			);
 
+			// Simulate reaching block 4
+			initialize_to_block(4);
+			assert_ok!(CollatorStaking::release(RuntimeOrigin::signed(3)));
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				Some(CandidacyBondRelease {
+					bond: 10,
+					block: 6,
+					reason: CandidacyBondReleaseReason::Left
+				})
+			);
+
 			// Simulate reaching block 7
 			initialize_to_block(7);
 
 			// Process the release for staker 3
 			assert_ok!(CollatorStaking::release(RuntimeOrigin::signed(3)));
+
+			assert_eq!(
+				CandidacyBondReleases::<Test>::get(3),
+				None
+			);
 		});
 	}
 
@@ -2932,7 +2949,6 @@ mod lock_unlock_and_release {
 			initialize_to_block(1);
 
 			register_candidates(3..=3);
-			lock_for_staking(3..=3);
 			register_candidates(5..=5);
 			lock_for_staking(5..=5);
 
@@ -2950,10 +2966,7 @@ mod lock_unlock_and_release {
 
 			let candidate_list = CollatorStaking::candidates();
 			assert_eq!(candidate_list.len(), 2);
-			assert_eq!(candidate_list[0].0, 5);
-			assert_eq!(candidate_list[0].1, 30);
-			assert_eq!(candidate_list[1].0, 3);
-			assert_eq!(candidate_list[1].1, 20);
+			assert_eq!(candidate_list, vec![(5, 30), (3, 20)]);
 		});
 	}
 
