@@ -23,6 +23,32 @@
 //! It allows staking tokens to back collators, and receive rewards proportionately.
 //! There is no slashing implemented. If a collator does not produce blocks as expected,
 //! it is removed from the collator set.
+//!
+//! ## Reward distribution mechanism
+//!
+//! The pallet uses a checkpoint system to efficiently track and distribute rewards.
+//! This allows automatically distribute rewards for autocompounding implementation.
+//!
+//! Example:
+//! A collator has 3 stakers with 100 tokens each (total 300 tokens)
+//! The collator's counter starts at 0
+//! After a session with 30 tokens of rewards:
+//!  * Counter increases by 30/300 = 0.1
+//!  * Each token staked now "earned" 0.1 tokens
+//! A staker with 100 tokens claims rewards:
+//!  * Unclaimed rewards = (0.1 - 0) * 100 = 10 tokens
+//!  * Checkpoint updated from 0 to 0.1
+//! After another session with 60 tokens of rewards:
+//!  * Counter increases by 60/300 = 0.2, now totaling 0.3
+//! The same staker claims again:
+//!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
+//!  * Checkpoint updated from 0.1 to 0.3
+//! 
+//! //! # Two-Layer Auto-Compound Settings
+//! 
+//! The pallet uses a two-layer approach for auto-compound distribuiton:
+//! - Commit Layer: Active settings currently used for reward distribution
+//! - Staging Layer: Temporary storage for changes made during active distribution
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -258,6 +284,7 @@ pub mod pallet {
 		/// The amount staked.
 		pub stake: Balance,
 		/// Checkpoint to track rewards for a given collator.
+		/// Represents the last point at which a staker was given rewards.
 		pub checkpoint: FixedU128,
 	}
 
@@ -488,7 +515,7 @@ pub mod pallet {
 	pub type CandidacyBondReleases<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
 
-	/// Accumulated rewards delivered to stakers by each collator.
+	/// Represents accumulated rewards per token staked on a given collator over time.
 	#[pallet::storage]
 	pub type Counters<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
@@ -1262,6 +1289,7 @@ pub mod pallet {
 		/// Distributes rewards accumulated over previous sessions
 		/// and ensures that rewards are only claimable for sessions where the
 		/// `other` has participated. Rewards for the current session cannot be claimed.
+		/// TODO: Why is it needed ? 
 		///
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: `other` has no rewards to claim.
