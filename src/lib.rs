@@ -43,9 +43,9 @@
 //! The same staker claims again:
 //!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
 //!  * Checkpoint updated from 0.1 to 0.3
-//! 
+//!
 //! ## Two-Layer Auto-Compound Settings
-//! 
+//!
 //! The pallet uses a two-layer approach for auto-compound distribution:
 //! - Commit Layer: Active settings currently used for reward distribution.
 //! - Staging Layer: Temporary storage for changes made during active distribution.
@@ -1283,26 +1283,26 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::claim_rewards(candidates)).into())
 		}
 
-		/// Claims all pending rewards for `other`.
+		/// Claims all pending rewards for `target`.
 		///
-		/// Distributes rewards accumulated over previous sessions. 
+		/// Distributes rewards accumulated over previous sessions.
 		/// Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
-		/// - `Error::<T>::NoPendingClaim`: `other` has no rewards to claim.
+		/// - `Error::<T>::NoPendingClaim`: `target` has no rewards to claim.
 		#[pallet::call_index(21)]
 		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get()))]
 		pub fn claim_rewards_other(
 			origin: OriginFor<T>,
-			other: T::AccountId,
+			target: T::AccountId,
 		) -> DispatchResultWithPostInfo {
 			// We do not care about the sender.
 			ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
-			ensure!(!Self::staker_has_claimed(&other), Error::<T>::NoPendingClaim);
+			ensure!(!Self::staker_has_claimed(&target), Error::<T>::NoPendingClaim);
 
-			let candidates = Self::do_claim_rewards(&other)?;
+			let candidates = Self::do_claim_rewards(&target)?;
 			Ok(Some(T::WeightInfo::claim_rewards(candidates)).into())
 		}
 	}
