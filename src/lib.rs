@@ -28,7 +28,7 @@
 
 use core::marker::PhantomData;
 
-use codec::Codec;
+use codec::{Codec, DecodeWithMemTracking};
 use frame_support::traits::TypedGet;
 use sp_std::vec::Vec;
 
@@ -238,7 +238,15 @@ pub mod pallet {
 	}
 
 	#[derive(
-		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
 	)]
 	pub struct StakeTarget<AccountId, Balance> {
 		pub candidate: AccountId,
