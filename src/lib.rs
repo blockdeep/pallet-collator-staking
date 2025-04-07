@@ -29,7 +29,7 @@
 //! The pallet uses a checkpoint system to efficiently track and distribute rewards.
 //! This allows automatically distribute rewards for autocompounding implementation.
 //!
-//! Example:
+//! ### Example:
 //! A collator has 3 stakers with 100 tokens each (total 300 tokens)
 //! The collator's counter starts at 0
 //! After a session with 30 tokens of rewards:
@@ -44,11 +44,11 @@
 //!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
 //!  * Checkpoint updated from 0.1 to 0.3
 //! 
-//! //! # Two-Layer Auto-Compound Settings
+//! ## Two-Layer Auto-Compound Settings
 //! 
-//! The pallet uses a two-layer approach for auto-compound distribuiton:
-//! - Commit Layer: Active settings currently used for reward distribution
-//! - Staging Layer: Temporary storage for changes made during active distribution
+//! The pallet uses a two-layer approach for auto-compound distribution:
+//! - Commit Layer: Active settings currently used for reward distribution.
+//! - Staging Layer: Temporary storage for changes made during active distribution.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -1266,9 +1266,8 @@ pub mod pallet {
 
 		/// Claims all pending rewards for a given staker.
 		///
-		/// Distributes rewards accumulated over previous sessions
-		/// and ensures that rewards are only claimable for sessions where the
-		/// caller has participated. Rewards for the current session cannot be claimed.
+		/// Distributes rewards accumulated over previous sessions.
+		/// Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
@@ -1286,10 +1285,8 @@ pub mod pallet {
 
 		/// Claims all pending rewards for `other`.
 		///
-		/// Distributes rewards accumulated over previous sessions
-		/// and ensures that rewards are only claimable for sessions where the
-		/// `other` has participated. Rewards for the current session cannot be claimed.
-		/// TODO: Why is it needed ? 
+		/// Distributes rewards accumulated over previous sessions. 
+		/// Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: `other` has no rewards to claim.
