@@ -4289,3 +4289,79 @@ mod session_management {
 		});
 	}
 }
+
+mod claim_rewards_other {
+	use super::*;
+
+	#[test]
+	fn claim_rewards_other_should_work() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Register a candidate
+			register_candidates(3..=3);
+			lock_for_staking(4..=4);
+
+			// Staker 4 stakes on candidate 3
+			assert_ok!(CollatorStaking::stake(
+				RuntimeOrigin::signed(4),
+				vec![StakeTarget { candidate: 3, stake: 40 }].try_into().unwrap()
+			));
+
+			// Move 1 session.
+			initialize_to_block(10);
+
+			// Simulate that collator 3 produced blocks in session 1
+			ProducedBlocks::<Test>::insert(3, 10);
+
+			// Generate 10 as rewards on the pot generated during session 1.
+			// 20% to collators, 80% to stakers, so 8 to staker.
+			assert_ok!(Balances::mint_into(
+				&CollatorStaking::account_id(),
+				Balances::minimum_balance() + 10
+			));
+
+			// Move to session 2.
+			initialize_to_block(20);
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::SessionEnded {
+				index: 1,
+				rewards: 10,
+			}));
+
+			// Check that staker 4 has 8 claimable rewards.
+			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 8);
+
+			// Claim rewards for staker 4 from other user.
+			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(1), 4));
+			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
+				account: 4,
+				amount: 8, // 80% of 10
+			}));
+		});
+	}
+
+	#[test]
+	fn nonexistent_account() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Try to claim rewards for an account that has never staked
+			let nonexistent_staker = 25;
+
+			assert_noop!(
+				CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(1), nonexistent_staker),
+				Error::<Test>::NoPendingClaim
+			);
+		});
+	}
+
+	#[test]
+	fn requires_signed_origin() {
+		new_test_ext().execute_with(|| {
+			initialize_to_block(1);
+
+			// Try to claim with root origin should fail
+			assert_noop!(CollatorStaking::claim_rewards_other(RuntimeOrigin::root(), 4), BadOrigin);
+		});
+	}
+}

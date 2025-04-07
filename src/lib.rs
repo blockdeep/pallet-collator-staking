@@ -1197,6 +1197,33 @@ pub mod pallet {
 			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
 			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
 		}
+
+		/// Claims all pending rewards for `target`.
+		///
+		/// Distributes rewards accumulated over previous sessions
+		/// and ensures that rewards are only claimable for sessions where the
+		/// `target` has participated. Rewards for the current session cannot be claimed.
+		///
+		/// **Errors**:
+		/// - `Error::<T>::NoPendingClaim`: `target` has no rewards to claim.
+		#[pallet::call_index(21)]
+		#[pallet::weight(T::WeightInfo::claim_rewards(
+			T::MaxStakedCandidates::get(),
+			T::MaxRewardSessions::get()
+		))]
+		pub fn claim_rewards_other(
+			origin: OriginFor<T>,
+			target: T::AccountId,
+		) -> DispatchResultWithPostInfo {
+			// We do not care about the sender.
+			ensure_signed(origin)?;
+
+			// Staker can't claim in the same session as there are no rewards.
+			ensure!(!Self::staker_has_claimed(&target), Error::<T>::NoPendingClaim);
+
+			let (candidates, rewards) = Self::do_claim_rewards(&target)?;
+			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
