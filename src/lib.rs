@@ -28,7 +28,7 @@
 
 use core::marker::PhantomData;
 
-use codec::{Codec, DecodeWithMemTracking};
+use codec::Codec;
 use frame_support::traits::TypedGet;
 use sp_std::vec::Vec;
 
