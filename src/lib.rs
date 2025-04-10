@@ -261,7 +261,15 @@ pub mod pallet {
 	}
 
 	#[derive(
-		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
 	)]
 	pub struct StakeTarget<AccountId, Balance> {
 		pub candidate: AccountId,
