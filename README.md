@@ -54,17 +54,23 @@ before their funds are unlocked. No rewards are given during this delay period.
 
 ### Auto Compounding
 
-Users can also select the percentage of rewards that will be auto-compounded. If the selected percentage is greater than
-zero, part of the rewards will be re-invested as stake in the collator when receiving rewards per block.
+Users opt-in to reinvest all generated rewards automatically. If they do, all newly generated rewards will be
+re-invested as stake in the collator when receiving rewards per block. Furthermore, **the system will automatically
+collect and reinvest all the rewards on behalf of the user when a new session starts**.
 
 ### Reward delivery
 
-When a session ends, a snapshot of the generated rewards and the per-candidate stake is taken. This information is used
-to calculate the per-staker rewards for that session.
+When a session ends, total rewards generated for each collator are updated with the new information and the corresponding
+portion will be available for stakers to claim.
 Stakers will have to call the `claim_rewards` extrinsic to collect the corresponding earnings from the previous
 sessions. This process will be automatically triggered whenever
 the staker alter its stake. That is: when `stake`, `unstake` or `unstake_all` is called. Claimed rewards will then be
 auto-compounded if the user sets an auto-compound percentage greater than zero.
+
+#### Automatic reward claiming
+
+Users with autocompounding enabled are eligible to get their rewards automatically claimed and reinvested. The system
+will make use of the `on_idle` hook for that matter, collecting the rewards right after a new session starts.
 
 ### Runtime Configuration
 
@@ -89,7 +95,6 @@ auto-compounded if the user sets an auto-compound percentage greater than zero.
 | `StakeUnlockDelay`         | Number of blocks to wait before unlocking the stake by a user.                                       |
 | `BondUnlockDelay`          | Number of blocks to wait before unlocking the bond by a collator.                                    |
 | `RestakeUnlockDelay`       | Number of blocks to wait before reusing funds previously assigned to a candidate.                    |
-| `MaxRewardSessions`        | Maximum number of per-session reward snapshots to keep in storage.                                   |
 | `AutoCompoundingThreshold` | Minimum stake needed to enable autocompounding.                                                      |
 | `WeightInfo`               | Information on runtime weights.                                                                      |
 
@@ -116,7 +121,7 @@ to block authorship so that it can assign rewards to collators and their stakers
 ### Compatibility
 
 This pallet is compatible
-with [polkadot release stable2407-2](https://github.com/paritytech/polkadot-sdk/releases/tag/polkadot-stable2407-2) or
+with [polkadot release stable2412-2](https://github.com/paritytech/polkadot-sdk/releases/tag/polkadot-stable2412-2) or
 higher.
 
 ## License

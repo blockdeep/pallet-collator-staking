@@ -21,14 +21,13 @@ use super::*;
 use crate::Pallet as CollatorStaking;
 use codec::Decode;
 use frame_benchmarking::{account, v2::*, whitelisted_caller, BenchmarkError};
+use frame_support::pallet_prelude::Zero;
 use frame_support::traits::fungible::{Inspect, Mutate};
 use frame_support::traits::{EnsureOrigin, Get};
-use frame_support::BoundedBTreeMap;
 use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, RawOrigin};
 use pallet_authorship::EventHandler;
 use pallet_session::SessionManager;
-use sp_runtime::traits::Zero;
-use sp_runtime::Percent;
+use sp_runtime::{FixedPointNumber, FixedU128, Percent, Saturating};
 use sp_std::prelude::*;
 
 const SEED: u32 = 0;
@@ -141,7 +140,6 @@ fn prepare_staker<T: Config>() -> T::AccountId {
 
 fn prepare_rewards<T: Config + pallet_session::Config>(
 	c: u32,
-	r: u32,
 ) -> (T::AccountId, BalanceOf<T>, Vec<T::AccountId>) {
 	let amount = T::Currency::minimum_balance();
 	MinStake::<T>::set(amount);
@@ -154,13 +152,8 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 	)
 	.unwrap();
 
-	CollatorStaking::<T>::set_autocompound_percentage(
-		RawOrigin::Signed(staker.clone()).into(),
-		Percent::from_parts(100),
-	)
-	.unwrap();
+	CollatorStaking::<T>::set_autocompound(RawOrigin::Signed(staker.clone()).into(), true).unwrap();
 
-	let mut reward_map = BoundedBTreeMap::new();
 	let total_candidates = T::MaxCandidates::get();
 	let candidates = register_validators::<T>(total_candidates);
 	register_candidates::<T>(total_candidates);
@@ -173,24 +166,16 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 					.unwrap(),
 			)
 			.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
+			Counters::<T>::mutate(candidate, |counter| {
+				counter
+					.saturating_accrue(FixedU128::saturating_from_rational(amount, amount).into())
+			})
 		}
-		reward_map.try_insert(candidate.clone(), (amount, amount)).unwrap();
 	}
 
-	for session in 1..(r + 1) {
-		PerSessionRewards::<T>::insert(
-			session,
-			SessionInfo {
-				candidates: reward_map.clone(),
-				rewards: amount * c.into(),
-				claimed_rewards: Zero::zero(),
-			},
-		);
-	}
-
-	let total_rewards = amount * c.into() * r.into();
+	let total_rewards: BalanceOf<T> = amount * c.into();
 	ClaimableRewards::<T>::set(total_rewards);
-	CurrentSession::<T>::set(r + 1);
+	CurrentSession::<T>::set(1);
 	T::Currency::mint_into(
 		&CollatorStaking::<T>::account_id(),
 		T::Currency::minimum_balance() + total_rewards,
@@ -203,6 +188,7 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
+	use frame_support::weights::WeightMeter;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -575,11 +561,8 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn claim_rewards(
-		c: Linear<1, { T::MaxStakedCandidates::get() }>,
-		r: Linear<1, { T::MaxRewardSessions::get() }>,
-	) {
-		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c, r);
+	fn claim_rewards(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
+		let (staker, total_rewards, candidates) = prepare_rewards::<T>(c);
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(staker.clone()));
@@ -602,7 +585,7 @@ mod benchmarks {
 
 	// Worst case is if stake exists
 	#[benchmark]
-	fn set_autocompound_percentage() {
+	fn set_autocompound() {
 		let caller = prepare_staker::<T>();
 		let amount = T::AutoCompoundingThreshold::get();
 		let candidate = register_single_validator::<T>(0);
@@ -614,12 +597,10 @@ mod benchmarks {
 		)
 		.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
 
-		let percent = Percent::from_parts(50);
-
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), percent);
+		_(RawOrigin::Signed(caller.clone()), true);
 
-		assert_eq!(AutoCompound::<T>::get(&caller), percent);
+		assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &caller), true);
 	}
 
 	#[benchmark]
@@ -801,6 +782,52 @@ mod benchmarks {
 			T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller),
 			T::Currency::minimum_balance()
 		);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_stake_step() {
+		let acc1: T::AccountId = account("user1", 0, SEED);
+		let acc2: T::AccountId = account("user2", 1, SEED);
+		crate::migrations::v2::v1::CandidateStake::<T>::insert(
+			&acc1,
+			&acc2,
+			crate::migrations::v2::v1::CandidateStakeInfo { stake: 50u32.into(), session: 15 },
+		);
+		let mut meter = WeightMeter::new();
+		let mut cursor = None;
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_stake(
+				&mut meter,
+				&mut cursor,
+			);
+		}
+
+		assert_eq!(
+			CandidateStake::<T>::get(&acc1, &acc2),
+			CandidateStakeInfo { stake: 50u32.into(), checkpoint: FixedU128::zero() }
+		);
+		assert_eq!(cursor, None);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_autocompound_step() {
+		let acc: T::AccountId = account("user1", 0, SEED);
+		crate::migrations::v2::v1::AutoCompound::<T>::insert(&acc, Percent::from_parts(10));
+		let mut meter = WeightMeter::new();
+		let mut cursor = None;
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_autocompounding(
+				&mut meter,
+				&mut cursor,
+			);
+		}
+
+		assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &acc), true);
+		assert_eq!(cursor, None);
 	}
 
 	impl_benchmark_test_suite!(CollatorStaking, crate::mock::new_test_ext(), crate::mock::Test,);
