@@ -187,7 +187,7 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 #[benchmarks(where T: pallet_authorship::Config + pallet_session::Config)]
 mod benchmarks {
 	use super::*;
-	use frame_support::traits::fungible::{Inspect, InspectFreeze, Mutate};
+	use frame_support::traits::fungible::{Inspect, Mutate};
 	use frame_support::weights::WeightMeter;
 
 	#[benchmark]
@@ -758,7 +758,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), balance);
 
-		assert_eq!(T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller), balance);
+		assert_eq!(CollatorStaking::<T>::get_total_frozen_balance(&caller), balance);
 	}
 
 	#[benchmark]

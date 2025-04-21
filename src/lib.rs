@@ -76,7 +76,6 @@ const LOG_TARGET: &str = "runtime::collator-staking";
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::weights::WeightMeter;
 	use frame_support::{
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
@@ -86,6 +85,7 @@ pub mod pallet {
 			tokens::Preservation::{Expendable, Preserve},
 			EnsureOrigin, ValidatorRegistration,
 		},
+		weights::WeightMeter,
 		BoundedVec, DefaultNoBound, PalletId,
 	};
 	use frame_system::pallet_prelude::*;
@@ -427,6 +427,7 @@ pub mod pallet {
 	where
 		Balance: Saturating + Copy,
 	{
+		/// Returns the total amount of locked balance that is not part of staking.
 		pub fn total(&self) -> Balance {
 			self.releasing.saturating_add(self.candidacy_bond)
 		}
@@ -2105,11 +2106,14 @@ pub mod pallet {
 			frame_system::Pallet::<T>::block_number()
 		}
 
+		pub fn get_total_frozen_balance(account: &T::AccountId) -> BalanceOf<T> {
+			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
+		}
+
 		/// Gets the locked balance potentially used for staking.
 		pub fn get_staked_balance(account: &T::AccountId) -> BalanceOf<T> {
-			let other = LockedBalances::<T>::get(account).total();
-			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
-				.saturating_sub(other)
+			Self::get_total_frozen_balance(account)
+				.saturating_sub(LockedBalances::<T>::get(account).total())
 		}
 
 		/// Gets the locked balance to be released.
@@ -2124,7 +2128,7 @@ pub mod pallet {
 
 		/// Gets the maximum balance a given user can lock for staking.
 		pub fn get_free_balance(account: &T::AccountId) -> BalanceOf<T> {
-			let total_locked = T::Currency::balance_frozen(&FreezeReason::Staking.into(), account);
+			let total_locked = Self::get_total_frozen_balance(account);
 			T::Currency::balance(account).saturating_sub(total_locked)
 		}
 
@@ -2271,8 +2275,7 @@ pub mod pallet {
 
 			for (account, lock) in LockedBalances::<T>::iter() {
 				ensure!(
-					lock.total()
-						== T::Currency::balance_frozen(&FreezeReason::Staking.into(), &account),
+					lock.total() <= Self::get_total_frozen_balance(&account),
 					"Staker has a mismatch between locked funds and tracked ones"
 				);
 			}

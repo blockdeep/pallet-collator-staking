@@ -80,11 +80,11 @@ pub(crate) mod v1 {
 	PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub enum MigrationSteps<T: Config> {
-	/// The stake has to be migrated form the old storage layout.
+	/// The stake has to be migrated from the old storage layout.
 	MigrateStake { cursor: Option<(T::AccountId, T::AccountId)> },
 	/// Migrate autocompounding.
 	MigrateAutocompounding { cursor: Option<T::AccountId> },
-	/// [`crate::ClaimableRewards`] are to be set to zero, resetting all rewards.
+	/// [`ClaimableRewards`] are to be set to zero, resetting all rewards.
 	ResetClaimableRewards,
 	/// Changes the storage version to 2.
 	ChangeStorageVersion,
@@ -92,12 +92,12 @@ pub enum MigrationSteps<T: Config> {
 	Noop,
 }
 
-/// Migrates the items of the [`crate::CandidateStake`] map to the counter-checkpoint
+/// Migrates the items of the [`CandidateStake`] map to the counter-checkpoint
 /// reward-tracking system.
 ///
 /// The `step` function will be called once per block. It is very important that this function
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
-/// try to make maximal progress per step, so that the total time it takes to migrate stays low.
+/// try to make maximal progress per step so that the total time it takes to migrate stays low.
 pub struct LazyMigrationV1ToV2<T: Config>(PhantomData<T>);
 
 impl<T: Config> LazyMigrationV1ToV2<T> {
