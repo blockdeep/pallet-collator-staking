@@ -1612,6 +1612,15 @@ pub mod pallet {
 			});
 			if !released.is_zero() {
 				Self::decrease_frozen(who, released)?;
+				LockedBalances::<T>::mutate_exists(who, |maybe_locked| {
+					if let Some(locked) = maybe_locked {
+						locked.releasing.saturating_reduce(released);
+						// Remove the map entry if needed be to save some space.
+						if locked.total().is_zero() {
+							*maybe_locked = None;
+						}
+					}
+				});
 				Self::deposit_event(Event::StakeReleased {
 					account: who.clone(),
 					amount: released,
