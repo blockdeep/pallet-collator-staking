@@ -417,8 +417,6 @@ pub mod pallet {
 		Default,
 	)]
 	pub struct LockedBalance<Balance> {
-		/// The amount currently locked for staking purposes.
-		staking: Balance,
 		/// The amount that is in the process of being released.
 		releasing: Balance,
 		/// The amount locked as candidacy bond.
@@ -430,7 +428,7 @@ pub mod pallet {
 		Balance: Saturating + Copy,
 	{
 		pub fn total(&self) -> Balance {
-			self.staking.saturating_add(self.releasing).saturating_add(self.candidacy_bond)
+			self.releasing.saturating_add(self.candidacy_bond)
 		}
 	}
 
@@ -1262,7 +1260,7 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 
 			let UserStakeInfo { stake: total_staked, .. } = UserStake::<T>::get(&who);
-			let staked_balance = LockedBalances::<T>::get(&who).staking;
+			let staked_balance = Self::get_staked_balance(&who);
 			let available = staked_balance.saturating_sub(total_staked);
 			let amount = if let Some(desired_amount) = maybe_amount {
 				ensure!(available >= desired_amount, Error::<T>::CannotUnlock);
@@ -1897,7 +1895,6 @@ pub mod pallet {
 					.try_push(ReleaseRequest { block, amount })
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
 				LockedBalances::<T>::mutate(account, |lock| {
-					lock.staking.saturating_reduce(amount);
 					lock.releasing.saturating_accrue(amount);
 				});
 				Ok(())
@@ -2085,7 +2082,6 @@ pub mod pallet {
 		/// The operation will fail if `account` does not have sufficient free balance.
 		fn do_lock(account: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
 			Self::increase_frozen(account, amount)?;
-			LockedBalances::<T>::mutate(account, |lock| lock.staking.saturating_accrue(amount));
 			Self::deposit_event(Event::<T>::LockExtended { account: account.clone(), amount });
 			Ok(())
 		}
@@ -2111,7 +2107,9 @@ pub mod pallet {
 
 		/// Gets the locked balance potentially used for staking.
 		pub fn get_staked_balance(account: &T::AccountId) -> BalanceOf<T> {
-			LockedBalances::<T>::get(account).staking
+			let other = LockedBalances::<T>::get(account).total();
+			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
+				.saturating_sub(other)
 		}
 
 		/// Gets the locked balance to be released.
@@ -2126,7 +2124,7 @@ pub mod pallet {
 
 		/// Gets the maximum balance a given user can lock for staking.
 		pub fn get_free_balance(account: &T::AccountId) -> BalanceOf<T> {
-			let total_locked = LockedBalances::<T>::get(account).total();
+			let total_locked = T::Currency::balance_frozen(&FreezeReason::Staking.into(), account);
 			T::Currency::balance(account).saturating_sub(total_locked)
 		}
 
