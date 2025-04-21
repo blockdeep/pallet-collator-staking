@@ -741,18 +741,12 @@ mod benchmarks {
 			MinCandidacyBond::<T>::get(),
 		)
 		.unwrap();
-		assert_eq!(
-			T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &caller),
-			MinCandidacyBond::<T>::get()
-		);
+		assert_eq!(CollatorStaking::<T>::get_bond(&caller), MinCandidacyBond::<T>::get());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), balance);
 
-		assert_eq!(
-			T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &caller),
-			balance
-		);
+		assert_eq!(CollatorStaking::<T>::get_bond(&caller), balance);
 	}
 
 	#[benchmark]
@@ -779,7 +773,7 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()), Some(T::Currency::minimum_balance()));
 
 		assert_eq!(
-			T::Currency::balance_frozen(&FreezeReason::Staking.into(), &caller),
+			CollatorStaking::<T>::get_staked_balance(&caller),
 			T::Currency::minimum_balance()
 		);
 	}
