@@ -186,7 +186,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		/// Candidates will be  removed from active collator set, if block is not produced within this threshold.
+		/// Candidates will be removed from active collator set, if block is not produced within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
@@ -234,6 +234,10 @@ pub mod pallet {
 	#[pallet::composite_enum]
 	pub enum FreezeReason {
 		Staking,
+		#[deprecated]
+		CandidacyBond,
+		#[deprecated]
+		Releasing,
 	}
 
 	/// Basic information about a candidate.
@@ -418,9 +422,9 @@ pub mod pallet {
 	)]
 	pub struct LockedBalance<Balance> {
 		/// The amount that is in the process of being released.
-		releasing: Balance,
+		pub releasing: Balance,
 		/// The amount locked as candidacy bond.
-		candidacy_bond: Balance,
+		pub candidacy_bond: Balance,
 	}
 
 	impl<Balance> LockedBalance<Balance>
@@ -1936,12 +1940,18 @@ pub mod pallet {
 		}
 
 		/// Decreases the frozen balance for staking.
-		fn decrease_frozen(who: &T::AccountId, amount: BalanceOf<T>) -> Result<(), DispatchError> {
+		pub(crate) fn decrease_frozen(
+			who: &T::AccountId,
+			amount: BalanceOf<T>,
+		) -> Result<(), DispatchError> {
 			T::Currency::decrease_frozen(&FreezeReason::Staking.into(), who, amount)
 		}
 
 		/// Increases the frozen balance for staking.
-		fn increase_frozen(who: &T::AccountId, amount: BalanceOf<T>) -> Result<(), DispatchError> {
+		pub(crate) fn increase_frozen(
+			who: &T::AccountId,
+			amount: BalanceOf<T>,
+		) -> Result<(), DispatchError> {
 			T::Currency::increase_frozen(&FreezeReason::Staking.into(), who, amount)
 		}
 

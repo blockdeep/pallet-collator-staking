@@ -2052,7 +2052,6 @@ dependencies = [
  "scale-info",
  "sp-api",
  "sp-consensus-aura",
- "sp-core",
  "sp-io",
  "sp-runtime",
  "sp-staking",

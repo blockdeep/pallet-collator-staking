@@ -29,7 +29,6 @@ pallet-session = { git = "https://github.com/paritytech/polkadot-sdk", tag = "po
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503", default-features = false, optional = true }
 
 [dev-dependencies]
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503" }
 sp-io = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503" }
 sp-tracing = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503" }
 sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503" }

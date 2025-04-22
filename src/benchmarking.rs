@@ -189,6 +189,7 @@ mod benchmarks {
 	use super::*;
 	use frame_support::traits::fungible::{Inspect, Mutate};
 	use frame_support::weights::WeightMeter;
+	use sp_runtime::BoundedVec;
 
 	#[benchmark]
 	fn set_invulnerables(
@@ -821,6 +822,54 @@ mod benchmarks {
 		}
 
 		assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &acc), true);
+		assert_eq!(cursor, None);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_release_queue(
+		l: Linear<1, { T::MaxStakedCandidates::get() }>,
+	) {
+		let acc: T::AccountId = account("user1", 0, SEED);
+		let mut meter = WeightMeter::new();
+		let mut cursor = None;
+		let mut queue = BoundedVec::new();
+		for _ in 0..l {
+			queue
+				.try_push(ReleaseRequest {
+					block: 0u32.into(),
+					amount: T::Currency::minimum_balance(),
+				})
+				.unwrap();
+		}
+		ReleaseQueues::<T>::insert(&acc, queue);
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_release_queue(
+				&mut meter,
+				&mut cursor,
+			);
+		}
+
+		assert_eq!(ReleaseQueues::<T>::get(&acc).len(), 0);
+		assert_eq!(cursor, None);
+	}
+
+	#[benchmark]
+	fn migration_from_v1_to_v2_migrate_candidacy_bond() {
+		let mut meter = WeightMeter::new();
+		let mut cursor = None;
+		register_validators::<T>(1);
+		register_candidates::<T>(1);
+
+		#[block]
+		{
+			crate::migrations::v2::LazyMigrationV1ToV2::<T>::do_migrate_candidacy_bond(
+				&mut meter,
+				&mut cursor,
+			);
+		}
+
 		assert_eq!(cursor, None);
 	}
 

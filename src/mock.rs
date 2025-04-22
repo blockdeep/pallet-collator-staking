@@ -24,7 +24,6 @@ use frame_support::{
 };
 use frame_system as system;
 use frame_system::EnsureSignedBy;
-use sp_core::H256;
 use sp_runtime::traits::Get;
 use sp_runtime::{
 	testing::UintAuthorityId,
@@ -65,7 +64,6 @@ impl system::Config for Test {
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type Nonce = u64;
-	type Hash = H256;
 	type Hashing = BlakeTwo256;
 	type AccountId = u64;
 	type Lookup = IdentityLookup<Self::AccountId>;

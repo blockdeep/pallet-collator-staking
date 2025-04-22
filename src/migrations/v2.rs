@@ -17,27 +17,30 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, ClaimableRewards, Config,
-	Layer, Pallet, WeightInfo,
+	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, Candidates,
+	ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet, ReleaseQueues,
+	WeightInfo,
 };
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
+use frame_support::traits::fungible::{InspectFreeze, MutateFreeze};
 use frame_support::weights::WeightMeter;
-use sp_runtime::{FixedU128, Percent};
+use sp_runtime::{FixedU128, Percent, Saturating};
+use sp_std::vec::Vec;
 
 #[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
 use sp_std::collections::btree_map::BTreeMap;
-#[cfg(feature = "try-runtime")]
-use sp_std::vec::Vec;
+
+const LOG_TARGET: &str = "collator-staking::migration::v2";
 
 pub(crate) mod v1 {
 	use super::*;
 	use frame_support::{storage_alias, Blake2_128Concat};
 	use sp_staking::SessionIndex;
 
-	/// Old `CandidateStakeInfo` struct.
+	/// Stores information about a stake held by a staker in the checkpoint system of a candidate.
 	#[derive(
 		Default,
 		PartialEq,
@@ -50,10 +53,16 @@ pub(crate) mod v1 {
 		MaxEncodedLen,
 	)]
 	pub struct CandidateStakeInfo<Balance> {
+		/// The last session where the stake was updated.
 		pub session: SessionIndex,
+		/// The amount of balance staked by the staker.
 		pub stake: Balance,
 	}
 
+	/// Storage double map that tracks staking information for candidates and their stakers.
+	/// - First Key: The candidate's account ID
+	/// - Second Key: The staker's account ID
+	/// - Value: Information about the stake amount and its current checkpoint
 	#[storage_alias]
 	pub type CandidateStake<T: Config> = StorageDoubleMap<
 		Pallet<T>,
@@ -65,6 +74,7 @@ pub(crate) mod v1 {
 		ValueQuery,
 	>;
 
+	/// Storage map that tracks the auto-compound preferences from before the migration.
 	#[storage_alias]
 	pub type AutoCompound<T: Config> = StorageMap<
 		Pallet<T>,
@@ -84,6 +94,10 @@ pub enum MigrationSteps<T: Config> {
 	MigrateStake { cursor: Option<(T::AccountId, T::AccountId)> },
 	/// Migrate autocompounding.
 	MigrateAutocompounding { cursor: Option<T::AccountId> },
+	/// Migrate the release queue.
+	MigrateReleaseQueue { cursor: Option<T::AccountId> },
+	/// Migrate the candidacy bond locked balance.
+	MigrateCandidacyBond { cursor: Option<T::AccountId> },
 	/// [`ClaimableRewards`] are to be set to zero, resetting all rewards.
 	ResetClaimableRewards,
 	/// Changes the storage version to 2.
@@ -126,7 +140,6 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 		meter: &mut WeightMeter,
 		cursor: &mut Option<T::AccountId>,
 	) {
-		// A single operation reads and removes one element from the old map and inserts it in the new one.
 		let required =
 			<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_autocompound_step();
 
@@ -150,11 +163,158 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 		}
 	}
 
+	pub(crate) fn do_migrate_release_queue(
+		meter: &mut WeightMeter,
+		cursor: &mut Option<T::AccountId>,
+	) {
+		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_release_queue(
+			<T as Config>::MaxStakedCandidates::get(),
+		);
+
+		let now = Pallet::<T>::current_block_number();
+		let mut iter = match cursor {
+			None => ReleaseQueues::<T>::iter(),
+			Some(key) => ReleaseQueues::<T>::iter_from(ReleaseQueues::<T>::hashed_key_for(key)),
+		};
+		while meter.can_consume(required) {
+			if let Some((staker, requests)) = iter.next() {
+				meter.consume(
+					<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_release_queue(
+						requests.len() as u32,
+					),
+				);
+				let mut total_released: BalanceOf<T> = Zero::zero();
+				let remaining_requests = requests
+					.into_iter()
+					.filter(|release| {
+						let _ = T::Currency::decrease_frozen(
+							#[allow(deprecated)]
+							&FreezeReason::Releasing.into(),
+							&staker,
+							release.amount,
+						);
+						// If the release has already expired, we can simply remove it.
+						if now > release.block {
+							return false;
+						}
+						// Attempt to increase the frozen balance of the staker if the release is
+						// still active.
+						// If it fails, it means the user was able to spend these funds already, so we
+						// can simply remove the release request now.
+						match Pallet::<T>::increase_frozen(&staker, release.amount) {
+							Ok(_) => {
+								total_released.saturating_accrue(release.amount);
+								false
+							},
+							Err(e) => {
+								log::warn!(
+									target: LOG_TARGET,
+									"Failed to increase frozen balance of {:?} when releasing: {:?}",
+									staker,
+									e
+								);
+								true
+							},
+						}
+					})
+					.collect::<Vec<_>>();
+				if !total_released.is_zero() {
+					LockedBalances::<T>::mutate(&staker, |locked| {
+						locked.releasing.saturating_accrue(total_released);
+					});
+				}
+				if remaining_requests.is_empty() {
+					ReleaseQueues::<T>::remove(staker.clone());
+				} else {
+					ReleaseQueues::<T>::set(
+						staker.clone(),
+						remaining_requests
+							.try_into()
+							.expect("Filtering an array must yield a smaller one. qed"),
+					);
+				}
+				*cursor = Some(staker);
+			} else {
+				meter.consume(
+					<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_release_queue(1),
+				);
+				*cursor = None;
+				break;
+			}
+		}
+	}
+
+	pub(crate) fn do_migrate_candidacy_bond(
+		meter: &mut WeightMeter,
+		cursor: &mut Option<T::AccountId>,
+	) {
+		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_candidacy_bond();
+		let mut iter = match cursor {
+			None => Candidates::<T>::iter(),
+			Some(key) => Candidates::<T>::iter_from(Candidates::<T>::hashed_key_for(key)),
+		};
+
+		while meter.try_consume(required).is_ok() {
+			if let Some((candidate, _)) = iter.next() {
+				#[allow(deprecated)]
+				let bond = T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
+				let _ = T::Currency::decrease_frozen(
+					#[allow(deprecated)]
+					&FreezeReason::CandidacyBond.into(),
+					&candidate,
+					bond,
+				);
+				// Here we attempt to increase the frozen balance of the candidate.
+				// If the candidate does not have enough balance to lock,
+				// we leave him with a candidacy bond equal to zero.
+				match Pallet::<T>::increase_frozen(&candidate, bond) {
+					Ok(_) => LockedBalances::<T>::mutate(&candidate, |locked| {
+						locked.candidacy_bond.saturating_accrue(bond);
+					}),
+					Err(e) => {
+						log::warn!(
+							target: LOG_TARGET,
+							"Failed to increase frozen balance of {:?} when adjusting the candidacy bond: {:?}",
+							candidate,
+							e
+						);
+					},
+				}
+				*cursor = Some(candidate);
+			} else {
+				*cursor = None;
+				break;
+			}
+		}
+	}
+
 	pub(crate) fn migrate_autocompounding(
 		meter: &mut WeightMeter,
 		mut cursor: Option<T::AccountId>,
 	) -> MigrationSteps<T> {
 		Self::do_migrate_autocompounding(meter, &mut cursor);
+		match cursor {
+			None => Self::migrate_release_queue(meter, None),
+			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
+		}
+	}
+
+	pub(crate) fn migrate_release_queue(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_release_queue(meter, &mut cursor);
+		match cursor {
+			None => Self::migrate_candidacy_bond(meter, None),
+			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
+		}
+	}
+
+	pub(crate) fn migrate_candidacy_bond(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_candidacy_bond(meter, &mut cursor);
 		match cursor {
 			None => Self::reset_rewards(meter),
 			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
@@ -244,6 +404,12 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			MigrationSteps::MigrateAutocompounding { cursor: checkpoint } => {
 				Some(Self::migrate_autocompounding(meter, checkpoint))
 			},
+			MigrationSteps::MigrateReleaseQueue { cursor: checkpoint } => {
+				Some(Self::migrate_release_queue(meter, checkpoint))
+			},
+			MigrationSteps::MigrateCandidacyBond { cursor: checkpoint } => {
+				Some(Self::migrate_candidacy_bond(meter, checkpoint))
+			},
 			MigrationSteps::ResetClaimableRewards => Some(Self::reset_rewards(meter)),
 			MigrationSteps::ChangeStorageVersion => Some(Self::set_storage_version(meter)),
 			MigrationSteps::Noop => None,
@@ -313,15 +479,29 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 mod tests {
 	use super::*;
 	use crate::mock::*;
-	use frame_support::traits::OnRuntimeUpgrade;
+	use crate::{CandidateInfo, MinCandidacyBond, ReleaseRequest};
+	use frame_support::assert_ok;
+	use frame_support::traits::{
+		fungible::{Inspect, Mutate},
+		OnRuntimeUpgrade,
+	};
 
 	#[test]
 	fn migration_of_single_element_should_work() {
 		new_test_ext().execute_with(|| {
+			let len = 16;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
+			Candidates::<Test>::insert(1, CandidateInfo { stake: 0, stakers: 0 });
+			let bond = MinCandidacyBond::<Test>::get();
+			assert_ok!(<Test as Config>::Currency::set_freeze(
+				#[allow(deprecated)]
+				&FreezeReason::CandidacyBond.into(),
+				&1,
+				bond
+			));
 
 			v1::CandidateStake::<Test>::insert(
 				&1,
@@ -329,6 +509,21 @@ mod tests {
 				v1::CandidateStakeInfo { session: 10, stake: 50 },
 			);
 			v1::AutoCompound::<Test>::insert(&1, Percent::from_percent(100));
+			let mut requests = vec![];
+			for _ in 0..len {
+				requests.push(ReleaseRequest {
+					block: 1000,
+					amount: <Test as Config>::Currency::minimum_balance(),
+				});
+			}
+			ReleaseQueues::<Test>::set(1, requests.try_into().unwrap());
+			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
+			assert_ok!(<Test as Config>::Currency::set_freeze(
+				#[allow(deprecated)]
+				&FreezeReason::Releasing.into(),
+				&1,
+				bond
+			));
 
 			// Trigger the runtime upgrade
 			assert_eq!(ClaimableRewards::<Test>::get(), 100);
@@ -342,25 +537,48 @@ mod tests {
 			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &1), true);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 2);
+			assert_eq!(ReleaseQueues::<Test>::get(&1).len(), 0);
+			assert_eq!(LockedBalances::<Test>::get(&1).releasing, total_release_balance);
+			#[allow(deprecated)]
+			let old_release_lock =
+				<Test as Config>::Currency::balance_frozen(&FreezeReason::Releasing.into(), &1);
+			assert_eq!(old_release_lock, 0);
+			assert_eq!(LockedBalances::<Test>::get(&1).candidacy_bond, bond);
+			#[allow(deprecated)]
+			let old_candidacy_bond_lock =
+				<Test as Config>::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &1);
+			assert_eq!(old_candidacy_bond_lock, 0);
+			assert_eq!(LockedBalances::<Test>::get(&1).candidacy_bond, bond);
 		});
 	}
 
 	#[test]
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
+			let len = 16;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
 			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
 
 			for i in 1..=100 {
+				assert_ok!(Balances::mint_into(&i, 100));
 				v1::CandidateStake::<Test>::insert(
 					&i,
 					&i,
 					v1::CandidateStakeInfo { session: 10, stake: 50 },
 				);
 				v1::AutoCompound::<Test>::insert(&i, Percent::from_percent(100));
+				let mut requests = vec![];
+				for _ in 0..len {
+					requests.push(ReleaseRequest {
+						block: 1000,
+						amount: <Test as Config>::Currency::minimum_balance(),
+					});
+				}
+				ReleaseQueues::<Test>::set(i, requests.try_into().unwrap());
 			}
+			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
 
 			// Trigger the runtime upgrade
 			assert_eq!(ClaimableRewards::<Test>::get(), 100);
@@ -373,6 +591,18 @@ mod tests {
 					CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 				);
 				assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &i), true);
+				assert_eq!(ReleaseQueues::<Test>::get(&i).len(), 0);
+				assert_eq!(LockedBalances::<Test>::get(&i).releasing, total_release_balance);
+				#[allow(deprecated)]
+				let old_release_lock =
+					<Test as Config>::Currency::balance_frozen(&FreezeReason::Releasing.into(), &i);
+				assert_eq!(old_release_lock, 0);
+				#[allow(deprecated)]
+				let old_candidacy_bond_lock = <Test as Config>::Currency::balance_frozen(
+					&FreezeReason::CandidacyBond.into(),
+					&i,
+				);
+				assert_eq!(old_candidacy_bond_lock, 0);
 			}
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			assert_eq!(AutoCompoundSettings::<Test>::iter_prefix(Layer::Commit).count(), 100);
