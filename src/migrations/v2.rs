@@ -29,6 +29,8 @@ use sp_runtime::{FixedU128, Percent, Saturating};
 use sp_std::vec::Vec;
 
 #[cfg(feature = "try-runtime")]
+use crate::ReleaseRequestOf;
+#[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
 use sp_std::collections::btree_map::BTreeMap;
@@ -423,10 +425,20 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 		use codec::Encode;
 
 		// Return the state of the storage before the migration.
-		let map: BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>> =
-			v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
+		let candidate_stakes: BTreeMap<
+			(T::AccountId, T::AccountId),
+			v1::CandidateStakeInfo<BalanceOf<T>>,
+		> = v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
 		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
-		Ok((map, autocompound).encode())
+		let releases = ReleaseQueues::<T>::iter().collect::<Vec<_>>();
+		let bonds = Candidates::<T>::iter_keys()
+			.map(|candidate| {
+				#[allow(deprecated)]
+				let bond = T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
+				(candidate, bond)
+			})
+			.collect::<Vec<_>>();
+		Ok((candidate_stakes, autocompound, releases, bonds).encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -438,16 +450,19 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			StorageVersion::new(Self::id().version_to as u16),
 			"Migration post-upgrade failed: the storage version is not the expected one"
 		);
-		let (prev_map, prev_autocompound) = <(
-			BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
-			Vec<(T::AccountId, Percent)>,
-		)>::decode(&mut &prev[..])
-		.expect("Failed to decode the previous storage state");
+		let (prev_candidate_stakes, prev_autocompound, prev_releases, prev_bonds) =
+			<(
+				BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
+				Vec<(T::AccountId, Percent)>,
+				Vec<(T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>)>,
+				Vec<(T::AccountId, BalanceOf<T>)>,
+			)>::decode(&mut &prev[..])
+			.expect("Failed to decode the previous storage state");
 
 		// Check the len of prev and post are the same.
-		assert_eq!(prev_map.len(), CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the storage after the migration is not the same as before");
+		assert_eq!(prev_candidate_stakes.len(), CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the CandidateStake storage after the migration is not the same as before");
 
-		for ((candidate, staker), value) in prev_map {
+		for ((candidate, staker), value) in prev_candidate_stakes {
 			let new_value = CandidateStake::<T>::get(candidate, staker);
 			assert_eq!(
 				value.stake, new_value.stake,
@@ -458,6 +473,47 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 				FixedU128::zero(),
 				"Migration failed: the checkpoint after the migration is not zero"
 			);
+		}
+
+		for (candidate, releases) in prev_releases.into_iter() {
+			assert_eq!(
+				<T as Config>::Currency::balance_frozen(
+					#[allow(deprecated)]
+					&FreezeReason::Releasing.into(),
+					&candidate
+				),
+				Zero::zero(),
+				"Migration failed: the release balance after the migration is not zero"
+			);
+			let new_releases = ReleaseQueues::<T>::get(&candidate);
+			assert!(releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
+			let total_releasing: BalanceOf<T> = new_releases
+				.iter()
+				.map(|r| r.amount)
+				.reduce(|a, b| a.saturating_add(b))
+				.unwrap_or_default();
+			assert_eq!(
+				total_releasing,
+				LockedBalances::<T>::get(&candidate).releasing,
+				"Migration failed: the total releasing balance after the migration is not correct"
+			);
+		}
+
+		for (candidate, prev_bond) in prev_bonds.into_iter() {
+			assert_eq!(
+				<T as Config>::Currency::balance_frozen(
+					#[allow(deprecated)]
+					&FreezeReason::CandidacyBond.into(),
+					&candidate
+				),
+				Zero::zero(),
+				"Migration failed: the candidacy bond balance after the migration is not zero"
+			);
+
+			let bond = LockedBalances::<T>::get(&candidate).candidacy_bond;
+			if bond != prev_bond {
+				log::warn!(target: LOG_TARGET, "The bond for candidate {:?} is not the same as before: {:?} != {:?}", candidate, bond, prev_bond);
+			}
 		}
 
 		for (staker, percentage) in prev_autocompound {
