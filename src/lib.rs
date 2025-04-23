@@ -2001,6 +2001,9 @@ pub mod pallet {
 				{
 					if Self::current_block_number() > *bond_release {
 						Self::decrease_frozen(account, *bond)?;
+						LockedBalances::<T>::mutate(account, |locked| {
+							locked.releasing.saturating_reduce(*bond)
+						});
 						*maybe_bond_release = None;
 					}
 				}
