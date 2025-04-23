@@ -2001,8 +2001,13 @@ pub mod pallet {
 				{
 					if Self::current_block_number() > *bond_release {
 						Self::decrease_frozen(account, *bond)?;
-						LockedBalances::<T>::mutate(account, |locked| {
-							locked.releasing.saturating_reduce(*bond)
+						LockedBalances::<T>::mutate_exists(account, |maybe_locked| {
+							if let Some(locked) = maybe_locked {
+								locked.releasing.saturating_reduce(*bond);
+								if locked.total().is_zero() {
+									*maybe_locked = None;
+								}
+							}
 						});
 						*maybe_bond_release = None;
 					}
@@ -2300,6 +2305,24 @@ pub mod pallet {
 					lock.total() <= Self::get_total_frozen_balance(&account),
 					"Staker has a mismatch between locked funds and tracked ones"
 				);
+				ensure!(
+					!T::Currency::balance_frozen(&FreezeReason::Staking.into(), &account)
+						.is_zero(),
+					"LockedBalances holds an item with zero actual locked balances. It should be removed"
+				);
+				#[allow(deprecated)]
+				{
+					ensure!(
+						T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &account)
+							.is_zero(),
+						"Old candidacy bond lock is present"
+					);
+					ensure!(
+						T::Currency::balance_frozen(&FreezeReason::Releasing.into(), &account)
+							.is_zero(),
+						"Old releasing lock is present"
+					);
+				}
 			}
 
 			Ok(())
