@@ -14,12 +14,11 @@
 // limitations under the License.
 
 use core::marker::PhantomData;
-
 use frame_support::migrations::MultiStepMigrator;
 use frame_support::traits::OnInitialize;
 use frame_support::{
-	derive_impl, ord_parameter_types, parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
+	assert_ok, derive_impl, ord_parameter_types, parameter_types,
+	traits::{fungible::Mutate, ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
 	PalletId,
 };
 use frame_system as system;
@@ -30,14 +29,59 @@ use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
 	BuildStorage, Percent, RuntimeAppPublic,
 };
+use std::ops::RangeInclusive;
 
 use crate as collator_staking;
 
 use super::*;
 
 type Block = frame_system::mocking::MockBlock<Test>;
-type AccountId = <Test as frame_system::Config>::AccountId;
+pub(crate) type AccountId = <Test as frame_system::Config>::AccountId;
 type Balance = u64;
+
+pub(crate) fn fund_account(acc: AccountId) {
+	assert_ok!(Balances::mint_into(&acc, 100));
+}
+
+pub(crate) fn register_keys(acc: AccountId) {
+	let key = MockSessionKeys { aura: UintAuthorityId(acc) };
+	assert_ok!(Session::set_keys(RuntimeOrigin::signed(acc), key, Vec::new()));
+}
+
+pub(crate) fn register_candidates(range: RangeInclusive<AccountId>) {
+	for ii in range {
+		if ii > 5 {
+			// only keys were registered in mock for 1 to 5
+			fund_account(ii);
+			register_keys(ii);
+		}
+		assert_ok!(CollatorStaking::register_as_candidate(
+			RuntimeOrigin::signed(ii),
+			MinCandidacyBond::<Test>::get()
+		));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
+			account: ii,
+			deposit: MinCandidacyBond::<Test>::get(),
+		}));
+	}
+}
+
+pub(crate) fn candidate_list() -> Vec<(AccountId, CandidateInfo<BalanceOf<Test>>)> {
+	let mut all_candidates = Candidates::<Test>::iter().collect::<Vec<_>>();
+	all_candidates.sort_by_key(|(_, info)| info.stake);
+	all_candidates
+}
+
+pub(crate) fn lock_for_staking(range: RangeInclusive<AccountId>) {
+	for ii in range {
+		let balance = CollatorStaking::get_free_balance(&ii);
+		assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(ii), balance));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+			account: ii,
+			amount: balance,
+		}));
+	}
+}
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -250,7 +294,21 @@ impl pallet_migrations::Config for Test {
 	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
 }
 
-pub fn new_test_ext() -> sp_io::TestExternalities {
+pub(crate) struct TestExtBuilder(sp_io::TestExternalities);
+impl TestExtBuilder {
+	pub fn execute_with(&mut self, execute: impl FnOnce()) {
+		let mut ext = self.0.ext();
+		sp_externalities::set_and_run_with_externalities(&mut ext, || {
+			initialize_to_block(1);
+		});
+		sp_externalities::set_and_run_with_externalities(&mut ext, execute);
+		sp_externalities::set_and_run_with_externalities(&mut ext, || {
+			assert_ok!(CollatorStaking::do_try_state());
+		});
+	}
+}
+
+pub fn new_test_ext() -> TestExtBuilder {
 	sp_tracing::try_init_simple();
 	let mut t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
 	let invulnerables = vec![2, 1]; // unsorted
@@ -276,7 +334,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	collator_staking.assimilate_storage(&mut t).unwrap();
 	session.assimilate_storage(&mut t).unwrap();
 
-	t.into()
+	TestExtBuilder(t.into())
 }
 
 pub fn initialize_to_block(n: u64) {

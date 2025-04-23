@@ -548,7 +548,6 @@ mod tests {
 			let len = 16;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
-			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
 			Candidates::<Test>::insert(1, CandidateInfo { stake: 0, stakers: 0 });
 			let bond = MinCandidacyBond::<Test>::get();
@@ -614,7 +613,6 @@ mod tests {
 			let len = 16;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
-			initialize_to_block(1);
 			ClaimableRewards::<Test>::set(100);
 
 			for i in 1..=100 {
