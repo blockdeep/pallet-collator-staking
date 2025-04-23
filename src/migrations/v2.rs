@@ -15,6 +15,8 @@
 
 //! Collator Staking Pallet migration from v1 to v2.
 
+#![allow(deprecated)]
+
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
 	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, Candidates,
@@ -190,7 +192,6 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 					.into_iter()
 					.filter(|release| {
 						let _ = T::Currency::decrease_frozen(
-							#[allow(deprecated)]
 							&FreezeReason::Releasing.into(),
 							&staker,
 							release.amount,
@@ -258,10 +259,9 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 
 		while meter.try_consume(required).is_ok() {
 			if let Some((candidate, _)) = iter.next() {
-				#[allow(deprecated)]
-				let bond = T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
+				let bond =
+					T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
 				let _ = T::Currency::decrease_frozen(
-					#[allow(deprecated)]
 					&FreezeReason::CandidacyBond.into(),
 					&candidate,
 					bond,
@@ -433,8 +433,8 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 		let releases = ReleaseQueues::<T>::iter().collect::<Vec<_>>();
 		let bonds = Candidates::<T>::iter_keys()
 			.map(|candidate| {
-				#[allow(deprecated)]
-				let bond = T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
+				let bond =
+					T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
 				(candidate, bond)
 			})
 			.collect::<Vec<_>>();
@@ -478,7 +478,6 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 		for (candidate, releases) in prev_releases.into_iter() {
 			assert_eq!(
 				<T as Config>::Currency::balance_frozen(
-					#[allow(deprecated)]
 					&FreezeReason::Releasing.into(),
 					&candidate
 				),
@@ -502,7 +501,6 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 		for (candidate, prev_bond) in prev_bonds.into_iter() {
 			assert_eq!(
 				<T as Config>::Currency::balance_frozen(
-					#[allow(deprecated)]
 					&FreezeReason::CandidacyBond.into(),
 					&candidate
 				),
@@ -552,7 +550,6 @@ mod tests {
 			Candidates::<Test>::insert(1, CandidateInfo { stake: 0, stakers: 0 });
 			let bond = MinCandidacyBond::<Test>::get();
 			assert_ok!(<Test as Config>::Currency::set_freeze(
-				#[allow(deprecated)]
 				&FreezeReason::CandidacyBond.into(),
 				&1,
 				bond
@@ -574,7 +571,6 @@ mod tests {
 			ReleaseQueues::<Test>::set(1, requests.try_into().unwrap());
 			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
 			assert_ok!(<Test as Config>::Currency::set_freeze(
-				#[allow(deprecated)]
 				&FreezeReason::Releasing.into(),
 				&1,
 				bond
@@ -594,12 +590,12 @@ mod tests {
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 2);
 			assert_eq!(ReleaseQueues::<Test>::get(&1).len(), 0);
 			assert_eq!(LockedBalances::<Test>::get(&1).releasing, total_release_balance);
-			#[allow(deprecated)]
+
 			let old_release_lock =
 				<Test as Config>::Currency::balance_frozen(&FreezeReason::Releasing.into(), &1);
 			assert_eq!(old_release_lock, 0);
 			assert_eq!(LockedBalances::<Test>::get(&1).candidacy_bond, bond);
-			#[allow(deprecated)]
+
 			let old_candidacy_bond_lock =
 				<Test as Config>::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &1);
 			assert_eq!(old_candidacy_bond_lock, 0);
@@ -647,11 +643,11 @@ mod tests {
 				assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &i), true);
 				assert_eq!(ReleaseQueues::<Test>::get(&i).len(), 0);
 				assert_eq!(LockedBalances::<Test>::get(&i).releasing, total_release_balance);
-				#[allow(deprecated)]
+
 				let old_release_lock =
 					<Test as Config>::Currency::balance_frozen(&FreezeReason::Releasing.into(), &i);
 				assert_eq!(old_release_lock, 0);
-				#[allow(deprecated)]
+
 				let old_candidacy_bond_lock = <Test as Config>::Currency::balance_frozen(
 					&FreezeReason::CandidacyBond.into(),
 					&i,
