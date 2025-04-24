@@ -453,9 +453,9 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 	fn post_upgrade(prev: Vec<u8>) -> Result<(), TryRuntimeError> {
 		use codec::Decode;
 		// Check the state of the storage after the migration.
-		assert_eq!(
-			Pallet::<T>::on_chain_storage_version(),
-			StorageVersion::new(Self::id().version_to as u16),
+		ensure!(
+			Pallet::<T>::on_chain_storage_version()
+				== StorageVersion::new(Self::id().version_to as u16),
 			"Migration post-upgrade failed: the storage version is not the expected one"
 		);
 		let (prev_candidate_stakes, prev_autocompound, prev_releases, prev_bonds) =
@@ -468,32 +468,31 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 			.expect("Failed to decode the previous storage state");
 
 		// Check the len of prev and post are the same.
-		assert_eq!(prev_candidate_stakes.len(), CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the CandidateStake storage after the migration is not the same as before");
+		ensure!(prev_candidate_stakes.len() == CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the CandidateStake storage after the migration is not the same as before");
 
 		for ((candidate, staker), value) in prev_candidate_stakes {
 			let new_value = CandidateStake::<T>::get(candidate, staker);
-			assert_eq!(
-				value.stake, new_value.stake,
+			ensure!(
+				value.stake == new_value.stake,
 				"Migration failed: the stake after the migration is not the same as before"
 			);
-			assert_eq!(
-				new_value.checkpoint,
-				FixedU128::zero(),
+			ensure!(
+				new_value.checkpoint.is_zero(),
 				"Migration failed: the checkpoint after the migration is not zero"
 			);
 		}
 
 		for (candidate, old_releases) in prev_releases.into_iter() {
-			assert_eq!(
+			ensure!(
 				<T as Config>::Currency::balance_frozen(
 					&FreezeReason::Releasing.into(),
 					&candidate
-				),
-				Zero::zero(),
+				)
+				.is_zero(),
 				"Migration failed: the release balance after the migration is not zero"
 			);
 			let new_releases = ReleaseQueues::<T>::get(&candidate);
-			assert!(old_releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
+			ensure!(old_releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
 			let total_releasing_new: BalanceOf<T> = new_releases
 				.iter()
 				.map(|r| r.amount)
@@ -504,21 +503,21 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 				.map(|r| r.amount)
 				.reduce(|a, b| a.saturating_add(b))
 				.unwrap_or_default();
-			assert!(total_releasing_old >= total_releasing_new, "Migration failed: the total releasing balance after the migration is not greater than before");
-			assert_eq!(
-				total_releasing_old - total_releasing_new,
-				LockedBalances::<T>::get(&candidate).releasing,
+			ensure!(total_releasing_old >= total_releasing_new, "Migration failed: the total releasing balance after the migration is not greater than before");
+			ensure!(
+				total_releasing_old - total_releasing_new
+					== LockedBalances::<T>::get(&candidate).releasing,
 				"Migration failed: the total releasing balance after the migration is not correct"
 			);
 		}
 
 		for (candidate, prev_bond) in prev_bonds.into_iter() {
-			assert_eq!(
+			ensure!(
 				<T as Config>::Currency::balance_frozen(
 					&FreezeReason::CandidacyBond.into(),
 					&candidate
-				),
-				Zero::zero(),
+				)
+				.is_zero(),
 				"Migration failed: the candidacy bond balance after the migration is not zero"
 			);
 
@@ -535,12 +534,14 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 
 		for (staker, percentage) in prev_autocompound {
 			let value = !percentage.is_zero();
-			assert_eq!(AutoCompoundSettings::<T>::get(Layer::Commit, &staker), value);
+			ensure!(
+				AutoCompoundSettings::<T>::get(Layer::Commit, &staker) == value,
+				"Migration failed: the autocompound setting after the migration is not the same as before"
+			);
 		}
 
-		assert_eq!(
-			ClaimableRewards::<T>::get(),
-			0u32.into(),
+		ensure!(
+			ClaimableRewards::<T>::get().is_zero(),
 			"Migration failed: the claimable rewards after the migration is not zero"
 		);
 
