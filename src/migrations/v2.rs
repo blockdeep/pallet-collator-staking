@@ -305,7 +305,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		Self::do_migrate_release_queue(meter, &mut cursor);
 		match cursor {
 			None => Self::migrate_candidacy_bond(meter, None),
-			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
+			Some(checkpoint) => MigrationSteps::MigrateReleaseQueue { cursor: Some(checkpoint) },
 		}
 	}
 
@@ -316,7 +316,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		Self::do_migrate_candidacy_bond(meter, &mut cursor);
 		match cursor {
 			None => Self::reset_rewards(meter),
-			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
+			Some(checkpoint) => MigrationSteps::MigrateCandidacyBond { cursor: Some(checkpoint) },
 		}
 	}
 
