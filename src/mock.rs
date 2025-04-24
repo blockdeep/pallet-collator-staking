@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate as collator_staking;
 use core::marker::PhantomData;
 use frame_support::migrations::MultiStepMigrator;
 use frame_support::traits::OnInitialize;
@@ -22,16 +23,15 @@ use frame_support::{
 	PalletId,
 };
 use frame_system as system;
+use frame_system::limits::BlockWeights;
 use frame_system::EnsureSignedBy;
 use sp_runtime::traits::Get;
 use sp_runtime::{
 	testing::UintAuthorityId,
 	traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
-	BuildStorage, Percent, RuntimeAppPublic,
+	BuildStorage, Percent, RuntimeAppPublic, Weight,
 };
 use std::ops::RangeInclusive;
-
-use crate as collator_staking;
 
 use super::*;
 
@@ -286,8 +286,14 @@ impl Config for Test {
 	type WeightInfo = ();
 }
 
+parameter_types! {
+	// Set the block maximum capacity low enough so that many migration steps are required.
+	pub MaxServiceWeight: Weight = <<pallet_migrations::config_preludes::TestDefaultConfig as frame_system::DefaultConfig>::BlockWeights as Get<BlockWeights>>::get().max_block.div(100);
+}
+
 #[derive_impl(pallet_migrations::config_preludes::TestDefaultConfig)]
 impl pallet_migrations::Config for Test {
+	type MaxServiceWeight = MaxServiceWeight;
 	#[cfg(not(feature = "runtime-benchmarks"))]
 	type Migrations = (crate::migrations::v2::LazyMigrationV1ToV2<Test>,);
 	#[cfg(feature = "runtime-benchmarks")]

@@ -554,6 +554,7 @@ mod tests {
 	use crate::mock::*;
 	use crate::{CandidateInfo, MinCandidacyBond, ReleaseRequest};
 	use frame_support::assert_ok;
+	use frame_support::migrations::MultiStepMigrator;
 	use frame_support::traits::{
 		fungible::{Inspect, Mutate},
 		OnRuntimeUpgrade,
@@ -626,11 +627,12 @@ mod tests {
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
 			let len = 16;
+			let users = 1_000;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
-			ClaimableRewards::<Test>::set(100);
+			ClaimableRewards::<Test>::set(100_000);
 
-			for i in 1..=100 {
+			for i in 1..=users {
 				assert_ok!(Balances::mint_into(&i, 100));
 				v1::CandidateStake::<Test>::insert(
 					&i,
@@ -650,11 +652,22 @@ mod tests {
 			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
 
 			// Trigger the runtime upgrade
-			assert_eq!(ClaimableRewards::<Test>::get(), 100);
+			let initial_block = System::block_number();
 			AllPalletsWithSystem::on_runtime_upgrade();
-			initialize_to_block(2);
+			loop {
+				let block = System::block_number();
+				assert!(
+					block - initial_block <= 100,
+					"Migration should not take more than 100 blocks"
+				);
 
-			for i in 1..=100 {
+				initialize_to_block(block + 1);
+				if !<Migrator as MultiStepMigrator>::ongoing() {
+					break;
+				}
+			}
+
+			for i in 1..=users {
 				assert_eq!(
 					CandidateStake::<Test>::get(&i, &i),
 					CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
@@ -674,7 +687,10 @@ mod tests {
 				assert_eq!(old_candidacy_bond_lock, 0);
 			}
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
-			assert_eq!(AutoCompoundSettings::<Test>::iter_prefix(Layer::Commit).count(), 100);
+			assert_eq!(
+				AutoCompoundSettings::<Test>::iter_prefix(Layer::Commit).count() as u64,
+				users
+			);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(2));
 		});
 	}
