@@ -23,6 +23,7 @@ use crate::{
 	ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet, ReleaseQueues,
 	WeightInfo,
 };
+use core::fmt::Debug;
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
 use frame_support::pallet_prelude::*;
 use frame_support::traits::fungible::{InspectFreeze, MutateFreeze};
@@ -36,8 +37,6 @@ use crate::ReleaseRequestOf;
 use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
 use sp_std::collections::btree_map::BTreeMap;
-
-const LOG_TARGET: &str = "collator-staking::migration::v2";
 
 pub(crate) mod v1 {
 	use super::*;
@@ -116,9 +115,9 @@ pub enum MigrationSteps<T: Config> {
 /// The `step` function will be called once per block. It is very important that this function
 /// *never* panics and never uses more weight than it got in its meter. The migrations should also
 /// try to make maximal progress per step so that the total time it takes to migrate stays low.
-pub struct LazyMigrationV1ToV2<T: Config>(PhantomData<T>);
+pub struct LazyMigrationV1ToV2<T: Config + Debug>(PhantomData<T>);
 
-impl<T: Config> LazyMigrationV1ToV2<T> {
+impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 	pub(crate) fn set_storage_version(meter: &mut WeightMeter) -> MigrationSteps<T> {
 		let required = T::DbWeight::get().reads_writes(0, 1);
 		if meter.try_consume(required).is_ok() {
@@ -211,7 +210,6 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 							},
 							Err(e) => {
 								log::warn!(
-									target: LOG_TARGET,
 									"Failed to increase frozen balance of {:?} when releasing: {:?}",
 									staker,
 									e
@@ -275,7 +273,6 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 					}),
 					Err(e) => {
 						log::warn!(
-							target: LOG_TARGET,
 							"Failed to increase frozen balance of {:?} when adjusting the candidacy bond: {:?}",
 							candidate,
 							e
@@ -374,7 +371,7 @@ impl<T: Config> LazyMigrationV1ToV2<T> {
 	}
 }
 
-impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
+impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 	type Cursor = MigrationSteps<T>;
 	// Without the explicit length here the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
@@ -398,26 +395,37 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			return Ok(None);
 		}
 
-		let cursor = maybe_cursor.unwrap_or_else(|| MigrationSteps::MigrateStake { cursor: None });
+		let cursor = maybe_cursor.unwrap_or(MigrationSteps::MigrateStake { cursor: None });
+		log::info!("Running migration at step: {:?}", cursor);
+
 		let new_cursor = match cursor {
 			MigrationSteps::MigrateStake { cursor: checkpoint } => {
-				Some(Self::migrate_stake(meter, checkpoint))
+				Self::migrate_stake(meter, checkpoint)
 			},
 			MigrationSteps::MigrateAutocompounding { cursor: checkpoint } => {
-				Some(Self::migrate_autocompounding(meter, checkpoint))
+				Self::migrate_autocompounding(meter, checkpoint)
 			},
 			MigrationSteps::MigrateReleaseQueue { cursor: checkpoint } => {
-				Some(Self::migrate_release_queue(meter, checkpoint))
+				Self::migrate_release_queue(meter, checkpoint)
 			},
 			MigrationSteps::MigrateCandidacyBond { cursor: checkpoint } => {
-				Some(Self::migrate_candidacy_bond(meter, checkpoint))
+				Self::migrate_candidacy_bond(meter, checkpoint)
 			},
-			MigrationSteps::ResetClaimableRewards => Some(Self::reset_rewards(meter)),
-			MigrationSteps::ChangeStorageVersion => Some(Self::set_storage_version(meter)),
-			MigrationSteps::Noop => None,
+			MigrationSteps::ResetClaimableRewards => Self::reset_rewards(meter),
+			MigrationSteps::ChangeStorageVersion => Self::set_storage_version(meter),
+			MigrationSteps::Noop => MigrationSteps::Noop,
 		};
 
-		Ok(new_cursor)
+		match new_cursor {
+			MigrationSteps::Noop => {
+				log::info!("Migration fully complete");
+				Ok(None)
+			},
+			_ => {
+				log::info!("Migration not completed yet: {:?}", new_cursor);
+				Ok(Some(new_cursor))
+			},
+		}
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -430,7 +438,7 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			v1::CandidateStakeInfo<BalanceOf<T>>,
 		> = v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
 		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
-		let releases = ReleaseQueues::<T>::iter().collect::<Vec<_>>();
+		let releases = ReleaseQueues::<T>::iter().collect::<BTreeMap<_, _>>();
 		let bonds = Candidates::<T>::iter_keys()
 			.map(|candidate| {
 				let bond =
@@ -454,7 +462,7 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			<(
 				BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
 				Vec<(T::AccountId, Percent)>,
-				Vec<(T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>)>,
+				BTreeMap<T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>>,
 				Vec<(T::AccountId, BalanceOf<T>)>,
 			)>::decode(&mut &prev[..])
 			.expect("Failed to decode the previous storage state");
@@ -475,7 +483,7 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 			);
 		}
 
-		for (candidate, releases) in prev_releases.into_iter() {
+		for (candidate, old_releases) in prev_releases.into_iter() {
 			assert_eq!(
 				<T as Config>::Currency::balance_frozen(
 					&FreezeReason::Releasing.into(),
@@ -485,14 +493,20 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 				"Migration failed: the release balance after the migration is not zero"
 			);
 			let new_releases = ReleaseQueues::<T>::get(&candidate);
-			assert!(releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
-			let total_releasing: BalanceOf<T> = new_releases
+			assert!(old_releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
+			let total_releasing_new: BalanceOf<T> = new_releases
 				.iter()
 				.map(|r| r.amount)
 				.reduce(|a, b| a.saturating_add(b))
 				.unwrap_or_default();
+			let total_releasing_old: BalanceOf<T> = old_releases
+				.iter()
+				.map(|r| r.amount)
+				.reduce(|a, b| a.saturating_add(b))
+				.unwrap_or_default();
+			assert!(total_releasing_old >= total_releasing_new, "Migration failed: the total releasing balance after the migration is not greater than before");
 			assert_eq!(
-				total_releasing,
+				total_releasing_old - total_releasing_new,
 				LockedBalances::<T>::get(&candidate).releasing,
 				"Migration failed: the total releasing balance after the migration is not correct"
 			);
@@ -510,7 +524,12 @@ impl<T: Config> SteppedMigration for LazyMigrationV1ToV2<T> {
 
 			let bond = LockedBalances::<T>::get(&candidate).candidacy_bond;
 			if bond != prev_bond {
-				log::warn!(target: LOG_TARGET, "The bond for candidate {:?} is not the same as before: {:?} != {:?}", candidate, bond, prev_bond);
+				log::warn!(
+					"The bond for candidate {:?} is not the same as before: {:?} != {:?}",
+					candidate,
+					bond,
+					prev_bond
+				);
 			}
 		}
 
