@@ -21,7 +21,7 @@ use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
 	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, Candidates,
 	ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet, ReleaseQueues,
-	WeightInfo,
+	ReleaseRequestOf, WeightInfo,
 };
 use core::fmt::Debug;
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
@@ -31,8 +31,6 @@ use frame_support::weights::WeightMeter;
 use sp_runtime::{FixedU128, Percent, Saturating};
 use sp_std::vec::Vec;
 
-#[cfg(feature = "try-runtime")]
-use crate::ReleaseRequestOf;
 #[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
@@ -187,14 +185,14 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 					),
 				);
 				let mut total_released: BalanceOf<T> = Zero::zero();
+				let _ = T::Currency::thaw(
+					&FreezeReason::Releasing.into(),
+					&staker,
+				);
 				let remaining_requests = requests
 					.into_iter()
 					.filter(|release| {
-						let _ = T::Currency::decrease_frozen(
-							&FreezeReason::Releasing.into(),
-							&staker,
-							release.amount,
-						);
+
 						// If the release has already expired, we can simply remove it.
 						if now > release.block {
 							return false;
@@ -206,7 +204,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 						match Pallet::<T>::increase_frozen(&staker, release.amount) {
 							Ok(_) => {
 								total_released.saturating_accrue(release.amount);
-								false
+								true
 							},
 							Err(e) => {
 								log::warn!(
@@ -214,7 +212,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 									staker,
 									e
 								);
-								true
+								false
 							},
 						}
 					})
@@ -259,11 +257,8 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 			if let Some((candidate, _)) = iter.next() {
 				let bond =
 					T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
-				let _ = T::Currency::decrease_frozen(
-					&FreezeReason::CandidacyBond.into(),
-					&candidate,
-					bond,
-				);
+				let _ = T::Currency::thaw(&FreezeReason::CandidacyBond.into(), &candidate);
+				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &candidate);
 				// Here we attempt to increase the frozen balance of the candidate.
 				// If the candidate does not have enough balance to lock,
 				// we leave him with a candidacy bond equal to zero.
@@ -482,16 +477,13 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 			);
 		}
 
-		for (candidate, old_releases) in prev_releases.into_iter() {
+		for (staker, old_releases) in prev_releases.into_iter() {
 			ensure!(
-				<T as Config>::Currency::balance_frozen(
-					&FreezeReason::Releasing.into(),
-					&candidate
-				)
-				.is_zero(),
+				<T as Config>::Currency::balance_frozen(&FreezeReason::Releasing.into(), &staker)
+					.is_zero(),
 				"Migration failed: the release balance after the migration is not zero"
 			);
-			let new_releases = ReleaseQueues::<T>::get(&candidate);
+			let new_releases = ReleaseQueues::<T>::get(&staker);
 			ensure!(old_releases.len() >= new_releases.len(), "Migration failed: the number of items in the ReleaseQueue storage after the migration is not less than before");
 			let total_releasing_new: BalanceOf<T> = new_releases
 				.iter()
@@ -505,8 +497,7 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 				.unwrap_or_default();
 			ensure!(total_releasing_old >= total_releasing_new, "Migration failed: the total releasing balance after the migration is not greater than before");
 			ensure!(
-				total_releasing_old - total_releasing_new
-					== LockedBalances::<T>::get(&candidate).releasing,
+				LockedBalances::<T>::get(&staker).releasing >= total_releasing_new,
 				"Migration failed: the total releasing balance after the migration is not correct"
 			);
 		}
@@ -609,7 +600,7 @@ mod tests {
 			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &1), true);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 2);
-			assert_eq!(ReleaseQueues::<Test>::get(&1).len(), 0);
+			assert_eq!(ReleaseQueues::<Test>::get(&1).len(), 16);
 			assert_eq!(LockedBalances::<Test>::get(&1).releasing, total_release_balance);
 
 			let old_release_lock =
@@ -634,7 +625,7 @@ mod tests {
 			ClaimableRewards::<Test>::set(100_000);
 
 			for i in 1..=users {
-				assert_ok!(Balances::mint_into(&i, 100));
+				assert_ok!(Balances::mint_into(&i, 100_000));
 				v1::CandidateStake::<Test>::insert(
 					&i,
 					&i,
@@ -642,20 +633,19 @@ mod tests {
 				);
 				v1::AutoCompound::<Test>::insert(&i, Percent::from_percent(100));
 				let mut requests = vec![];
-				for _ in 0..len {
-					requests.push(ReleaseRequest {
-						block: 1000,
-						amount: <Test as Config>::Currency::minimum_balance(),
-					});
+				for r in 0..len {
+					let amount = <Test as Config>::Currency::minimum_balance() + r as u64;
+					requests.push(ReleaseRequest { block: u64::MAX, amount });
 				}
 				ReleaseQueues::<Test>::set(i, requests.try_into().unwrap());
 			}
-			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
+			let total_release_balance =
+				len * <Test as Config>::Currency::minimum_balance() + len * (len - 1) / 2;
 
 			// Trigger the runtime upgrade
 			let initial_block = System::block_number();
 			AllPalletsWithSystem::on_runtime_upgrade();
-			loop {
+			while <Migrator as MultiStepMigrator>::ongoing() {
 				let block = System::block_number();
 				assert!(
 					block - initial_block <= 100,
@@ -663,9 +653,6 @@ mod tests {
 				);
 
 				initialize_to_block(block + 1);
-				if !<Migrator as MultiStepMigrator>::ongoing() {
-					break;
-				}
 			}
 
 			for i in 1..=users {
@@ -674,7 +661,7 @@ mod tests {
 					CandidateStakeInfo { stake: 50, checkpoint: FixedU128::zero() }
 				);
 				assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, &i), true);
-				assert_eq!(ReleaseQueues::<Test>::get(&i).len(), 0);
+				assert_eq!(ReleaseQueues::<Test>::get(&i).len() as u64, len);
 				assert_eq!(LockedBalances::<Test>::get(&i).releasing, total_release_balance);
 
 				let old_release_lock =
