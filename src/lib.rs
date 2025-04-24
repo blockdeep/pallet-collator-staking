@@ -51,6 +51,7 @@
 //! - Staging Layer: Temporary storage for changes made during active distribution.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+extern crate core;
 
 use core::marker::PhantomData;
 

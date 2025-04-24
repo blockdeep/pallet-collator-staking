@@ -19,9 +19,9 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompoundSettings, BalanceOf, CandidateStake, CandidateStakeInfo, Candidates,
-	ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet, ReleaseQueues,
-	ReleaseRequestOf, WeightInfo,
+	AutoCompoundSettings, BalanceOf, CandidacyBondReleaseOf, CandidacyBondReleases, CandidateStake,
+	CandidateStakeInfo, Candidates, ClaimableRewards, Config, FreezeReason, Layer, LockedBalances,
+	Pallet, ReleaseQueues, ReleaseRequestOf, WeightInfo,
 };
 use core::fmt::Debug;
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
@@ -99,6 +99,8 @@ pub enum MigrationSteps<T: Config> {
 	MigrateReleaseQueue { cursor: Option<T::AccountId> },
 	/// Migrate the candidacy bond locked balance.
 	MigrateCandidacyBond { cursor: Option<T::AccountId> },
+	/// Migrate the candidacy bond pending releases.
+	MigrateCandidacyBondReleases { cursor: Option<T::AccountId> },
 	/// [`ClaimableRewards`] are to be set to zero, resetting all rewards.
 	ResetClaimableRewards,
 	/// Changes the storage version to 2.
@@ -145,7 +147,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 			<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_autocompound_step();
 
 		let mut iter = if let Some(staker) = cursor.clone() {
-			v1::AutoCompound::<T>::iter_from(v1::AutoCompound::<T>::hashed_key_for(staker))
+			v1::AutoCompound::<T>::iter_from_key(staker)
 		} else {
 			v1::AutoCompound::<T>::iter()
 		};
@@ -175,7 +177,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		let now = Pallet::<T>::current_block_number();
 		let mut iter = match cursor {
 			None => ReleaseQueues::<T>::iter(),
-			Some(key) => ReleaseQueues::<T>::iter_from(ReleaseQueues::<T>::hashed_key_for(key)),
+			Some(key) => ReleaseQueues::<T>::iter_from_key(key),
 		};
 		while meter.can_consume(required) {
 			if let Some((staker, requests)) = iter.next() {
@@ -185,14 +187,10 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 					),
 				);
 				let mut total_released: BalanceOf<T> = Zero::zero();
-				let _ = T::Currency::thaw(
-					&FreezeReason::Releasing.into(),
-					&staker,
-				);
+				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &staker);
 				let remaining_requests = requests
 					.into_iter()
 					.filter(|release| {
-
 						// If the release has already expired, we can simply remove it.
 						if now > release.block {
 							return false;
@@ -282,6 +280,50 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		}
 	}
 
+	pub(crate) fn do_migrate_candidacy_bond_releases(
+		meter: &mut WeightMeter,
+		cursor: &mut Option<T::AccountId>,
+	) {
+		// TODO change the weight
+		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_candidacy_bond();
+		let mut iter = match cursor {
+			None => CandidacyBondReleases::<T>::iter(),
+			Some(key) => CandidacyBondReleases::<T>::iter_from_key(key),
+		};
+		let now = Pallet::<T>::current_block_number();
+
+		while meter.try_consume(required).is_ok() {
+			if let Some((excandidate, bond_release)) = iter.next() {
+				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &excandidate);
+				if now >= bond_release.block {
+					// Just collect the bond.
+					CandidacyBondReleases::<T>::remove(excandidate.clone());
+				} else {
+					match Pallet::<T>::increase_frozen(&excandidate, bond_release.bond) {
+						Ok(_) => LockedBalances::<T>::mutate(&excandidate, |locked| {
+							locked.candidacy_bond.saturating_accrue(bond_release.bond);
+						}),
+						Err(e) => {
+							log::warn!(
+							"Failed to increase frozen balance of {:?} when adjusting the candidacy bond release: {:?}",
+							excandidate,
+							e
+						);
+							// We tried to freeze the bond, but the user already spent the money, so
+							// all we can do is just to remove the bond.
+							CandidacyBondReleases::<T>::remove(excandidate.clone());
+						},
+					}
+				}
+
+				*cursor = Some(excandidate);
+			} else {
+				*cursor = None;
+				break;
+			}
+		}
+	}
+
 	pub(crate) fn migrate_autocompounding(
 		meter: &mut WeightMeter,
 		mut cursor: Option<T::AccountId>,
@@ -310,8 +352,21 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 	) -> MigrationSteps<T> {
 		Self::do_migrate_candidacy_bond(meter, &mut cursor);
 		match cursor {
-			None => Self::reset_rewards(meter),
+			None => Self::migrate_candidacy_bond_releases(meter, None),
 			Some(checkpoint) => MigrationSteps::MigrateCandidacyBond { cursor: Some(checkpoint) },
+		}
+	}
+
+	pub(crate) fn migrate_candidacy_bond_releases(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_candidacy_bond_releases(meter, &mut cursor);
+		match cursor {
+			None => Self::reset_rewards(meter),
+			Some(checkpoint) => {
+				MigrationSteps::MigrateCandidacyBondReleases { cursor: Some(checkpoint) }
+			},
 		}
 	}
 
@@ -406,6 +461,9 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 			MigrationSteps::MigrateCandidacyBond { cursor: checkpoint } => {
 				Self::migrate_candidacy_bond(meter, checkpoint)
 			},
+			MigrationSteps::MigrateCandidacyBondReleases { cursor: checkpoint } => {
+				Self::migrate_candidacy_bond_releases(meter, checkpoint)
+			},
 			MigrationSteps::ResetClaimableRewards => Self::reset_rewards(meter),
 			MigrationSteps::ChangeStorageVersion => Self::set_storage_version(meter),
 			MigrationSteps::Noop => MigrationSteps::Noop,
@@ -434,6 +492,7 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 		> = v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
 		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
 		let releases = ReleaseQueues::<T>::iter().collect::<BTreeMap<_, _>>();
+		let bond_releases = CandidacyBondReleases::<T>::iter().collect::<BTreeMap<_, _>>();
 		let bonds = Candidates::<T>::iter_keys()
 			.map(|candidate| {
 				let bond =
@@ -441,7 +500,7 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 				(candidate, bond)
 			})
 			.collect::<Vec<_>>();
-		Ok((candidate_stakes, autocompound, releases, bonds).encode())
+		Ok((candidate_stakes, autocompound, releases, bonds, bond_releases).encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -453,14 +512,20 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 				== StorageVersion::new(Self::id().version_to as u16),
 			"Migration post-upgrade failed: the storage version is not the expected one"
 		);
-		let (prev_candidate_stakes, prev_autocompound, prev_releases, prev_bonds) =
-			<(
-				BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
-				Vec<(T::AccountId, Percent)>,
-				BTreeMap<T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>>,
-				Vec<(T::AccountId, BalanceOf<T>)>,
-			)>::decode(&mut &prev[..])
-			.expect("Failed to decode the previous storage state");
+		let (
+			prev_candidate_stakes,
+			prev_autocompound,
+			prev_releases,
+			prev_bonds,
+			prev_bond_releases,
+		) = <(
+			BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
+			Vec<(T::AccountId, Percent)>,
+			BTreeMap<T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>>,
+			Vec<(T::AccountId, BalanceOf<T>)>,
+			BTreeMap<T::AccountId, CandidacyBondReleaseOf<T>>,
+		)>::decode(&mut &prev[..])
+		.expect("Failed to decode the previous storage state");
 
 		// Check the len of prev and post are the same.
 		ensure!(prev_candidate_stakes.len() == CandidateStake::<T>::iter().count(), "Migration failed: the number of items in the CandidateStake storage after the migration is not the same as before");
@@ -513,12 +578,28 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 			);
 
 			let bond = LockedBalances::<T>::get(&candidate).candidacy_bond;
-			if bond != prev_bond {
-				log::warn!(
-					"The bond for candidate {:?} is not the same as before: {:?} != {:?}",
-					candidate,
-					bond,
-					prev_bond
+			ensure!(bond == prev_bond || bond.is_zero(),
+				"Migration failed: the candidacy bond balance after the migration is not the same as before");
+		}
+
+		let bond_releases = CandidacyBondReleases::<T>::iter().collect::<BTreeMap<_, _>>();
+		ensure!(
+			prev_bond_releases.len() >= bond_releases.len(),
+			"Migration failed: the number of items in the CandidacyBondReleases storage after the migration is not the same as before"
+		);
+		for (excandidate, prev_bond_release) in prev_bond_releases.into_iter() {
+			ensure!(
+				<T as Config>::Currency::balance_frozen(
+					&FreezeReason::Releasing.into(),
+					&excandidate
+				)
+				.is_zero(),
+				"Migration failed: the candidacy bond balance after the migration is not zero"
+			);
+			if let Some(bond_release) = bond_releases.get(&excandidate) {
+				ensure!(
+					prev_bond_release == *bond_release,
+					"Migration failed: the candidacy bond release after the migration is not the same as before"
 				);
 			}
 		}
@@ -544,7 +625,10 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 mod tests {
 	use super::*;
 	use crate::mock::*;
-	use crate::{CandidateInfo, MinCandidacyBond, ReleaseRequest};
+	use crate::{
+		CandidacyBondRelease, CandidacyBondReleaseReason, CandidacyBondReleases, CandidateInfo,
+		MinCandidacyBond, ReleaseRequest,
+	};
 	use frame_support::assert_ok;
 	use frame_support::migrations::MultiStepMigrator;
 	use frame_support::traits::{
@@ -587,6 +671,14 @@ mod tests {
 				&1,
 				bond
 			));
+			CandidacyBondReleases::<Test>::insert(
+				&1,
+				CandidacyBondRelease {
+					bond: 10,
+					block: u64::MAX,
+					reason: CandidacyBondReleaseReason::Idle,
+				},
+			);
 
 			// Trigger the runtime upgrade
 			assert_eq!(ClaimableRewards::<Test>::get(), 100);
@@ -638,6 +730,14 @@ mod tests {
 					requests.push(ReleaseRequest { block: u64::MAX, amount });
 				}
 				ReleaseQueues::<Test>::set(i, requests.try_into().unwrap());
+				CandidacyBondReleases::<Test>::insert(
+					&i,
+					CandidacyBondRelease {
+						bond: 10,
+						block: u64::MAX,
+						reason: CandidacyBondReleaseReason::Idle,
+					},
+				);
 			}
 			let total_release_balance =
 				len * <Test as Config>::Currency::minimum_balance() + len * (len - 1) / 2;
