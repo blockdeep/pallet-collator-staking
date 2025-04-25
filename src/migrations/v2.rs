@@ -263,8 +263,8 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		meter: &mut WeightMeter,
 		cursor: &mut Option<T::AccountId>,
 	) {
-		// TODO change the weight
-		let required = <T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_candidacy_bond();
+		let required =
+			<T as Config>::WeightInfo::migration_from_v1_to_v2_migrate_candidacy_bond_release();
 		let mut iter = match cursor {
 			None => CandidacyBondReleases::<T>::iter(),
 			Some(key) => CandidacyBondReleases::<T>::iter_from_key(key),
