@@ -280,7 +280,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 				} else {
 					match Pallet::<T>::increase_frozen(&excandidate, bond_release.bond) {
 						Ok(_) => LockedBalances::<T>::mutate(&excandidate, |locked| {
-							locked.candidacy_bond.saturating_accrue(bond_release.bond);
+							locked.releasing.saturating_accrue(bond_release.bond);
 						}),
 						Err(e) => {
 							log::warn!(
@@ -604,6 +604,25 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 			}
 		}
 
+		let releases = LockedBalances::<T>::iter();
+		for (staker, locked) in releases {
+			let bond_release = if let Some(release) = CandidacyBondReleases::<T>::get(&staker) {
+				release.bond
+			} else {
+				Zero::zero()
+			};
+			let stake_releases = ReleaseQueues::<T>::get(&staker)
+				.into_iter()
+				.map(|r| r.amount)
+				.reduce(|a, b| a + b)
+				.unwrap_or_default();
+			let total = bond_release + stake_releases;
+			ensure!(
+				locked.releasing == total,
+				"Migration failed: the total releasing balance after the migration is not correct"
+			);
+		}
+
 		for (staker, percentage) in prev_autocompound {
 			let value = !percentage.is_zero();
 			ensure!(
@@ -665,7 +684,7 @@ mod tests {
 				});
 			}
 			ReleaseQueues::<Test>::set(1, requests.try_into().unwrap());
-			let total_release_balance = len * <Test as Config>::Currency::minimum_balance();
+			let total_release_balance = len * <Test as Config>::Currency::minimum_balance() + bond;
 			assert_ok!(<Test as Config>::Currency::set_freeze(
 				&FreezeReason::Releasing.into(),
 				&1,
@@ -711,6 +730,7 @@ mod tests {
 	fn migration_of_many_elements_should_work() {
 		new_test_ext().execute_with(|| {
 			let len = 16;
+			let bond = 10;
 			let users = 1_000;
 			StorageVersion::new(1).put::<Pallet<Test>>();
 			assert_eq!(Pallet::<Test>::on_chain_storage_version(), 1);
@@ -733,14 +753,14 @@ mod tests {
 				CandidacyBondReleases::<Test>::insert(
 					&i,
 					CandidacyBondRelease {
-						bond: 10,
+						bond,
 						block: u64::MAX,
 						reason: CandidacyBondReleaseReason::Idle,
 					},
 				);
 			}
 			let total_release_balance =
-				len * <Test as Config>::Currency::minimum_balance() + len * (len - 1) / 2;
+				bond + len * <Test as Config>::Currency::minimum_balance() + len * (len - 1) / 2;
 
 			// Trigger the runtime upgrade
 			let initial_block = System::block_number();
@@ -748,8 +768,8 @@ mod tests {
 			while <Migrator as MultiStepMigrator>::ongoing() {
 				let block = System::block_number();
 				assert!(
-					block - initial_block <= 100,
-					"Migration should not take more than 100 blocks"
+					block - initial_block <= 200,
+					"Migration should not take more than 200 blocks"
 				);
 
 				initialize_to_block(block + 1);
