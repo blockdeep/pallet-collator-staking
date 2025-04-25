@@ -2302,14 +2302,26 @@ pub mod pallet {
 			);
 
 			for (account, lock) in LockedBalances::<T>::iter() {
+				let frozen_balance = Self::get_total_frozen_balance(&account);
 				ensure!(
-					lock.total() <= Self::get_total_frozen_balance(&account),
+					lock.total() <= frozen_balance,
 					"Staker has a mismatch between locked funds and tracked ones"
 				);
 				ensure!(
-					!T::Currency::balance_frozen(&FreezeReason::Staking.into(), &account)
-						.is_zero(),
+					!frozen_balance.is_zero(),
 					"LockedBalances holds an item with zero actual locked balances. It should be removed"
+				);
+				let new_releases = ReleaseQueues::<T>::get(&account);
+				let normal_release: BalanceOf<T> = new_releases
+					.iter()
+					.map(|r| r.amount)
+					.reduce(|a, b| a.saturating_add(b))
+					.unwrap_or_default();
+				let bond_release =
+					CandidacyBondReleases::<T>::get(&account).map(|r| r.bond).unwrap_or_default();
+				ensure!(
+					(bond_release + normal_release) == Self::get_releasing_balance(&account),
+					"Releasing balance is not the sum of the candidacy bond and the release queue"
 				);
 				#[allow(deprecated)]
 				{
