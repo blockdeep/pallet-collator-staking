@@ -118,27 +118,6 @@ pub enum MigrationSteps<T: Config> {
 pub struct LazyMigrationV1ToV2<T: Config + Debug>(PhantomData<T>);
 
 impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
-	pub(crate) fn set_storage_version(meter: &mut WeightMeter) -> MigrationSteps<T> {
-		let required = T::DbWeight::get().reads_writes(0, 1);
-		if meter.try_consume(required).is_ok() {
-			StorageVersion::new(Self::id().version_to as u16).put::<Pallet<T>>();
-			MigrationSteps::Noop
-		} else {
-			MigrationSteps::ChangeStorageVersion
-		}
-	}
-
-	pub(crate) fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
-		// This step can be manually calculated.
-		let required = T::DbWeight::get().reads_writes(0, 1);
-		if meter.try_consume(required).is_ok() {
-			ClaimableRewards::<T>::set(Zero::zero());
-			Self::set_storage_version(meter)
-		} else {
-			MigrationSteps::ResetClaimableRewards
-		}
-	}
-
 	pub(crate) fn do_migrate_autocompounding(
 		meter: &mut WeightMeter,
 		cursor: &mut Option<T::AccountId>,
@@ -324,52 +303,6 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		}
 	}
 
-	pub(crate) fn migrate_autocompounding(
-		meter: &mut WeightMeter,
-		mut cursor: Option<T::AccountId>,
-	) -> MigrationSteps<T> {
-		Self::do_migrate_autocompounding(meter, &mut cursor);
-		match cursor {
-			None => Self::migrate_release_queue(meter, None),
-			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
-		}
-	}
-
-	pub(crate) fn migrate_release_queue(
-		meter: &mut WeightMeter,
-		mut cursor: Option<T::AccountId>,
-	) -> MigrationSteps<T> {
-		Self::do_migrate_release_queue(meter, &mut cursor);
-		match cursor {
-			None => Self::migrate_candidacy_bond(meter, None),
-			Some(checkpoint) => MigrationSteps::MigrateReleaseQueue { cursor: Some(checkpoint) },
-		}
-	}
-
-	pub(crate) fn migrate_candidacy_bond(
-		meter: &mut WeightMeter,
-		mut cursor: Option<T::AccountId>,
-	) -> MigrationSteps<T> {
-		Self::do_migrate_candidacy_bond(meter, &mut cursor);
-		match cursor {
-			None => Self::migrate_candidacy_bond_releases(meter, None),
-			Some(checkpoint) => MigrationSteps::MigrateCandidacyBond { cursor: Some(checkpoint) },
-		}
-	}
-
-	pub(crate) fn migrate_candidacy_bond_releases(
-		meter: &mut WeightMeter,
-		mut cursor: Option<T::AccountId>,
-	) -> MigrationSteps<T> {
-		Self::do_migrate_candidacy_bond_releases(meter, &mut cursor);
-		match cursor {
-			None => Self::reset_rewards(meter),
-			Some(checkpoint) => {
-				MigrationSteps::MigrateCandidacyBondReleases { cursor: Some(checkpoint) }
-			},
-		}
-	}
-
 	pub(crate) fn do_migrate_stake(
 		meter: &mut WeightMeter,
 		cursor: &mut Option<(T::AccountId, T::AccountId)>,
@@ -409,7 +342,53 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		}
 	}
 
-	pub(crate) fn migrate_stake(
+	fn migrate_autocompounding(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_autocompounding(meter, &mut cursor);
+		match cursor {
+			None => Self::migrate_release_queue(meter, None),
+			Some(checkpoint) => MigrationSteps::MigrateAutocompounding { cursor: Some(checkpoint) },
+		}
+	}
+
+	fn migrate_release_queue(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_release_queue(meter, &mut cursor);
+		match cursor {
+			None => Self::migrate_candidacy_bond(meter, None),
+			Some(checkpoint) => MigrationSteps::MigrateReleaseQueue { cursor: Some(checkpoint) },
+		}
+	}
+
+	fn migrate_candidacy_bond(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_candidacy_bond(meter, &mut cursor);
+		match cursor {
+			None => Self::migrate_candidacy_bond_releases(meter, None),
+			Some(checkpoint) => MigrationSteps::MigrateCandidacyBond { cursor: Some(checkpoint) },
+		}
+	}
+
+	fn migrate_candidacy_bond_releases(
+		meter: &mut WeightMeter,
+		mut cursor: Option<T::AccountId>,
+	) -> MigrationSteps<T> {
+		Self::do_migrate_candidacy_bond_releases(meter, &mut cursor);
+		match cursor {
+			None => Self::reset_rewards(meter),
+			Some(checkpoint) => {
+				MigrationSteps::MigrateCandidacyBondReleases { cursor: Some(checkpoint) }
+			},
+		}
+	}
+
+	fn migrate_stake(
 		meter: &mut WeightMeter,
 		mut cursor: Option<(T::AccountId, T::AccountId)>,
 	) -> MigrationSteps<T> {
@@ -417,6 +396,27 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		match cursor {
 			None => Self::migrate_autocompounding(meter, None),
 			Some(checkpoint) => MigrationSteps::MigrateStake { cursor: Some(checkpoint) },
+		}
+	}
+
+	fn set_storage_version(meter: &mut WeightMeter) -> MigrationSteps<T> {
+		let required = T::DbWeight::get().reads_writes(0, 1);
+		if meter.try_consume(required).is_ok() {
+			StorageVersion::new(Self::id().version_to as u16).put::<Pallet<T>>();
+			MigrationSteps::Noop
+		} else {
+			MigrationSteps::ChangeStorageVersion
+		}
+	}
+
+	fn reset_rewards(meter: &mut WeightMeter) -> MigrationSteps<T> {
+		// This step can be manually calculated.
+		let required = T::DbWeight::get().reads_writes(0, 1);
+		if meter.try_consume(required).is_ok() {
+			ClaimableRewards::<T>::set(Zero::zero());
+			Self::set_storage_version(meter)
+		} else {
+			MigrationSteps::ResetClaimableRewards
 		}
 	}
 }
