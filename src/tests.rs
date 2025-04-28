@@ -2492,7 +2492,7 @@ mod set_autocompound {
 	#[test]
 	fn set_autocompound() {
 		new_test_ext().execute_with(|| {
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
+			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 			assert_noop!(
 				CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true),
 				Error::<Test>::InsufficientStake
@@ -2503,13 +2503,13 @@ mod set_autocompound {
 
 			lock_for_staking(5..=5);
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true));
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
+			assert!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundEnabled {
 				account: 5,
 			}));
 			// Set it back to zero.
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
+			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 			System::assert_last_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
 				account: 5,
 			}));
@@ -3454,7 +3454,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
+			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			// Now we can see the reward.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
@@ -3565,7 +3565,7 @@ mod collator_rewards {
 			// Reward for staker when claiming.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 28);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
+			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3677,7 +3677,7 @@ mod collator_rewards {
 			// Reward for staker.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(&4, &4).checkpoint, Counters::<Test>::get(&4));
+			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3814,7 +3814,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&2), 12);
 			assert_ok!(CollatorStaking::do_claim_rewards(&2));
-			assert_eq!(CandidateStake::<Test>::get(&4, &2).checkpoint, Counters::<Test>::get(&4));
+			assert_eq!(CandidateStake::<Test>::get(4, 2).checkpoint, Counters::<Test>::get(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 16); // this remains to staker 3.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 2,
@@ -3822,7 +3822,7 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&3));
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, Counters::<Test>::get(&4));
+			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, Counters::<Test>::get(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 1); // rounding issue
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 3,
@@ -3916,8 +3916,8 @@ mod collator_rewards {
 
 			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
 			// rewards were distributed.
-			assert_eq!(Counters::<Test>::get(&3), FixedU128::zero());
-			assert_eq!(CandidateStake::<Test>::get(&3, &4).checkpoint, FixedU128::zero());
+			assert_eq!(Counters::<Test>::get(3), FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(3, 4).checkpoint, FixedU128::zero());
 
 			// Skip session 0, as there are no rewards for this session.
 			initialize_to_block(10);
@@ -3934,10 +3934,10 @@ mod collator_rewards {
 			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
 			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
 			// between the rewards obtained and the total stake deposited in it.
-			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
+			assert_eq!(Counters::<Test>::get(4), FixedU128::from_rational(8, 40));
 
 			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, FixedU128::zero());
 
 			// Now a random user claims the rewards on behalf of the staker.
 			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(1), 3));
@@ -3948,7 +3948,7 @@ mod collator_rewards {
 
 			// And the checkpoint should be updated to the candidate's current counter.
 			assert_eq!(
-				CandidateStake::<Test>::get(&4, &3).checkpoint,
+				CandidateStake::<Test>::get(4, 3).checkpoint,
 				FixedU128::from_rational(8, 40)
 			);
 
@@ -3962,9 +3962,9 @@ mod collator_rewards {
 			));
 
 			// The checkpoint should be equal to the candidate's current counter.
-			assert_eq!(Counters::<Test>::get(&4), FixedU128::from_rational(8, 40));
+			assert_eq!(Counters::<Test>::get(4), FixedU128::from_rational(8, 40));
 			assert_eq!(
-				CandidateStake::<Test>::get(&4, &5).checkpoint,
+				CandidateStake::<Test>::get(4, 5).checkpoint,
 				FixedU128::from_rational(8, 40)
 			);
 		});
@@ -4362,15 +4362,15 @@ mod claim_rewards_other {
 				RuntimeOrigin::signed(3),
 				vec![StakeTarget { candidate: 4, stake: 40 }].try_into().unwrap()
 			));
-			let initial_stake = CandidateStake::<Test>::get(&4, &3).stake;
+			let initial_stake = CandidateStake::<Test>::get(4, 3).stake;
 
 			// Enable autocompound for staker 3
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(3), true));
 
 			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
 			// rewards were distributed.
-			assert_eq!(Counters::<Test>::get(&4), FixedU128::zero());
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+			assert_eq!(Counters::<Test>::get(4), FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, FixedU128::zero());
 
 			// Skip session 0, as there are no rewards for this session
 			initialize_to_block(10);
@@ -4392,11 +4392,11 @@ mod claim_rewards_other {
 			// At this point, rewards from session 1 should have been calculated
 			// Check counter is updated as expected with 20% to collator, 80% to stakers
 			let expected_checkpoint = FixedU128::from_rational(80, 40);
-			assert_eq!(Counters::<Test>::get(&4), expected_checkpoint);
+			assert_eq!(Counters::<Test>::get(4), expected_checkpoint);
 
 			// The checkpoint should still be zero, as rewards aren't claimed
 			// or distributed yet
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, FixedU128::zero());
+			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, FixedU128::zero());
 
 			// Process on_idle with sufficient weight
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
@@ -4404,11 +4404,11 @@ mod claim_rewards_other {
 
 			// The checkpoint should now be updated to match the counter as
 			// rewards have been distributed
-			assert_eq!(CandidateStake::<Test>::get(&4, &3).checkpoint, expected_checkpoint);
+			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, expected_checkpoint);
 
 			// The stake should have increased by the reward amount (40 * 80/40 = 80)
 			let expected_final_stake = initial_stake + 80;
-			let actual_final_stake = CandidateStake::<Test>::get(&4, &3).stake;
+			let actual_final_stake = CandidateStake::<Test>::get(4, 3).stake;
 
 			// Verify stake increased correctly
 			assert_eq!(actual_final_stake, expected_final_stake);
@@ -4529,9 +4529,9 @@ mod on_idle {
 			));
 
 			// Record & check initial stakes
-			let initial_stake_3 = CandidateStake::<Test>::get(&4, &3).stake;
-			let initial_stake_5 = CandidateStake::<Test>::get(&4, &5).stake;
-			let initial_stake_6 = CandidateStake::<Test>::get(&4, &6).stake;
+			let initial_stake_3 = CandidateStake::<Test>::get(4, 3).stake;
+			let initial_stake_5 = CandidateStake::<Test>::get(4, 5).stake;
+			let initial_stake_6 = CandidateStake::<Test>::get(4, 6).stake;
 
 			// Skip session 0, as there are no rewards for this session
 			initialize_to_block(10);
@@ -4560,9 +4560,9 @@ mod on_idle {
 			// Staker 6 share: 100/200 * 400 = 200 (with no autocompounding)
 
 			// Get final stakes
-			let final_stake_3 = CandidateStake::<Test>::get(&4, &3).stake;
-			let final_stake_5 = CandidateStake::<Test>::get(&4, &5).stake;
-			let final_stake_6 = CandidateStake::<Test>::get(&4, &6).stake;
+			let final_stake_3 = CandidateStake::<Test>::get(4, 3).stake;
+			let final_stake_5 = CandidateStake::<Test>::get(4, 5).stake;
+			let final_stake_6 = CandidateStake::<Test>::get(4, 6).stake;
 
 			// For stakers with autocompound, stake should increase by their share
 			assert_eq!(final_stake_3, initial_stake_3 + 80);
@@ -4656,7 +4656,7 @@ mod on_idle {
 			// Record initial stakes before processing
 			let initial_stakes: Vec<_> = staker_accounts
 				.iter()
-				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.map(|&staker| (staker, CandidateStake::<Test>::get(4, staker).stake))
 				.collect();
 
 			// Verify initial operation state is to reward stakers
@@ -4676,7 +4676,7 @@ mod on_idle {
 
 			let stakes_after_first_block: Vec<_> = staker_accounts
 				.iter()
-				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.map(|&staker| (staker, CandidateStake::<Test>::get(4, staker).stake))
 				.collect();
 
 			// Count the number of stakers processed after the first block
@@ -4702,7 +4702,7 @@ mod on_idle {
 
 				let stakes_after_second_block: Vec<_> = staker_accounts
 					.iter()
-					.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+					.map(|&staker| (staker, CandidateStake::<Test>::get(4, staker).stake))
 					.collect();
 
 				let processed_after_second_block =
@@ -4725,7 +4725,7 @@ mod on_idle {
 				if matches!(current_op, Operation::Idle) {
 					break;
 				}
-				block_num = block_num + 1;
+				block_num += 1;
 			}
 
 			// Verify final operation state is Idle
@@ -4738,7 +4738,7 @@ mod on_idle {
 			// Now verify all stakers had their rewards autocompounded
 			let final_stakes: Vec<_> = staker_accounts
 				.iter()
-				.map(|&staker| (staker, CandidateStake::<Test>::get(&4, &staker).stake))
+				.map(|&staker| (staker, CandidateStake::<Test>::get(4, staker).stake))
 				.collect();
 
 			// Check that all stakers received increased stake through autocompounding
@@ -4775,15 +4775,15 @@ mod on_idle {
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true)); // Enable for Staker 5
 
 			// Staker 5 should be moved to commit layer with enabled = true
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false); // Staker 5 commit should be false initially
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5), true); // Staker 5 should be in Staging layer with enabled = true
+			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5)); // Staker 5 commit should be false initially
+			assert!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5)); // Staker 5 should be in Staging layer with enabled = true
 
 			// Process the `on_idle` function to trigger the commit operation
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
 			CollatorStaking::on_idle(1, weight); // Trigger the idle process
 
 			// After processing, staker 5 should be in the commit layer with enabled = true
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
+			assert!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 
 			// Move to session 2 (simulate next session)
 			initialize_to_block(20);
@@ -4798,7 +4798,7 @@ mod on_idle {
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
 
 			// Staker 5 should be in commit layer with enabled = true initially
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), true);
+			assert!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 
 			// Process the `on_idle` function again to trigger the commit operation
 			matches!(
@@ -4809,10 +4809,10 @@ mod on_idle {
 			assert!(!CollatorStaking::is_delivering_rewards());
 
 			// After disabling auto-compounding, staker 5 should be removed from commit layer
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5), false);
+			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 
 			// Staker 5 should now be back in the staging layer with enabled = false
-			assert_eq!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5), false);
+			assert!(!AutoCompoundSettings::<Test>::get(Layer::Staging, 5));
 		});
 	}
 }
