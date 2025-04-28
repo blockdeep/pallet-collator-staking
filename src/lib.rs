@@ -35,11 +35,14 @@
 //! After a session with 30 tokens of rewards:
 //!  * Counter increases by 30/300 = 0.1
 //!  * Each token staked now "earned" 0.1 tokens
+//!
 //! A staker with 100 tokens claims rewards:
 //!  * Unclaimed rewards = (0.1 - 0) * 100 = 10 tokens
 //!  * Checkpoint updated from 0 to 0.1
+//!
 //! After another session with 60 tokens of rewards:
 //!  * Counter increases by 60/300 = 0.2, now totaling 0.3
+//!
 //! The same staker claims again:
 //!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
 //!  * Checkpoint updated from 0.1 to 0.3
@@ -1484,7 +1487,7 @@ pub mod pallet {
 			let current_session = CurrentSession::<T>::get();
 			UserStake::<T>::try_mutate(who, |user_stake_info| {
 				for candidate in &user_stake_info.candidates {
-					let counter = Counters::<T>::get(&candidate);
+					let counter = Counters::<T>::get(candidate);
 					CandidateStake::<T>::mutate(candidate, who, |info| {
 						let reward =
 							counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
@@ -1519,7 +1522,7 @@ pub mod pallet {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
 			for candidate in &user_stake_info.candidates {
-				let counter = Counters::<T>::get(&candidate);
+				let counter = Counters::<T>::get(candidate);
 				let info = CandidateStake::<T>::get(candidate, who);
 				let reward = counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
 				total_rewards.saturating_accrue(reward);
@@ -1568,7 +1571,7 @@ pub mod pallet {
 							if let Some(bond_release) = maybe_bond_release {
 								if bond_release.reason == CandidacyBondReleaseReason::Replaced {
 									Self::decrease_frozen(who, bond_release.bond)?;
-									LockedBalances::<T>::mutate(&who, |lock| {
+									LockedBalances::<T>::mutate(who, |lock| {
 										lock.releasing.saturating_reduce(bond_release.bond)
 									});
 									*maybe_bond_release = None;
@@ -1584,8 +1587,8 @@ pub mod pallet {
 					// remove it from the SessionRemovedCandidates
 					SessionRemovedCandidates::<T>::remove(who);
 
-					LockedBalances::<T>::mutate(&who, |lock| lock.candidacy_bond = bond);
-					Self::increase_frozen(&who, bond)?;
+					LockedBalances::<T>::mutate(who, |lock| lock.candidacy_bond = bond);
+					Self::increase_frozen(who, bond)?;
 					Ok(info)
 				},
 			)?;
@@ -2089,7 +2092,7 @@ pub mod pallet {
 							collator_info.stake,
 						);
 						Counters::<T>::mutate(&collator, |counter| {
-							counter.saturating_accrue(session_ratio.into())
+							counter.saturating_accrue(session_ratio)
 						});
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);

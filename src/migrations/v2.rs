@@ -486,10 +486,8 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 		use codec::Encode;
 
 		// Return the state of the storage before the migration.
-		let candidate_stakes: BTreeMap<
-			(T::AccountId, T::AccountId),
-			v1::CandidateStakeInfo<BalanceOf<T>>,
-		> = v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
+		let candidate_stakes: BTreeMap<_, _> =
+			v1::CandidateStake::<T>::iter().map(|(k1, k2, v)| ((k1, k2), v)).collect();
 		let autocompound = v1::AutoCompound::<T>::iter().collect::<Vec<_>>();
 		let releases = ReleaseQueues::<T>::iter().collect::<BTreeMap<_, _>>();
 		let bond_releases = CandidacyBondReleases::<T>::iter().collect::<BTreeMap<_, _>>();
