@@ -14,12 +14,13 @@
 // limitations under the License.
 
 sp_api::decl_runtime_apis! {
-	/// This runtime api allows to query:
+	/// This runtime api allows querying:
 	/// - The main pallet's pot account.
 	/// - The extra rewards pot account.
 	/// - Accumulated rewards for an account.
 	/// - Whether a given account has rewards pending to be claimed or not.
 	/// - The current candidates and their corresponding stake.
+	/// - The locked balance available for staking.
 	///
 	/// Sample implementation:
 	/// ```ignore
@@ -38,6 +39,9 @@ sp_api::decl_runtime_apis! {
 	///    }
 	///	   fn candidates() -> Vec<(AccountId, Balance)> {
 	///        CollatorStaking::candidates()
+	///    }
+	///    fn total_stake(account: AccountId) -> Balance {
+	///        CollatorStaking::get_staked_balance(&account)
 	///    }
 	/// }
 	/// ```
@@ -60,5 +64,8 @@ sp_api::decl_runtime_apis! {
 
 		/// Returns a list with all candidates and their stake.
 		fn candidates() -> sp_std::vec::Vec<(AccountId, Balance)>;
+		
+		/// Locked funds available for staking.
+		fn total_stake(account: AccountId) -> Balance;
 	}
 }
