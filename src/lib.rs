@@ -576,6 +576,14 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type NextSystemOperation<T: Config> = StorageValue<_, OperationFor<T>, ValueQuery>;
 
+	/// Tracks the different types of locked balances for each account.
+	///
+	/// This storage map keeps track of how much of an account's locked balance is:
+	/// - In the process of being released via the release queue
+	/// - Locked as a candidacy bond
+	///
+	/// The total locked balance for staking purposes can be calculated as:
+	/// `total_frozen - (releasing + candidacy_bond)`
 	#[pallet::storage]
 	pub type LockedBalances<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, LockedBalance<BalanceOf<T>>, ValueQuery>;

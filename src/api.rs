@@ -64,7 +64,7 @@ sp_api::decl_runtime_apis! {
 
 		/// Returns a list with all candidates and their stake.
 		fn candidates() -> sp_std::vec::Vec<(AccountId, Balance)>;
-		
+
 		/// Locked funds available for staking.
 		fn total_stake(account: AccountId) -> Balance;
 	}
