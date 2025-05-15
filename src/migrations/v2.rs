@@ -19,9 +19,9 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompoundSettings, BalanceOf, CandidacyBondReleaseOf, CandidacyBondReleases, CandidateStake,
-	CandidateStakeInfo, Candidates, ClaimableRewards, Config, FreezeReason, Layer, LockedBalances,
-	Pallet, ReleaseQueues, ReleaseRequestOf, WeightInfo,
+	AutoCompoundSettings, BalanceOf, CandidacyBondReleases, CandidateStake, CandidateStakeInfo,
+	Candidates, ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet,
+	ReleaseQueues, WeightInfo,
 };
 use core::fmt::Debug;
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
@@ -519,9 +519,9 @@ impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 		) = <(
 			BTreeMap<(T::AccountId, T::AccountId), v1::CandidateStakeInfo<BalanceOf<T>>>,
 			Vec<(T::AccountId, Percent)>,
-			BTreeMap<T::AccountId, BoundedVec<ReleaseRequestOf<T>, T::MaxStakedCandidates>>,
+			BTreeMap<T::AccountId, BoundedVec<crate::ReleaseRequestOf<T>, T::MaxStakedCandidates>>,
 			Vec<(T::AccountId, BalanceOf<T>)>,
-			BTreeMap<T::AccountId, CandidacyBondReleaseOf<T>>,
+			BTreeMap<T::AccountId, crate::CandidacyBondReleaseOf<T>>,
 		)>::decode(&mut &prev[..])
 		.expect("Failed to decode the previous storage state");
 
