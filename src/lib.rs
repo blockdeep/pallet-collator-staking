@@ -78,6 +78,8 @@ pub mod weights;
 
 const LOG_TARGET: &str = "runtime::collator-staking";
 
+/// # Pallet Documentation
+///
 #[frame_support::pallet]
 pub mod pallet {
 	use frame_support::{
@@ -412,7 +414,7 @@ pub mod pallet {
 	/// Tracks the different types of locks that can be applied to an account's balance.
 	///
 	/// This struct keeps track of the different amounts that are locked for staking,
-	/// releasing (in process of being unlocked), and held as candidacy bond.
+	/// releasing (in the process of being unlocked), and held as candidacy bond.
 	#[derive(
 		PartialEq,
 		Eq,
@@ -429,6 +431,30 @@ pub mod pallet {
 		pub releasing: Balance,
 		/// The amount locked as candidacy bond.
 		pub candidacy_bond: Balance,
+	}
+
+	/// Track reward distribution state for a candidate.
+	///
+	/// It maintains the state needed to calculate and distribute rewards for stakers
+	/// who have delegated to a specific collator.
+	#[derive(
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
+		Default,
+	)]
+	pub struct Counter {
+		/// Accumulated reward ratio per token staked, represented as a fixed-point number.
+		/// Updated when new rewards are added for distribution.
+		pub value: FixedU128,
+		/// Number of stakers that have not yet claimed their rewards.
+		/// Decremented when stakers claim their rewards.
+		pub pending_claims: u32,
 	}
 
 	impl<Balance> LockedBalance<Balance>
@@ -564,7 +590,7 @@ pub mod pallet {
 	/// Represents accumulated rewards per token staked on a given collator over time.
 	#[pallet::storage]
 	pub type Counters<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, Counter, ValueQuery>;
 
 	/// The storage value `LastRewardedKey` is used to track the last key that was rewarded
 	/// automatically by the system.
@@ -1495,13 +1521,26 @@ pub mod pallet {
 			let current_session = CurrentSession::<T>::get();
 			UserStake::<T>::try_mutate(who, |user_stake_info| {
 				for candidate in &user_stake_info.candidates {
-					let counter = Counters::<T>::get(candidate);
-					CandidateStake::<T>::mutate(candidate, who, |info| {
-						let reward =
-							counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
-						candidate_rewards.push((candidate.clone(), reward));
-						total_rewards.saturating_accrue(reward);
-						info.checkpoint = counter;
+					Counters::<T>::mutate_exists(candidate, |maybe_counter| {
+						CandidateStake::<T>::mutate(candidate, who, |info| {
+							let value = maybe_counter.clone().unwrap_or_default().value;
+							let reward = value
+								.saturating_sub(info.checkpoint)
+								.saturating_mul_int(info.stake);
+							candidate_rewards.push((candidate.clone(), reward));
+							total_rewards.saturating_accrue(reward);
+							info.checkpoint = value;
+						});
+						// Remove the counter if everything has been claimed and the candidate left.
+						if let Some(counter) = maybe_counter {
+							if counter.pending_claims <= 1
+								&& Self::get_candidate(candidate).is_err()
+							{
+								*maybe_counter = None;
+							} else {
+								counter.pending_claims.saturating_dec();
+							}
+						}
 					});
 				}
 				user_stake_info.maybe_last_reward_session = Some(current_session);
@@ -1532,7 +1571,8 @@ pub mod pallet {
 			for candidate in &user_stake_info.candidates {
 				let counter = Counters::<T>::get(candidate);
 				let info = CandidateStake::<T>::get(candidate, who);
-				let reward = counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
+				let reward =
+					counter.value.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
 				total_rewards.saturating_accrue(reward);
 			}
 			total_rewards
@@ -1700,7 +1740,7 @@ pub mod pallet {
 							candidate_info.stakers.saturating_inc();
 						}
 						candidate_stake_info.stake = final_staker_stake;
-						candidate_stake_info.checkpoint = Counters::<T>::get(candidate);
+						candidate_stake_info.checkpoint = Counters::<T>::get(candidate).value;
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
 							// In case the user recently unstaked we cannot allow those funds to be quickly
@@ -1897,7 +1937,13 @@ pub mod pallet {
 					}
 					Self::release_candidacy_bond(who, reason)?;
 
-					// Store removed candidate in SessionRemovedCandidates to properly reward
+					// Remove the counter if all rewards have been claimed.
+					let counter = Counters::<T>::get(who);
+					if counter.pending_claims.is_zero() {
+						Counters::<T>::remove(who);
+					}
+
+					// Store the removed candidate in SessionRemovedCandidates to properly reward
 					// the candidate and its stakers at the end of the session.
 					SessionRemovedCandidates::<T>::insert(who, candidate.clone());
 
@@ -2100,7 +2146,8 @@ pub mod pallet {
 							collator_info.stake,
 						);
 						Counters::<T>::mutate(&collator, |counter| {
-							counter.saturating_accrue(session_ratio)
+							counter.value.saturating_accrue(session_ratio);
+							counter.pending_claims = collator_info.stakers;
 						});
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);

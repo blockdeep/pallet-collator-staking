@@ -167,7 +167,9 @@ fn prepare_rewards<T: Config + pallet_session::Config>(
 			)
 			.unwrap_or_else(|e| panic!("Could not stake: {:?}", e));
 			Counters::<T>::mutate(candidate, |counter| {
-				counter.saturating_accrue(FixedU128::saturating_from_rational(amount, amount))
+				counter
+					.value
+					.saturating_accrue(FixedU128::saturating_from_rational(amount, amount));
 			})
 		}
 	}

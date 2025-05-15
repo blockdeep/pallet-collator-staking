@@ -17,7 +17,7 @@ use crate as collator_staking;
 use crate::{
 	mock::*, AutoCompoundSettings, CandidacyBondRelease, CandidacyBondReleaseReason,
 	CandidacyBondReleases, CandidateInfo, CandidateStake, CandidateStakeInfo, Candidates,
-	ClaimableRewards, CollatorRewardPercentage, Config, Counters, CurrentSession,
+	ClaimableRewards, CollatorRewardPercentage, Config, Counter, Counters, CurrentSession,
 	DesiredCandidates, Error, Event, ExtraReward, IdentityCollator, Invulnerables,
 	LastAuthoredBlock, Layer, MinCandidacyBond, MinStake, NextSystemOperation, Operation,
 	ProducedBlocks, ReleaseQueues, ReleaseRequest, SessionRemovedCandidates, StakeTarget,
@@ -3453,8 +3453,14 @@ mod collator_rewards {
 				)
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
+			assert_eq!(Counters::<Test>::get(4).pending_claims, 1);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
+			// The candidate 4 left the candidacy, so the counter got erased.
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: FixedU128::zero(), pending_claims: 0 }
+			);
+			assert!(!Counters::<Test>::contains_key(4));
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			// Now we can see the reward.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
@@ -3565,7 +3571,10 @@ mod collator_rewards {
 			// Reward for staker when claiming.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 28);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: CandidateStake::<Test>::get(4, 4).checkpoint, pending_claims: 0 }
+			);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3677,7 +3686,10 @@ mod collator_rewards {
 			// Reward for staker.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&4));
-			assert_eq!(CandidateStake::<Test>::get(4, 4).checkpoint, Counters::<Test>::get(4));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: CandidateStake::<Test>::get(4, 4).checkpoint, pending_claims: 0 }
+			);
 			assert_eq!(ClaimableRewards::<Test>::get(), 0);
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -3814,7 +3826,10 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&2), 12);
 			assert_ok!(CollatorStaking::do_claim_rewards(&2));
-			assert_eq!(CandidateStake::<Test>::get(4, 2).checkpoint, Counters::<Test>::get(4));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: CandidateStake::<Test>::get(4, 2).checkpoint, pending_claims: 1 }
+			);
 			assert_eq!(ClaimableRewards::<Test>::get(), 16); // this remains to staker 3.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 2,
@@ -3822,7 +3837,10 @@ mod collator_rewards {
 			}));
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&3), 15);
 			assert_ok!(CollatorStaking::do_claim_rewards(&3));
-			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, Counters::<Test>::get(4));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: CandidateStake::<Test>::get(4, 3).checkpoint, pending_claims: 0 }
+			);
 			assert_eq!(ClaimableRewards::<Test>::get(), 1); // rounding issue
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 3,
@@ -3916,7 +3934,10 @@ mod collator_rewards {
 
 			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
 			// rewards were distributed.
-			assert_eq!(Counters::<Test>::get(3), FixedU128::zero());
+			assert_eq!(
+				Counters::<Test>::get(3),
+				Counter { value: FixedU128::zero(), pending_claims: 0 }
+			);
 			assert_eq!(CandidateStake::<Test>::get(3, 4).checkpoint, FixedU128::zero());
 
 			// Skip session 0, as there are no rewards for this session.
@@ -3934,7 +3955,10 @@ mod collator_rewards {
 			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
 			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
 			// between the rewards obtained and the total stake deposited in it.
-			assert_eq!(Counters::<Test>::get(4), FixedU128::from_rational(8, 40));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: FixedU128::from_rational(8, 40), pending_claims: 1 }
+			);
 
 			// The current checkpoint does not vary, as the staker did not claim the rewards yet.
 			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, FixedU128::zero());
@@ -3962,7 +3986,10 @@ mod collator_rewards {
 			));
 
 			// The checkpoint should be equal to the candidate's current counter.
-			assert_eq!(Counters::<Test>::get(4), FixedU128::from_rational(8, 40));
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: FixedU128::from_rational(8, 40), pending_claims: 0 }
+			);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 5).checkpoint,
 				FixedU128::from_rational(8, 40)
@@ -4369,7 +4396,12 @@ mod claim_rewards_other {
 
 			// Check the collator's counter and staker's checkpoint. Both should be zero, as no
 			// rewards were distributed.
-			assert_eq!(Counters::<Test>::get(4), FixedU128::zero());
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: FixedU128::zero(), pending_claims: 0 }
+			);
+			// Which implies the counter should not exist yet.
+			assert!(!Counters::<Test>::contains_key(4));
 			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, FixedU128::zero());
 
 			// Skip session 0, as there are no rewards for this session
@@ -4392,7 +4424,10 @@ mod claim_rewards_other {
 			// At this point, rewards from session 1 should have been calculated
 			// Check counter is updated as expected with 20% to collator, 80% to stakers
 			let expected_checkpoint = FixedU128::from_rational(80, 40);
-			assert_eq!(Counters::<Test>::get(4), expected_checkpoint);
+			assert_eq!(
+				Counters::<Test>::get(4),
+				Counter { value: expected_checkpoint, pending_claims: 1 }
+			);
 
 			// The checkpoint should still be zero, as rewards aren't claimed
 			// or distributed yet
@@ -4402,8 +4437,7 @@ mod claim_rewards_other {
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
 			CollatorStaking::on_idle(21, weight);
 
-			// The checkpoint should now be updated to match the counter as
-			// rewards have been distributed
+			// The checkpoint should now be zero, since all stakers claimed
 			assert_eq!(CandidateStake::<Test>::get(4, 3).checkpoint, expected_checkpoint);
 
 			// The stake should have increased by the reward amount (40 * 80/40 = 80)

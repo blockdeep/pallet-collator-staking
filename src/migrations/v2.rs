@@ -19,9 +19,9 @@
 
 use crate::migrations::PALLET_MIGRATIONS_ID;
 use crate::{
-	AutoCompoundSettings, BalanceOf, CandidacyBondReleaseOf, CandidacyBondReleases, CandidateStake,
-	CandidateStakeInfo, Candidates, ClaimableRewards, Config, FreezeReason, Layer, LockedBalances,
-	Pallet, ReleaseQueues, ReleaseRequestOf, WeightInfo,
+	AutoCompoundSettings, BalanceOf, CandidacyBondReleases, CandidateStake, CandidateStakeInfo,
+	Candidates, ClaimableRewards, Config, FreezeReason, Layer, LockedBalances, Pallet,
+	ReleaseQueues, WeightInfo,
 };
 use core::fmt::Debug;
 use frame_support::migrations::{MigrationId, SteppedMigration, SteppedMigrationError};
@@ -31,6 +31,8 @@ use frame_support::weights::WeightMeter;
 use sp_runtime::{FixedU128, Percent, Saturating};
 use sp_std::vec::Vec;
 
+#[cfg(feature = "try-runtime")]
+use crate::{CandidacyBondReleaseOf, ReleaseRequestOf};
 #[cfg(feature = "try-runtime")]
 use sp_runtime::TryRuntimeError;
 #[cfg(feature = "try-runtime")]
