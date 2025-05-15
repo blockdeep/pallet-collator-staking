@@ -35,11 +35,14 @@
 //! After a session with 30 tokens of rewards:
 //!  * Counter increases by 30/300 = 0.1
 //!  * Each token staked now "earned" 0.1 tokens
+//!
 //! A staker with 100 tokens claims rewards:
 //!  * Unclaimed rewards = (0.1 - 0) * 100 = 10 tokens
 //!  * Checkpoint updated from 0 to 0.1
+//!
 //! After another session with 60 tokens of rewards:
 //!  * Counter increases by 60/300 = 0.2, now totaling 0.3
+//!
 //! The same staker claims again:
 //!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
 //!  * Checkpoint updated from 0.1 to 0.3
@@ -51,6 +54,7 @@
 //! - Staging Layer: Temporary storage for changes made during active distribution.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+extern crate core;
 
 use core::marker::PhantomData;
 
@@ -76,7 +80,6 @@ const LOG_TARGET: &str = "runtime::collator-staking";
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::weights::WeightMeter;
 	use frame_support::{
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
@@ -86,6 +89,7 @@ pub mod pallet {
 			tokens::Preservation::{Expendable, Preserve},
 			EnsureOrigin, ValidatorRegistration,
 		},
+		weights::WeightMeter,
 		BoundedVec, DefaultNoBound, PalletId,
 	};
 	use frame_system::pallet_prelude::*;
@@ -186,7 +190,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		/// Candidates will be  removed from active collator set, if block is not produced within this threshold.
+		/// Candidates will be removed from active collator set, if block is not produced within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
@@ -234,7 +238,9 @@ pub mod pallet {
 	#[pallet::composite_enum]
 	pub enum FreezeReason {
 		Staking,
+		#[deprecated]
 		CandidacyBond,
+		#[deprecated]
 		Releasing,
 	}
 
@@ -403,6 +409,38 @@ pub mod pallet {
 		pub reason: CandidacyBondReleaseReason,
 	}
 
+	/// Tracks the different types of locks that can be applied to an account's balance.
+	///
+	/// This struct keeps track of the different amounts that are locked for staking,
+	/// releasing (in process of being unlocked), and held as candidacy bond.
+	#[derive(
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
+		Default,
+	)]
+	pub struct LockedBalance<Balance> {
+		/// The amount that is in the process of being released.
+		pub releasing: Balance,
+		/// The amount locked as candidacy bond.
+		pub candidacy_bond: Balance,
+	}
+
+	impl<Balance> LockedBalance<Balance>
+	where
+		Balance: Saturating + Copy,
+	{
+		/// Returns the total amount of locked balance that is not part of staking.
+		pub fn total(&self) -> Balance {
+			self.releasing.saturating_add(self.candidacy_bond)
+		}
+	}
+
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
@@ -537,6 +575,18 @@ pub mod pallet {
 	/// - `Option<T::AccountId>`: The account ID of the last rewarded key, if any.
 	#[pallet::storage]
 	pub type NextSystemOperation<T: Config> = StorageValue<_, OperationFor<T>, ValueQuery>;
+
+	/// Tracks the different types of locked balances for each account.
+	///
+	/// This storage map keeps track of how much of an account's locked balance is:
+	/// - In the process of being released via the release queue
+	/// - Locked as a candidacy bond
+	///
+	/// The total locked balance for staking purposes can be calculated as:
+	/// `total_frozen - (releasing + candidacy_bond)`
+	#[pallet::storage]
+	pub type LockedBalances<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, LockedBalance<BalanceOf<T>>, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -871,7 +921,8 @@ pub mod pallet {
 		/// This call is not available to `Invulnerable` collators.
 		#[pallet::call_index(3)]
 		#[pallet::weight(
-			T::WeightInfo::register_as_candidate() + T::WeightInfo::remove_worst_candidate()
+			T::WeightInfo::register_as_candidate()
+				.saturating_add(T::WeightInfo::remove_worst_candidate())
 		)]
 		pub fn register_as_candidate(
 			origin: OriginFor<T>,
@@ -1234,11 +1285,6 @@ pub mod pallet {
 			} else {
 				available
 			};
-			T::Currency::set_freeze(
-				&FreezeReason::Staking.into(),
-				&who,
-				staked_balance.saturating_sub(amount),
-			)?;
 			Self::add_to_release_queue(&who, amount, T::StakeUnlockDelay::get())?;
 			Self::adjust_autocompound(&who);
 
@@ -1257,12 +1303,15 @@ pub mod pallet {
 			ensure!(amount >= MinCandidacyBond::<T>::get(), Error::<T>::InvalidCandidacyBond);
 			ensure!(Self::get_candidate(&who).is_ok(), Error::<T>::NotCandidate);
 
-			let available_balance = T::Currency::balance(&who)
-				.saturating_sub(Self::get_staked_balance(&who))
-				.saturating_sub(Self::get_releasing_balance(&who));
-			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
-
-			T::Currency::set_freeze(&FreezeReason::CandidacyBond.into(), &who, amount)?;
+			LockedBalances::<T>::try_mutate(&who, |lock| -> DispatchResult {
+				if lock.candidacy_bond < amount {
+					Self::increase_frozen(&who, amount.saturating_sub(lock.candidacy_bond))?;
+				} else {
+					Self::decrease_frozen(&who, lock.candidacy_bond.saturating_sub(amount))?;
+				}
+				lock.candidacy_bond = amount;
+				Ok(())
+			})?;
 
 			Self::deposit_event(Event::<T>::CandidacyBondUpdated {
 				candidate: who,
@@ -1446,7 +1495,7 @@ pub mod pallet {
 			let current_session = CurrentSession::<T>::get();
 			UserStake::<T>::try_mutate(who, |user_stake_info| {
 				for candidate in &user_stake_info.candidates {
-					let counter = Counters::<T>::get(&candidate);
+					let counter = Counters::<T>::get(candidate);
 					CandidateStake::<T>::mutate(candidate, who, |info| {
 						let reward =
 							counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
@@ -1481,7 +1530,7 @@ pub mod pallet {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
 			for candidate in &user_stake_info.candidates {
-				let counter = Counters::<T>::get(&candidate);
+				let counter = Counters::<T>::get(candidate);
 				let info = CandidateStake::<T>::get(candidate, who);
 				let reward = counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
 				total_rewards.saturating_accrue(reward);
@@ -1522,26 +1571,18 @@ pub mod pallet {
 						stake.saturating_accrue(info.stake);
 						stakers.saturating_inc();
 					}
-					// Users are allowed to reuse the old candidacy bond as long as they were
+					// Users are allowed to fully claim the old candidacy bond as long as they were
 					// replaced by another candidate.
 					CandidacyBondReleases::<T>::try_mutate(
 						who,
 						|maybe_bond_release| -> DispatchResult {
 							if let Some(bond_release) = maybe_bond_release {
-								if bond_release.reason == CandidacyBondReleaseReason::Replaced
-									&& bond_release.bond >= bond
-								{
-									let remaining_lock =
-										Self::get_releasing_balance(who).saturating_sub(bond);
-									T::Currency::set_freeze(
-										&FreezeReason::Releasing.into(),
-										who,
-										remaining_lock,
-									)?;
-									bond_release.bond.saturating_reduce(bond);
-									if bond_release.bond.is_zero() {
-										*maybe_bond_release = None;
-									}
+								if bond_release.reason == CandidacyBondReleaseReason::Replaced {
+									Self::decrease_frozen(who, bond_release.bond)?;
+									LockedBalances::<T>::mutate(who, |lock| {
+										lock.releasing.saturating_reduce(bond_release.bond)
+									});
+									*maybe_bond_release = None;
 								}
 							}
 							Ok(())
@@ -1554,7 +1595,8 @@ pub mod pallet {
 					// remove it from the SessionRemovedCandidates
 					SessionRemovedCandidates::<T>::remove(who);
 
-					T::Currency::set_freeze(&FreezeReason::CandidacyBond.into(), who, bond)?;
+					LockedBalances::<T>::mutate(who, |lock| lock.candidacy_bond = bond);
+					Self::increase_frozen(who, bond)?;
 					Ok(info)
 				},
 			)?;
@@ -1585,12 +1627,16 @@ pub mod pallet {
 				None
 			});
 			if !released.is_zero() {
-				let releasing_balance = Self::get_releasing_balance(who);
-				T::Currency::set_freeze(
-					&FreezeReason::Releasing.into(),
-					who,
-					releasing_balance.saturating_sub(released),
-				)?;
+				Self::decrease_frozen(who, released)?;
+				LockedBalances::<T>::mutate_exists(who, |maybe_locked| {
+					if let Some(locked) = maybe_locked {
+						locked.releasing.saturating_reduce(released);
+						// Remove the map entry if needed be to save some space.
+						if locked.total().is_zero() {
+							*maybe_locked = None;
+						}
+					}
+				});
 				Self::deposit_event(Event::StakeReleased {
 					account: who.clone(),
 					amount: released,
@@ -1868,18 +1914,15 @@ pub mod pallet {
 			amount: BalanceOf<T>,
 			delay: BlockNumberFor<T>,
 		) -> Result<(), DispatchError> {
-			let releasing_balance = Self::get_releasing_balance(account);
-			T::Currency::set_freeze(
-				&FreezeReason::Releasing.into(),
-				account,
-				releasing_balance.saturating_add(amount),
-			)?;
 			let now = Self::current_block_number();
-			let block = now + delay;
+			let block = now.saturating_add(delay);
 			ReleaseQueues::<T>::try_mutate(account, |requests| -> DispatchResult {
 				requests
 					.try_push(ReleaseRequest { block, amount })
 					.map_err(|_| Error::<T>::TooManyReleaseRequests)?;
+				LockedBalances::<T>::mutate(account, |lock| {
+					lock.releasing.saturating_accrue(amount);
+				});
 				Ok(())
 			})?;
 			// Since the process of unstaking leads to penalties, this lets users stake new funds
@@ -1908,6 +1951,22 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// Decreases the frozen balance for staking.
+		pub(crate) fn decrease_frozen(
+			who: &T::AccountId,
+			amount: BalanceOf<T>,
+		) -> Result<(), DispatchError> {
+			T::Currency::decrease_frozen(&FreezeReason::Staking.into(), who, amount)
+		}
+
+		/// Increases the frozen balance for staking.
+		pub(crate) fn increase_frozen(
+			who: &T::AccountId,
+			amount: BalanceOf<T>,
+		) -> Result<(), DispatchError> {
+			T::Currency::increase_frozen(&FreezeReason::Staking.into(), who, amount)
+		}
+
 		/// Prepares the candidacy bond to be released.
 		fn release_candidacy_bond(
 			account: &T::AccountId,
@@ -1919,22 +1978,6 @@ pub mod pallet {
 
 			let bond = Self::get_bond(account);
 			if !bond.is_zero() {
-				// We firstly release the current candidacy bond.
-				T::Currency::set_freeze(
-					&FreezeReason::CandidacyBond.into(),
-					account,
-					Zero::zero(),
-				)?;
-
-				// Now we freeze it again under a different reason.
-				let new_releasing_balance =
-					Self::get_releasing_balance(account).saturating_add(bond);
-				T::Currency::set_freeze(
-					&FreezeReason::Releasing.into(),
-					account,
-					new_releasing_balance,
-				)?;
-
 				// And finally update the period.
 				let release_block =
 					Self::current_block_number().saturating_add(T::BondUnlockDelay::get());
@@ -1954,6 +1997,10 @@ pub mod pallet {
 						reason,
 					});
 				});
+				LockedBalances::<T>::mutate(account, |lock| {
+					lock.candidacy_bond = Zero::zero();
+					lock.releasing.saturating_accrue(bond);
+				});
 			}
 			Ok(())
 		}
@@ -1965,13 +2012,15 @@ pub mod pallet {
 					maybe_bond_release
 				{
 					if Self::current_block_number() > *bond_release {
-						let new_release =
-							Self::get_releasing_balance(account).saturating_sub(*bond);
-						T::Currency::set_freeze(
-							&FreezeReason::Releasing.into(),
-							account,
-							new_release,
-						)?;
+						Self::decrease_frozen(account, *bond)?;
+						LockedBalances::<T>::mutate_exists(account, |maybe_locked| {
+							if let Some(locked) = maybe_locked {
+								locked.releasing.saturating_reduce(*bond);
+								if locked.total().is_zero() {
+									*maybe_locked = None;
+								}
+							}
+						});
 						*maybe_bond_release = None;
 					}
 				}
@@ -2051,7 +2100,7 @@ pub mod pallet {
 							collator_info.stake,
 						);
 						Counters::<T>::mutate(&collator, |counter| {
-							counter.saturating_accrue(session_ratio.into())
+							counter.saturating_accrue(session_ratio)
 						});
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
@@ -2072,12 +2121,7 @@ pub mod pallet {
 		///
 		/// The operation will fail if `account` does not have sufficient free balance.
 		fn do_lock(account: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
-			let available_balance = Self::get_free_balance(account);
-			ensure!(available_balance >= amount, Error::<T>::InsufficientFreeBalance);
-
-			let total = Self::get_staked_balance(account).saturating_add(amount);
-			T::Currency::set_freeze(&FreezeReason::Staking.into(), account, total)?;
-
+			Self::increase_frozen(account, amount)?;
 			Self::deposit_event(Event::<T>::LockExtended { account: account.clone(), amount });
 			Ok(())
 		}
@@ -2101,27 +2145,30 @@ pub mod pallet {
 			frame_system::Pallet::<T>::block_number()
 		}
 
+		pub fn get_total_frozen_balance(account: &T::AccountId) -> BalanceOf<T> {
+			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
+		}
+
 		/// Gets the locked balance potentially used for staking.
 		pub fn get_staked_balance(account: &T::AccountId) -> BalanceOf<T> {
-			T::Currency::balance_frozen(&FreezeReason::Staking.into(), account)
+			Self::get_total_frozen_balance(account)
+				.saturating_sub(LockedBalances::<T>::get(account).total())
 		}
 
 		/// Gets the locked balance to be released.
 		pub fn get_releasing_balance(account: &T::AccountId) -> BalanceOf<T> {
-			T::Currency::balance_frozen(&FreezeReason::Releasing.into(), account)
+			LockedBalances::<T>::get(account).releasing
 		}
 
 		/// Gets the locked balance for the candidacy bond.
 		pub fn get_bond(account: &T::AccountId) -> BalanceOf<T> {
-			T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), account)
+			LockedBalances::<T>::get(account).candidacy_bond
 		}
 
 		/// Gets the maximum balance a given user can lock for staking.
 		pub fn get_free_balance(account: &T::AccountId) -> BalanceOf<T> {
-			T::Currency::balance(account)
-				.saturating_sub(Self::get_staked_balance(account))
-				.saturating_sub(Self::get_releasing_balance(account))
-				.saturating_sub(Self::get_bond(account))
+			let total_locked = Self::get_total_frozen_balance(account);
+			T::Currency::balance(account).saturating_sub(total_locked)
 		}
 
 		/// Assemble the current set of candidates and invulnerables into the next collator set.
@@ -2264,6 +2311,43 @@ pub mod pallet {
 				Candidates::<T>::count() <= T::MaxCandidates::get(),
 				"Candidate count must not exceed MaxCandidates"
 			);
+
+			for (account, lock) in LockedBalances::<T>::iter() {
+				let frozen_balance = Self::get_total_frozen_balance(&account);
+				ensure!(
+					lock.total() <= frozen_balance,
+					"Staker has a mismatch between locked funds and tracked ones"
+				);
+				ensure!(
+					!frozen_balance.is_zero(),
+					"LockedBalances holds an item with zero actual locked balances. It should be removed"
+				);
+				let new_releases = ReleaseQueues::<T>::get(&account);
+				let normal_release: BalanceOf<T> = new_releases
+					.iter()
+					.map(|r| r.amount)
+					.reduce(|a, b| a.saturating_add(b))
+					.unwrap_or_default();
+				let bond_release =
+					CandidacyBondReleases::<T>::get(&account).map(|r| r.bond).unwrap_or_default();
+				ensure!(
+					(bond_release + normal_release) == Self::get_releasing_balance(&account),
+					"Releasing balance is not the sum of the candidacy bond and the release queue"
+				);
+				#[allow(deprecated)]
+				{
+					ensure!(
+						T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &account)
+							.is_zero(),
+						"Old candidacy bond lock is present"
+					);
+					ensure!(
+						T::Currency::balance_frozen(&FreezeReason::Releasing.into(), &account)
+							.is_zero(),
+						"Old releasing lock is present"
+					);
+				}
+			}
 
 			Ok(())
 		}
