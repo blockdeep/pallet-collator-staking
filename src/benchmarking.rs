@@ -297,8 +297,8 @@ mod benchmarks {
 		Ok(())
 	}
 
-	// worse case is when we have all the max-candidate slots filled except one, and we fill that
-	// one.
+	// The worst case is when we have all the max-candidate slots filled except one, and we fill
+	// that one.
 	#[benchmark]
 	fn register_as_candidate() -> Result<(), BenchmarkError> {
 		MinCandidacyBond::<T>::set(T::Currency::minimum_balance());
@@ -368,7 +368,7 @@ mod benchmarks {
 		assert_last_event::<T>(Event::CandidateRemoved { account: leaving }.into());
 	}
 
-	// worse case is paying a non-existing candidate account.
+	// The worst case is paying a non-existing candidate account.
 	#[benchmark]
 	fn note_author() {
 		let author: T::AccountId = account("author", 0, SEED);
@@ -384,7 +384,7 @@ mod benchmarks {
 		assert_eq!(frame_system::Pallet::<T>::block_number(), new_block);
 	}
 
-	// worst case for new session.
+	// worst case for a new session.
 	#[benchmark]
 	fn new_session(
 		r: Linear<1, { T::MaxCandidates::get() }>,
@@ -438,11 +438,11 @@ mod benchmarks {
 		} else if c > r && non_removals < min_candidates {
 			// candidates > removals and remaining candidates would be less than min candidates
 			// => remaining candidates should equal min candidates, i.e., some were removed up to
-			//    the minimum, but then anymore were "forced" to stay in candidates.
+			//    the minimum, but then anymore weren't "forced" to stay in candidates.
 			let current_length: u32 = Candidates::<T>::count();
 			assert_eq!(min_candidates, current_length);
 		} else {
-			// removals >= candidates, non removals must == 0
+			// removals >= candidates, non-removals must == 0
 			// can't remove more than exist
 			assert_eq!(Candidates::<T>::count(), pre_length);
 		}
@@ -493,7 +493,7 @@ mod benchmarks {
 		assert_eq!(CandidateStake::<T>::get(&caller, &candidate).stake, 0u32.into());
 	}
 
-	// worst case is having stake in as many collators as possible
+	// The worst case is having the stake in as many collators as possible
 	#[benchmark]
 	fn unstake_all(c: Linear<1, { T::MaxStakedCandidates::get() }>) {
 		let caller = prepare_staker::<T>();
@@ -532,7 +532,7 @@ mod benchmarks {
 		let bond = MinCandidacyBond::<T>::get();
 		T::Currency::mint_into(&caller, amount * 2u32.into() * (c + 1).into() + bond).unwrap();
 
-		// Here we add the staker as candidate and immediately remove it so that the candidacy bond
+		// Here we add the staker as a candidate and immediately remove it so that the candidacy bond
 		// gets released and the corresponding weight accounted for.
 		CollatorStaking::<T>::do_register_as_candidate(&caller, bond).unwrap();
 		CollatorStaking::<T>::try_remove_candidate(&caller, true, CandidacyBondReleaseReason::Idle)
@@ -583,7 +583,7 @@ mod benchmarks {
 		}
 	}
 
-	// Worst case is if stake exists
+	// The worst case is if the stake exists
 	#[benchmark]
 	fn set_autocompound() {
 		let caller = prepare_staker::<T>();
