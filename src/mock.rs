@@ -283,6 +283,7 @@ impl Config for Test {
 	type StakeUnlockDelay = ConstU64<2>;
 	type RestakeUnlockDelay = ConstU64<10>;
 	type AutoCompoundingThreshold = ConstU64<60>;
+	type BlockNumberProvider = frame_system::Pallet<Test>;
 	type WeightInfo = ();
 }
 

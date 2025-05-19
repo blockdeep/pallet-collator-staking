@@ -95,7 +95,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use pallet_session::SessionManager;
 	use sp_runtime::{
-		traits::{AccountIdConversion, Convert, Saturating, Zero},
+		traits::{AccountIdConversion, BlockNumberProvider, Convert, Saturating, Zero},
 		FixedPointNumber, FixedU128, Perbill, Percent, RuntimeDebug,
 	};
 	use sp_staking::SessionIndex;
@@ -229,6 +229,9 @@ pub mod pallet {
 		/// Minimum stake needed to enable autocompounding.
 		#[pallet::constant]
 		type AutoCompoundingThreshold: Get<BalanceOf<Self>>;
+
+		/// Provider for the block number. Normally this is the `frame_system` pallet.
+		type BlockNumberProvider: BlockNumberProvider<BlockNumber = BlockNumberFor<Self>>;
 
 		/// The weight information of this pallet.
 		type WeightInfo: WeightInfo;
@@ -2142,7 +2145,7 @@ pub mod pallet {
 
 		/// Gets the current block number.
 		pub fn current_block_number() -> BlockNumberFor<T> {
-			frame_system::Pallet::<T>::block_number()
+			T::BlockNumberProvider::current_block_number()
 		}
 
 		pub fn get_total_frozen_balance(account: &T::AccountId) -> BalanceOf<T> {
