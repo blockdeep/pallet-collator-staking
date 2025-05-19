@@ -432,12 +432,12 @@ mod benchmarks {
 
 		if c > r && non_removals >= min_candidates {
 			// candidates > removals and remaining candidates > min candidates
-			// => remaining candidates should be shorter than before removal, i.e. some were
+			// => remaining candidates should be shorter than before removal, i.e., some were
 			//    actually removed.
 			assert!(Candidates::<T>::count() < pre_length);
 		} else if c > r && non_removals < min_candidates {
 			// candidates > removals and remaining candidates would be less than min candidates
-			// => remaining candidates should equal min candidates, i.e. some were removed up to
+			// => remaining candidates should equal min candidates, i.e., some were removed up to
 			//    the minimum, but then anymore were "forced" to stay in candidates.
 			let current_length: u32 = Candidates::<T>::count();
 			assert_eq!(min_candidates, current_length);
@@ -741,12 +741,12 @@ mod benchmarks {
 			MinCandidacyBond::<T>::get(),
 		)
 		.unwrap();
-		assert_eq!(CollatorStaking::<T>::get_bond(&caller), MinCandidacyBond::<T>::get());
+		assert_eq!(CollatorStaking::<T>::get_candidacy_bond(&caller), MinCandidacyBond::<T>::get());
 
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), balance);
 
-		assert_eq!(CollatorStaking::<T>::get_bond(&caller), balance);
+		assert_eq!(CollatorStaking::<T>::get_candidacy_bond(&caller), balance);
 	}
 
 	#[benchmark]

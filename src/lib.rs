@@ -1979,7 +1979,7 @@ pub mod pallet {
 			// to do so before leaving the candidacy list.
 			Self::do_claim_candidacy_bond(account)?;
 
-			let bond = Self::get_bond(account);
+			let bond = Self::get_candidacy_bond(account);
 			if !bond.is_zero() {
 				// And finally update the period.
 				let release_block =
@@ -2164,7 +2164,7 @@ pub mod pallet {
 		}
 
 		/// Gets the locked balance for the candidacy bond.
-		pub fn get_bond(account: &T::AccountId) -> BalanceOf<T> {
+		pub fn get_candidacy_bond(account: &T::AccountId) -> BalanceOf<T> {
 			LockedBalances::<T>::get(account).candidacy_bond
 		}
 
@@ -2220,7 +2220,7 @@ pub mod pallet {
                     let last_block = LastAuthoredBlock::<T>::get(who.clone());
                     let since_last = now.saturating_sub(last_block);
                     let is_lazy = since_last >= kick_threshold;
-                    let bond = Self::get_bond(&who);
+                    let bond = Self::get_candidacy_bond(&who);
 
                     if Self::eligible_collators() <= min_collators || (!is_lazy && bond >= min_candidacy_bond) {
                         // Either this is a good collator (not lazy) or we are at the minimum
@@ -2245,7 +2245,7 @@ pub mod pallet {
 		/// Returns the candidate with the lowest candidacy bond.
 		fn get_worst_candidate() -> Result<(T::AccountId, BalanceOf<T>), DispatchError> {
 			let mut all_candidates = Candidates::<T>::iter()
-				.map(|(candidate, _)| (candidate.clone(), Self::get_bond(&candidate)))
+				.map(|(candidate, _)| (candidate.clone(), Self::get_candidacy_bond(&candidate)))
 				.collect::<Vec<_>>();
 			all_candidates.sort_by(|(_, bond1), (_, bond2)| bond2.cmp(bond1));
 			let candidate = all_candidates.last().ok_or(Error::<T>::TooManyCandidates)?;

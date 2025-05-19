@@ -168,8 +168,8 @@ mod set_invulnerables {
 		new_test_ext().execute_with(|| {
 			assert_eq!(Candidates::<Test>::count(), 0);
 			register_candidates(3..=4);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&4), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&4), 10);
 			assert_noop!(
 				CollatorStaking::set_invulnerables(
 					RuntimeOrigin::signed(RootAccount::get()),
@@ -353,12 +353,12 @@ mod add_invulnerable {
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
-			assert_eq!(CollatorStaking::get_bond(&4), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&4), 10);
 
 			lock_for_staking(3..=5);
 			assert_ok!(CollatorStaking::stake(
@@ -676,7 +676,7 @@ mod register_as_candidate {
 			let addition = CandidateInfo { stake: 0, stakers: 0 };
 			assert_eq!(candidate_list(), vec![(3, addition)]);
 			assert_eq!(LastAuthoredBlock::<Test>::get(3), 11);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
@@ -737,12 +737,12 @@ mod register_as_candidate {
 
 			register_candidates(3..=4);
 
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
-			assert_eq!(CollatorStaking::get_bond(&4), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&4), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(4, 4),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
@@ -768,7 +768,7 @@ mod register_as_candidate {
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
@@ -845,14 +845,14 @@ mod register_as_candidate {
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			// the candidate is replaced (artificially)
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
@@ -861,7 +861,7 @@ mod register_as_candidate {
 				bond_release.reason = CandidacyBondReleaseReason::Replaced;
 			});
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 
 			// and finally rejoins using the old candidacy bond
 			assert_ok!(CollatorStaking::register_as_candidate(
@@ -869,7 +869,7 @@ mod register_as_candidate {
 				MinCandidacyBond::<Test>::get()
 			));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 0);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 		});
 	}
 
@@ -889,19 +889,19 @@ mod register_as_candidate {
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			// the candidate removes itself
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 
 			// and finally rejoins using the old candidacy bond
 			assert_ok!(CollatorStaking::register_as_candidate(
@@ -910,7 +910,7 @@ mod register_as_candidate {
 			));
 			// the old locked candidacy bond should remain
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 		});
 	}
 
@@ -926,20 +926,20 @@ mod register_as_candidate {
 			);
 
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(Candidates::<Test>::count(), 1);
 			assert_eq!(Candidates::<Test>::get(3), Some(CandidateInfo { stake: 0, stakers: 0 }));
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
 
 			// First leave
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(
 				CandidacyBondReleases::<Test>::get(3),
 				Some(CandidacyBondRelease {
@@ -955,7 +955,7 @@ mod register_as_candidate {
 				MinCandidacyBond::<Test>::get()
 			));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidacyBondReleases::<Test>::get(3),
 				Some(CandidacyBondRelease {
@@ -968,7 +968,7 @@ mod register_as_candidate {
 			// Second leave. The bond should accumulate.
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 20);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(
 				CandidacyBondReleases::<Test>::get(3),
 				Some(CandidacyBondRelease {
@@ -1027,7 +1027,7 @@ mod leave_intent {
 		new_test_ext().execute_with(|| {
 			// register a candidate.
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
@@ -1035,7 +1035,7 @@ mod leave_intent {
 
 			// register too so can leave above min candidates
 			register_candidates(5..=5);
-			assert_eq!(CollatorStaking::get_bond(&5), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&5), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(5, 5),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
@@ -1052,7 +1052,7 @@ mod leave_intent {
 
 			// Unstake request is created
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
@@ -1065,7 +1065,7 @@ mod leave_intent {
 				})
 			);
 
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
@@ -1238,10 +1238,10 @@ mod stake {
 	fn stake() {
 		new_test_ext().execute_with(|| {
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 0);
 			lock_for_staking(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 90);
 
 			assert_eq!(
@@ -2057,7 +2057,7 @@ mod unstake_from {
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(MinCandidacyBond::<Test>::get(), 10);
 			register_candidates(3..=4);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			lock_for_staking(3..=3);
 			assert_eq!(
@@ -2140,7 +2140,7 @@ mod unstake_from {
 				CandidateStakeInfo { stake: 10, checkpoint: FixedU128::zero() }
 			);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 90);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 
 			// check after unstaking with a shorter delay the list remains sorted by block
@@ -2713,13 +2713,13 @@ mod lock_unlock_and_release {
 				CandidateStake::<Test>::get(3, 3),
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_total_frozen_balance(&3), 0);
 
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_total_frozen_balance(&3), 10);
@@ -2734,7 +2734,7 @@ mod lock_unlock_and_release {
 			// leave
 			assert_ok!(CollatorStaking::leave_intent(RuntimeOrigin::signed(3)));
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_total_frozen_balance(&3), 10);
 			assert_eq!(
@@ -2766,7 +2766,7 @@ mod lock_unlock_and_release {
 
 			assert_eq!(CandidacyBondReleases::<Test>::get(3), None);
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 0);
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 0);
 			assert_eq!(CollatorStaking::get_total_frozen_balance(&3), 0);
 		});
@@ -3077,7 +3077,7 @@ mod update_candidacy_bond {
 	fn update_candidacy_bond() {
 		new_test_ext().execute_with(|| {
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			// Cannot set it below the minimum candidacy bond.
 			assert_noop!(
@@ -3102,7 +3102,7 @@ mod update_candidacy_bond {
 			System::assert_last_event(RuntimeEvent::CollatorStaking(
 				Event::<Test>::CandidacyBondUpdated { candidate: 3, new_bond: 20 },
 			));
-			assert_eq!(CollatorStaking::get_bond(&3), 20);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 20);
 		});
 	}
 
@@ -3110,7 +3110,7 @@ mod update_candidacy_bond {
 	fn update_candidacy_bond_with_invalid_origin_should_fail() {
 		new_test_ext().execute_with(|| {
 			register_candidates(3..=3);
-			assert_eq!(CollatorStaking::get_bond(&3), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 
 			// Invalid Origin
 			assert_noop!(
@@ -3234,7 +3234,7 @@ mod general_tests {
 			assert_eq!(candidate_list(), vec![(4, collator)]);
 			assert_eq!(LastAuthoredBlock::<Test>::get(4), 1);
 			// Nothing received
-			assert_eq!(CollatorStaking::get_bond(&4), 10);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&4), 10);
 			// all fee stays
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 5);
 		});
@@ -4279,7 +4279,7 @@ mod session_management {
 			// 3 gets kicked after 1 session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 4]);
 			// kicked collator gets funds back after a delay
-			assert_eq!(CollatorStaking::get_bond(&3), 0);
+			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 0);
 			assert_eq!(CollatorStaking::get_releasing_balance(&3), 10);
 			assert_eq!(
 				CandidacyBondReleases::<Test>::get(3),
