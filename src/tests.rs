@@ -260,13 +260,13 @@ mod add_invulnerable {
 				account: new,
 			}));
 
-			// same element cannot be added more than once
+			// the same element cannot be added more than once
 			assert_noop!(
 				CollatorStaking::add_invulnerable(RuntimeOrigin::signed(RootAccount::get()), new),
 				Error::<Test>::AlreadyInvulnerable
 			);
 
-			// new element is now part of the invulnerables list
+			// a new element is now part of the invulnerables list
 			assert!(Invulnerables::<Test>::get().to_vec().contains(&new));
 
 			// cannot add with non-root
@@ -422,7 +422,7 @@ mod remove_invulnerable {
 				Error::<Test>::NotInvulnerable
 			);
 
-			// cannot remove without privilege
+			// cannot remove without privileges
 			assert_noop!(
 				CollatorStaking::remove_invulnerable(RuntimeOrigin::signed(1), 3),
 				BadOrigin
@@ -499,7 +499,7 @@ mod set_min_candidacy_bond {
 			initialize_to_block(10);
 			assert_eq!(candidate_list(), vec![(3, candidate_3.clone())]);
 
-			// can increase up to initial deposit
+			// can increase up to the initial deposit
 			assert_ok!(CollatorStaking::set_min_candidacy_bond(
 				RuntimeOrigin::signed(RootAccount::get()),
 				10
@@ -557,7 +557,7 @@ mod set_min_candidacy_bond {
 				vec![(5, candidate_5.clone()), (3, candidate_3.clone()), (4, candidate_4.clone())]
 			);
 
-			// can increase up to initial deposit
+			// can increase up to the initial deposit
 			assert_ok!(CollatorStaking::set_min_candidacy_bond(
 				RuntimeOrigin::signed(RootAccount::get()),
 				10
@@ -671,7 +671,7 @@ mod register_as_candidate {
 	#[test]
 	fn cannot_register_dupe_candidate() {
 		new_test_ext().execute_with(|| {
-			// can add 3 as candidate
+			// can add 3 as a candidate
 			register_candidates(3..=3);
 			let addition = CandidateInfo { stake: 0, stakers: 0 };
 			assert_eq!(candidate_list(), vec![(3, addition)]);
@@ -723,7 +723,7 @@ mod register_as_candidate {
 			assert_eq!(Candidates::<Test>::count(), 0);
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
-			// take two endowed, non-invulnerables accounts.
+			// take two endowed, non-invulnerable accounts.
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
@@ -1014,7 +1014,7 @@ mod leave_intent {
 				account_id: 2,
 			}));
 
-			// can not remove too few
+			// cannot remove too few
 			assert_noop!(
 				CollatorStaking::leave_intent(RuntimeOrigin::signed(4)),
 				Error::<Test>::TooFewEligibleCollators,
@@ -1041,7 +1041,7 @@ mod leave_intent {
 				CandidateStakeInfo { stake: 0, checkpoint: FixedU128::zero() }
 			);
 
-			// cannot leave if not candidate.
+			// cannot leave if not a candidate.
 			assert_noop!(
 				CollatorStaking::leave_intent(RuntimeOrigin::signed(4)),
 				Error::<Test>::NotCandidate
@@ -1130,7 +1130,7 @@ mod stake {
 				),
 				Error::<Test>::NotCandidate
 			);
-			// not registered as candidate
+			// not registered as a candidate
 			assert_noop!(
 				CollatorStaking::stake(
 					RuntimeOrigin::signed(4),
@@ -1736,7 +1736,7 @@ mod stake {
 				amount: 30,
 			}));
 
-			// Ensure initial user stake state is empty
+			// Ensure the initial user stake state is empty
 			assert_eq!(
 				UserStake::<Test>::get(5),
 				UserStakeInfo {
@@ -1821,7 +1821,7 @@ mod stake {
 				Error::<Test>::NoPendingClaim
 			);
 
-			// Time travel to next session
+			// Time travel to the next session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(5)));
@@ -1856,7 +1856,7 @@ mod stake {
 				Error::<Test>::NoPendingClaim
 			);
 
-			// Time travel to next session
+			// Time travel to the next session
 			initialize_to_block(10);
 			assert_eq!(CurrentSession::<Test>::get(), pre_stake_session + 1);
 			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(4), 5));
@@ -1872,7 +1872,7 @@ mod edge_case_tests {
 		new_test_ext().execute_with(|| {
 			register_candidates(3..=3);
 
-			// Attempt to stake with zero amount
+			// Attempt to stake zero.
 			assert_noop!(
 				CollatorStaking::stake(
 					RuntimeOrigin::signed(5),
@@ -1906,7 +1906,7 @@ mod edge_case_tests {
 		new_test_ext().execute_with(|| {
 			register_candidates(3..=4);
 			lock_for_staking(5..=5);
-			// Attempt to stake more than user's locked balance
+			// Attempt to stake more than the user's locked balance
 			assert_noop!(
 				CollatorStaking::stake(
 					RuntimeOrigin::signed(5),
@@ -2012,7 +2012,7 @@ mod unstake_from {
 				candidate: 3,
 				amount: 20,
 			}));
-			// candidate list gets reordered
+			// the candidate list gets reordered
 			assert_eq!(
 				candidate_list(),
 				vec![
@@ -2143,7 +2143,7 @@ mod unstake_from {
 			assert_eq!(CollatorStaking::get_candidacy_bond(&3), 10);
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 
-			// check after unstaking with a shorter delay the list remains sorted by block
+			// check after unstaking with a shorter delay, the list remains sorted by block
 			assert_ok!(CollatorStaking::unstake_from(RuntimeOrigin::signed(3), 4));
 			assert_eq!(ReleaseQueues::<Test>::get(3), vec![]);
 		});
@@ -2442,7 +2442,7 @@ mod unstake_all {
 				UserStakeInfo {
 					stake: 0,
 					candidates: bbtreeset![],
-					// Candidate 3 left, so 20 immediately restakable.
+					// Candidate 3 left, so 20 is immediately re-stakable.
 					maybe_last_unstake: Some((10, 11)),
 					maybe_last_reward_session: None,
 				}
@@ -2630,7 +2630,7 @@ mod lock_unlock_and_release {
 			assert_eq!(CollatorStaking::get_staked_balance(&5), 50);
 			assert_eq!(CollatorStaking::get_releasing_balance(&5), 10);
 
-			// If reducing the staked balance under the threshold there should be an event
+			// If reducing the staked balance under the threshold, there should be an event
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::AutoCompoundDisabled {
 				account: 5,
 			}));
@@ -2678,7 +2678,7 @@ mod lock_unlock_and_release {
 			System::assert_last_event(RuntimeEvent::CollatorStaking(
 				Event::ReleaseRequestCreated { account: 5, amount: 20, block: 3 },
 			));
-			// No changes until delay passes
+			// No changes until the delay passes
 			assert_eq!(
 				ReleaseQueues::<Test>::get(5),
 				vec![ReleaseRequest { block: 3, amount: 20 }]
@@ -3084,7 +3084,7 @@ mod update_candidacy_bond {
 				CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(3), 5),
 				Error::<Test>::InvalidCandidacyBond
 			);
-			// Cannot set it if not candidate.
+			// Cannot set it if not a candidate.
 			assert_noop!(
 				CollatorStaking::update_candidacy_bond(RuntimeOrigin::signed(4), 15),
 				Error::<Test>::NotCandidate
@@ -3166,7 +3166,7 @@ mod general_tests {
 			assert_eq!(Candidates::<Test>::count(), 0);
 			assert_eq!(Invulnerables::<Test>::get(), vec![1, 2]);
 
-			// take three endowed, non-invulnerables accounts.
+			// take three endowed, non-invulnerable accounts.
 			assert_eq!(Balances::balance(&3), 100);
 			assert_eq!(
 				CandidateStake::<Test>::get(3, 3),
@@ -3235,7 +3235,7 @@ mod general_tests {
 			assert_eq!(LastAuthoredBlock::<Test>::get(4), 1);
 			// Nothing received
 			assert_eq!(CollatorStaking::get_candidacy_bond(&4), 10);
-			// all fee stays
+			// all fees stay
 			assert_eq!(Balances::balance(&CollatorStaking::account_id()), 5);
 		});
 	}
@@ -3255,7 +3255,7 @@ mod general_tests {
 			collator_reward_percentage: Percent::from_parts(20),
 			extra_reward: 0,
 		};
-		// collator selection must be initialized before session.
+		// collator staking must be initialized before the session pallet.
 		collator_staking.assimilate_storage(&mut t).unwrap();
 	}
 
@@ -3273,7 +3273,7 @@ mod general_tests {
 			collator_reward_percentage: Percent::from_parts(20),
 			extra_reward: 0,
 		};
-		// collator selection must be initialized before session.
+		// collator staking must be initialized before the session pallet.
 		collator_staking.assimilate_storage(&mut t).unwrap();
 	}
 
@@ -3293,7 +3293,7 @@ mod general_tests {
 			collator_reward_percentage: Percent::from_parts(20),
 			extra_reward: 0,
 		};
-		// collator selection must be initialized before session.
+		// collator staking must be initialized before the session pallet.
 		collator_staking.assimilate_storage(&mut t).unwrap();
 	}
 }
@@ -3430,7 +3430,7 @@ mod collator_rewards {
 			assert_eq!(CurrentSession::<Test>::get(), 2);
 			assert_eq!(TotalBlocks::<Test>::get(), (1, 1));
 
-			// the block 20 just got produced, and belongs to the new session.
+			// block 20 just got produced and belongs to the new session.
 			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
 
 			// Total rewards in session 1: 18 (8 accumulated from session 0)
@@ -3514,7 +3514,7 @@ mod collator_rewards {
 
 			assert_eq!(ProducedBlocks::<Test>::get(4), 1);
 
-			// We collected 1 per block, plus 1 as extra reward per block.
+			// We collected 1 per block, plus 1 as an extra reward per block.
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
 				amount: 3,
@@ -3693,7 +3693,7 @@ mod collator_rewards {
 				RuntimeOrigin::signed(3),
 				MinCandidacyBond::<Test>::get()
 			));
-			// only the candidate 4 is going to produce blocks, but we do not want the candidate 3 to be kicked.
+			// only candidate 4 is going to produce blocks, but we do not want candidate 3 to be kicked.
 			LastAuthoredBlock::<Test>::insert(3, 100);
 			assert_ok!(CollatorStaking::register_as_candidate(
 				RuntimeOrigin::signed(4),
@@ -3838,7 +3838,7 @@ mod collator_rewards {
 			// Staker 3 autocompounded 15 in the previous round.
 			assert_eq!(CollatorStaking::get_staked_balance(&3), 105);
 
-			// Check after adding the stake via autocompound the candidate list is sorted.
+			// Check after adding the stake via autocompound, the candidate list is sorted.
 			assert_eq!(
 				candidate_list(),
 				vec![
@@ -3932,7 +3932,7 @@ mod collator_rewards {
 			initialize_to_block(20);
 
 			// Now we have 10 units of rewards being distributed. 20% goes to the collator, and 80%
-			// goes to stakers, so total 8 for stakers. The collator's counter should be the ratio
+			// goes to stakers, so the total is 8 for stakers. The collator's counter should be the ratio
 			// between the rewards obtained and the total stake deposited in it.
 			assert_eq!(Counters::<Test>::get(4), FixedU128::from_rational(8, 40));
 
@@ -4007,7 +4007,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 3.
 			assert_eq!(Session::queued_keys().len(), 3);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4050,7 +4050,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 4.
 			assert_eq!(Session::queued_keys().len(), 4);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4093,7 +4093,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 4.
 			assert_eq!(Session::queued_keys().len(), 4);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4132,7 +4132,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 4.
 			assert_eq!(Session::queued_keys().len(), 4);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4185,7 +4185,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 4.
 			assert_eq!(Session::queued_keys().len(), 4);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4243,7 +4243,7 @@ mod session_management {
 			assert_eq!(Session::validators(), vec![1, 2]);
 			// queued ones are changed, and now we have 4.
 			assert_eq!(Session::queued_keys().len(), 4);
-			// session handlers (aura, et. al.) cannot see this yet.
+			// session handlers (aura et al.) cannot see this yet.
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2]);
 
 			initialize_to_block(20);
@@ -4271,7 +4271,7 @@ mod session_management {
 			assert_eq!(SessionChangeBlock::get(), 30);
 			// 4 authored this block, gets to stay 3 was kicked
 			assert_eq!(Candidates::<Test>::count(), 1);
-			// 3 will be kicked after 1 session delay
+			// 3 will be kicked after a 1-session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![1, 2, 3, 4]);
 			assert_eq!(candidate_list(), vec![(4, CandidateInfo { stake: 0, stakers: 0 })]);
 			assert_eq!(LastAuthoredBlock::<Test>::get(4), 30);
@@ -4322,7 +4322,7 @@ mod session_management {
 			assert_eq!(SessionChangeBlock::get(), 30);
 			// 4 authored this block, 3 is kicked, 5 stays because of too few collators
 			assert_eq!(Candidates::<Test>::count(), 1);
-			// 3 will be kicked after 1 session delay
+			// 3 will be kicked after a 1-session delay
 			assert_eq!(SessionHandlerCollators::get(), vec![5, 3]);
 			// tuple of (id, deposit).
 			let collator = CandidateInfo { stake: 0, stakers: 0 };
@@ -4381,7 +4381,7 @@ mod claim_rewards_other {
 				Balances::minimum_balance() + 100
 			));
 
-			// Simulate block production, forcing all block to be produced by candidates
+			// Simulate block production, forcing all blocks to be produced by candidates
 			// Since only candidate 4 is registered, all blocks should be produced by it
 			ProducedBlocks::<Test>::insert(4, 10);
 			TotalBlocks::<Test>::set((10, 10));
@@ -4471,7 +4471,7 @@ mod on_idle {
 			ProducedBlocks::<Test>::insert(3, 10);
 
 			// Generate 10 as rewards on the pot generated during session 1.
-			// 20% to collators, 80% to stakers, so 8 to staker.
+			// 20% to collators, 80% to stakers, so 8 to stakers.
 			assert_ok!(Balances::mint_into(
 				&CollatorStaking::account_id(),
 				Balances::minimum_balance() + 10
@@ -4487,7 +4487,7 @@ mod on_idle {
 			// Check that staker 4 has 8 claimable rewards.
 			assert_eq!(CollatorStaking::calculate_unclaimed_rewards(&4), 8);
 
-			// Claim rewards for staker 4 from other user.
+			// Claim rewards for staker 4 from another user.
 			assert_ok!(CollatorStaking::claim_rewards_other(RuntimeOrigin::signed(1), 4));
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 4,
@@ -4568,7 +4568,7 @@ mod on_idle {
 			assert_eq!(final_stake_3, initial_stake_3 + 80);
 			assert_eq!(final_stake_5, initial_stake_5 + 120);
 
-			// For staker without autocompound, stake should remain the same
+			// For staker without autocompound, the stake should remain the same
 			assert_eq!(final_stake_6, initial_stake_6);
 
 			// Verify events for stakers with autocompound
@@ -4605,7 +4605,7 @@ mod on_idle {
 			// Now manually claim rewards for staker 6
 			assert_ok!(CollatorStaking::claim_rewards(RuntimeOrigin::signed(6)));
 
-			// After claiming, event should be emitted
+			// After claiming, the event should be emitted
 			System::assert_has_event(RuntimeEvent::CollatorStaking(Event::StakingRewardReceived {
 				account: 6,
 				amount: 200,
@@ -4697,7 +4697,7 @@ mod on_idle {
 			if unprocessed_after_first_block > 0
 				&& matches!(op_after_first_block, Operation::RewardStakers { .. })
 			{
-				// Process second block
+				// Process the second block
 				CollatorStaking::on_idle(22, Weight::from_parts(50_000_000_000, 250_000));
 
 				let stakes_after_second_block: Vec<_> = staker_accounts
@@ -4728,7 +4728,7 @@ mod on_idle {
 				block_num += 1;
 			}
 
-			// Verify final operation state is Idle
+			// Verify the final operation state is Idle
 			assert!(
 				matches!(NextSystemOperation::<Test>::get(), Operation::Idle),
 				"Final operation state should be Idle, got: {:?}",
@@ -4774,9 +4774,9 @@ mod on_idle {
 			// Initially, staker 5 is in the staging layer with enabled = false
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), true)); // Enable for Staker 5
 
-			// Staker 5 should be moved to commit layer with enabled = true
+			// Staker 5 should be moved to the commit layer with enabled = true
 			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5)); // Staker 5 commit should be false initially
-			assert!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5)); // Staker 5 should be in Staging layer with enabled = true
+			assert!(AutoCompoundSettings::<Test>::get(Layer::Staging, 5)); // Staker 5 should be in the Staging layer with enabled = true
 
 			// Process the `on_idle` function to trigger the commit operation
 			let weight = Weight::from_parts(u64::MAX, u64::MAX);
@@ -4797,7 +4797,7 @@ mod on_idle {
 			assert!(CollatorStaking::is_delivering_rewards());
 			assert_ok!(CollatorStaking::set_autocompound(RuntimeOrigin::signed(5), false));
 
-			// Staker 5 should be in commit layer with enabled = true initially
+			// Staker 5 should be in the commit layer with enabled = true initially
 			assert!(AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 
 			// Process the `on_idle` function again to trigger the commit operation
@@ -4808,7 +4808,7 @@ mod on_idle {
 			CollatorStaking::on_idle(1, weight); // Trigger the idle process
 			assert!(!CollatorStaking::is_delivering_rewards());
 
-			// After disabling auto-compounding, staker 5 should be removed from commit layer
+			// After disabling auto-compounding, staker 5 should be removed from the commit layer
 			assert!(!AutoCompoundSettings::<Test>::get(Layer::Commit, 5));
 
 			// Staker 5 should now be back in the staging layer with enabled = false

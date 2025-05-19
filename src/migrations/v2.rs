@@ -275,7 +275,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 			if let Some((excandidate, bond_release)) = iter.next() {
 				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &excandidate);
 				if now >= bond_release.block {
-					// Just collect the bond.
+					// Collect the bond.
 					CandidacyBondReleases::<T>::remove(excandidate.clone());
 				} else {
 					match Pallet::<T>::increase_frozen(&excandidate, bond_release.bond) {
@@ -313,7 +313,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		let mut iter = if let Some((candidate, staker)) = cursor.clone() {
 			// If a cursor is provided, start iterating from the stored value
 			// corresponding to the last key processed in the previous step.
-			// Note that this only works if the old and the new map use the same way to hash
+			// Note that this only works if the old and the new maps use the same way to hash
 			// storage keys.
 			v1::CandidateStake::<T>::iter_from(v1::CandidateStake::<T>::hashed_key_for(
 				candidate, staker,
@@ -327,7 +327,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 		while meter.try_consume(required).is_ok() {
 			// If there's a next item in the iterator, perform the migration.
 			if let Some((candidate, staker, value)) = iter.next() {
-				// We can just insert here since the old and the new map share the same key-space.
+				// We can just insert here since the old and the new maps share the same key-space.
 				// Otherwise, it would have to invert the concat hash function and re-hash it.
 				CandidateStake::<T>::insert(
 					candidate.clone(),
@@ -423,7 +423,7 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 
 impl<T: Config + Debug> SteppedMigration for LazyMigrationV1ToV2<T> {
 	type Cursor = MigrationSteps<T>;
-	// Without the explicit length here the construction of the ID would not be infallible.
+	// Without the explicit length here, the construction of the ID would not be infallible.
 	type Identifier = MigrationId<23>;
 
 	/// The identifier of this migration. Which should be globally unique.

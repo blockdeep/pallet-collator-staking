@@ -59,7 +59,7 @@ sp_api::decl_runtime_apis! {
 		/// Gets the total accumulated rewards.
 		fn total_rewards(account: AccountId) -> Balance;
 
-		/// Returns true if user should claim rewards.
+		/// Returns true if the user should claim rewards.
 		fn should_claim(account: AccountId) -> bool;
 
 		/// Returns a list with all candidates and their stake.

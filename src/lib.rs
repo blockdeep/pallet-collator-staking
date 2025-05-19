@@ -20,14 +20,14 @@
 //! ## Overview
 //!
 //! The Collator Staking pallet provides DPoS functionality to manage collators of a parachain.
-//! It allows staking tokens to back collators, and receive rewards proportionately.
+//! It allows staking tokens to back collators and receive rewards proportionately.
 //! There is no slashing implemented. If a collator does not produce blocks as expected,
 //! it is removed from the collator set.
 //!
 //! ## Reward distribution mechanism
 //!
 //! The pallet uses a checkpoint system to efficiently track and distribute rewards.
-//! This allows automatically distribute rewards for autocompounding implementation.
+//! This allows automatically distributing rewards for autocompounding implementation.
 //!
 //! ### Example:
 //! A collator has 3 stakers with 100 tokens each (total 300 tokens)
@@ -37,14 +37,14 @@
 //!  * Each token staked now "earned" 0.1 tokens
 //!
 //! A staker with 100 tokens claims rewards:
-//!  * Unclaimed rewards = (0.1 - 0) * 100 = 10 tokens
+//!  * Unclaimed rewards = (0.1-0) * 100 = 10 tokens
 //!  * Checkpoint updated from 0 to 0.1
 //!
 //! After another session with 60 tokens of rewards:
 //!  * Counter increases by 60/300 = 0.2, now totaling 0.3
 //!
 //! The same staker claims again:
-//!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
+//!  * Unclaimed rewards = (0.3-0.1) * 100 = 20 tokens
 //!  * Checkpoint updated from 0.1 to 0.3
 //!
 //! ## Two-Layer Auto-Compound Settings
@@ -112,7 +112,8 @@ pub mod pallet {
 	pub type SessionInfoOf<T> = SessionInfo<
 		BoundedBTreeMap<
 			<T as frame_system::Config>::AccountId,
-			(BalanceOf<T>, BalanceOf<T>), // first item is the stake and second one the rewards generated.
+			// The first item is the stake, and the second one the reward generated.
+			(BalanceOf<T>, BalanceOf<T>),
 			<T as Config>::MaxCandidates,
 		>,
 		BalanceOf<T>,
@@ -129,7 +130,7 @@ pub mod pallet {
 	pub type CandidacyBondReleaseOf<T> = CandidacyBondRelease<BalanceOf<T>, BlockNumberFor<T>>;
 	pub type OperationFor<T> = Operation<<T as frame_system::Config>::AccountId>;
 
-	/// A convertor from collators id. Since this pallet does not have stash/controller, this is
+	/// A convertor from collators id. Since this pallet does not have a stash/controller, this is
 	/// just identity.
 	pub struct IdentityCollator;
 
@@ -164,7 +165,7 @@ pub mod pallet {
 
 		/// Account Identifier from which the extra reward pot is generated.
 		///
-		/// To initiate extra rewards the [`set_extra_reward`] extrinsic must be called;
+		/// To initiate extra rewards, the [`set_extra_reward`] extrinsic must be called;
 		/// and this pot should be funded using [`top_up_extra_rewards`] extrinsic.
 		#[pallet::constant]
 		type ExtraRewardPotId: Get<PalletId>;
@@ -180,7 +181,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxCandidates: Get<u32>;
 
-		/// Minimum number eligible collators including Invulnerables.
+		/// Minimum number of eligible collators including `Invulnerables`.
 		/// Should always be greater than zero. This ensures that there will always be
 		/// one collator who can produce blocks.
 		#[pallet::constant]
@@ -190,7 +191,8 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxInvulnerables: Get<u32>;
 
-		/// Candidates will be removed from active collator set, if block is not produced within this threshold.
+		/// Candidates will be removed from the active collator set if a block is not produced
+		/// within this threshold.
 		#[pallet::constant]
 		type KickThreshold: Get<BlockNumberFor<Self>>;
 
@@ -263,7 +265,7 @@ pub mod pallet {
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub struct ReleaseRequest<BlockNumber, Balance> {
-		/// Block when stake can be unlocked.
+		/// Block when the stake can be unlocked.
 		pub block: BlockNumber,
 		/// Stake to be unlocked.
 		pub amount: Balance,
@@ -367,7 +369,7 @@ pub mod pallet {
 		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
 	)]
 	pub enum Layer {
-		/// Changes yet to be commited.
+		/// Changes yet to be committed.
 		Staging,
 		/// Changes already being applied.
 		Commit,
@@ -415,7 +417,7 @@ pub mod pallet {
 	/// Tracks the different types of locks that can be applied to an account's balance.
 	///
 	/// This struct keeps track of the different amounts that are locked for staking,
-	/// releasing (in process of being unlocked), and held as candidacy bond.
+	/// releasing (in the process of being unlocked), and held as candidacy bond.
 	#[derive(
 		PartialEq,
 		Eq,
@@ -485,7 +487,7 @@ pub mod pallet {
 
 	/// Amount staked by users per candidate.
 	///
-	/// First key is the candidate, and second one is the staker.
+	/// The first key is the candidate, and the second one is the staker.
 	#[pallet::storage]
 	pub type CandidateStake<T: Config> = StorageDoubleMap<
 		_,
@@ -516,7 +518,7 @@ pub mod pallet {
 		ValueQuery,
 	>;
 
-	/// Percentage of rewards that would go for collators.
+	/// Percentage of rewards that would go to collators.
 	#[pallet::storage]
 	pub type CollatorRewardPercentage<T: Config> = StorageValue<_, Percent, ValueQuery>;
 
@@ -524,8 +526,10 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ExtraReward<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Blocks produced in the current session. First value is the total,
-	/// and second is blocks produced by candidates only (not invulnerables).
+	/// Blocks produced in the current session.
+	///
+	/// The first value is the total,
+	/// and the second is blocks produced by candidates only (not invulnerables).
 	#[pallet::storage]
 	pub type TotalBlocks<T: Config> = StorageValue<_, (u32, u32), ValueQuery>;
 
@@ -538,8 +542,10 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CurrentSession<T: Config> = StorageValue<_, SessionIndex, ValueQuery>;
 
-	/// Claimable rewards. This represents the portion of the main pallet's pot account that belong
-	/// to user rewards. The rest of the funds are those generated during the current session that
+	/// Claimable rewards.
+	///
+	/// This represents the portion of the main pallet's pot account that belongs to user rewards.
+	/// The rest of the funds are those generated during the current session that
 	/// will become actual rewards when the session ends.
 	#[pallet::storage]
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
@@ -569,8 +575,8 @@ pub mod pallet {
 	pub type Counters<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
 
-	/// The storage value `LastRewardedKey` is used to track the last key that was rewarded
-	/// automatically by the system.
+	/// The storage value `LastRewardedKey` is used to track the last key automatically rewarded by
+	/// the system.
 	///
 	/// Only those accounts with autocompound enabled have their rewards automatically collected.
 	///
@@ -649,7 +655,7 @@ pub mod pallet {
 		/// An account was unable to be added to the Invulnerables because they did not have keys
 		/// registered. Other Invulnerables may have been set.
 		InvalidInvulnerableSkipped { account: T::AccountId },
-		/// A staker added stake to a candidate.
+		/// A staker added some stake to a candidate.
 		StakeAdded { account: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// Stake was claimed after a penalty period.
 		StakeReleased { account: T::AccountId, amount: BalanceOf<T> },
@@ -695,13 +701,13 @@ pub mod pallet {
 		AlreadyCandidate,
 		/// Account is not a candidate.
 		NotCandidate,
-		/// There are too many Invulnerables.
+		/// There are too many `Invulnerables`.
 		TooManyInvulnerables,
 		/// At least one of the invulnerables is duplicated
 		DuplicatedInvulnerables,
-		/// Account is already an Invulnerable.
+		/// Account is already `Invulnerable`.
 		AlreadyInvulnerable,
-		/// Account is not an Invulnerable.
+		/// Account is not an `Invulnerable`.
 		NotInvulnerable,
 		/// Account has no associated validator ID.
 		NoAssociatedCollatorId,
@@ -717,7 +723,7 @@ pub mod pallet {
 		InvalidMinStake,
 		/// Invalid value for CandidacyBond. It must be higher than or equal to [`MinCandidacyBond`].
 		InvalidCandidacyBond,
-		/// Number of staked candidates is greater than [`MaxStakedCandidates`].
+		/// The number of staked candidates is greater than [`MaxStakedCandidates`].
 		TooManyStakedCandidates,
 		/// Extra reward cannot be zero.
 		InvalidExtraReward,
@@ -731,7 +737,7 @@ pub mod pallet {
 		InsufficientFreeBalance,
 		/// The user does not have enough locked balance to stake.
 		InsufficientLockedBalance,
-		/// Cannot unlock such amount.
+		/// Cannot unlock such an amount.
 		CannotUnlock,
 		/// User must stake at least on one candidate.
 		TooFewCandidates,
@@ -832,20 +838,20 @@ pub mod pallet {
 
 			// check if the invulnerables have associated validator keys before they are set
 			for account_id in &new {
-				// If at least one of the invulnerables is already a collator abort the operation.
+				// If at least one of the invulnerables is already a collator, abort the operation.
 				ensure!(Self::get_candidate(account_id).is_err(), Error::<T>::AlreadyCandidate);
 				// don't let one unprepared collator ruin things for everyone.
 				let validator_key = T::CollatorIdOf::convert(account_id.clone());
 				match validator_key {
 					Some(key) => {
-						// key is not registered
+						// The key is not registered
 						if !T::CollatorRegistration::is_registered(&key) {
 							Self::deposit_event(Event::InvalidInvulnerableSkipped {
 								account: account_id.clone(),
 							});
 							continue;
 						}
-						// else condition passes; key is registered
+						// else condition passes; the key is registered
 					},
 					// key does not exist
 					None => {
@@ -918,7 +924,7 @@ pub mod pallet {
 		}
 
 		/// Register this account as a collator candidate. The account must (a) already have
-		/// registered session keys and (b) be able to reserve the `CandidacyBond`.
+		/// registered session keys, and (b) be able to reserve the `CandidacyBond`.
 		/// The `CandidacyBond` amount is automatically reserved from the balance of the caller.
 		///
 		/// This call is not available to `Invulnerable` collators.
@@ -958,7 +964,7 @@ pub mod pallet {
 		/// Deregister `origin` as a collator candidate. No rewards will be delivered to this
 		/// candidate and its stakers after this moment.
 		///
-		/// This call will fail if the total number of candidates would drop below `MinEligibleCollators`.
+		/// This call will fail if the total number of candidates drops below `MinEligibleCollators`.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::leave_intent())]
 		pub fn leave_intent(origin: OriginFor<T>) -> DispatchResult {
@@ -995,7 +1001,7 @@ pub mod pallet {
 				Error::<T>::CollatorNotRegistered
 			);
 
-			// If the account is already a candidate this operation cannot be performed.
+			// If the account is already a candidate, this operation cannot be performed.
 			ensure!(Self::get_candidate(&who).is_err(), Error::<T>::AlreadyCandidate);
 
 			Invulnerables::<T>::try_mutate(|invulnerables| -> DispatchResult {
@@ -1050,7 +1056,7 @@ pub mod pallet {
 		/// The call will fail if:
 		///     - `origin` does not have the at least [`MinStake`] deposited in the candidate.
 		///     - one of the `targets` is not in the [`Candidates`] map.
-		///     - the user does not have sufficient locked balance to stake.
+		///     - the user does not have a sufficient locked balance to stake.
 		///     - zero targets are passed.
 		#[pallet::call_index(7)]
 		#[pallet::weight(T::WeightInfo::stake(targets.len() as u32))]
@@ -1181,7 +1187,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Sets minimum amount that can be staked on a candidate.
+		/// Sets a minimum amount that can be staked on a candidate.
 		///
 		/// The origin for this call must be the `UpdateOrigin`.
 		#[pallet::call_index(14)]
@@ -1359,7 +1365,7 @@ pub mod pallet {
 			// We do not care about the sender.
 			ensure_signed(origin)?;
 
-			// Staker can't claim in the same session as there are no rewards.
+			// Staker cannot claim in the same session, as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&target), Error::<T>::NoPendingClaim);
 
 			let candidates = Self::do_claim_rewards(&target)?;
@@ -1541,10 +1547,10 @@ pub mod pallet {
 			total_rewards
 		}
 
-		/// Registers a given account as candidate.
+		/// Registers a given account as a candidate.
 		///
-		/// The account has to lock the candidacy bond. If the account was previously a candidate
-		/// the retained stake will be re-included.
+		/// The account has to lock the candidacy bond.
+		/// If the account was previously a candidate, the retained stake will be re-included.
 		///
 		/// Returns the registered candidate info.
 		pub fn do_register_as_candidate(
@@ -1594,8 +1600,8 @@ pub mod pallet {
 					let info = CandidateInfo { stake, stakers };
 					*maybe_candidate_info = Some(info.clone());
 
-					// If the candidate left in the current session and is now rejoining
-					// remove it from the SessionRemovedCandidates
+					// If the candidate left in the current session and is now rejoining,
+					// remove it from the `SessionRemovedCandidates`.
 					SessionRemovedCandidates::<T>::remove(who);
 
 					LockedBalances::<T>::mutate(who, |lock| lock.candidacy_bond = bond);
@@ -1610,7 +1616,7 @@ pub mod pallet {
 
 		/// Releases all pending release requests for a given user that are expired.
 		///
-		/// Returns the amount of operations performed.
+		/// Returns the number of operations performed.
 		pub fn do_release(who: &T::AccountId) -> Result<u32, DispatchError> {
 			let mut released: BalanceOf<T> = 0u32.into();
 			let mut pos = 0;
@@ -1666,7 +1672,7 @@ pub mod pallet {
 		///   - The user does not have sufficient locked balance to perform this operation.
 		///   - The candidate is not registered as such.
 		///   - The total staked amount for this staker in this candidate is lower than [`MinStake`].
-		///   - The amount of stakers for this candidate is greater than or equal to [`MaxStakers`]
+		///   - The amount of stakers for this candidate is greater than or equal to [`MaxStakers`],
 		///     and the staker did not previously have stake on this candidate.
 		///   - The staker staked on more than [`MaxStakedCandidates`] candidates.
 		fn do_stake(
@@ -1706,7 +1712,7 @@ pub mod pallet {
 						candidate_stake_info.checkpoint = Counters::<T>::get(candidate);
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
-							// In case the user recently unstaked we cannot allow those funds to be quickly
+							// In case the user recently unstaked, we cannot allow those funds to be quickly
 							// reinvested. Otherwise, stakers could potentially move funds right before
 							// the session ends from one candidate to another, depending on the most
 							// performant ones during the current session.
@@ -1761,7 +1767,7 @@ pub mod pallet {
 		pub fn staker_has_claimed(who: &T::AccountId) -> bool {
 			UserStake::<T>::get(who)
 				.maybe_last_reward_session
-				// Theoretically you cannot receive rewards in the future, but regardless, it
+				// Theoretically, you cannot receive rewards in the future, but regardless, it
 				// should yield the same result.
 				.map(|last_reward_session| last_reward_session >= CurrentSession::<T>::get())
 				.unwrap_or(true)
@@ -1825,7 +1831,7 @@ pub mod pallet {
 				}
 			}
 
-			// If we could write directly into the commit layer then we can safely remove the staging one.
+			// If we could write directly into the commit layer, then we can safely remove the staging one.
 			if !is_delivering_rewards {
 				AutoCompoundSettings::<T>::remove(Layer::Staging, who);
 			}
@@ -1833,7 +1839,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Disable autocompounding if staked balance dropped below the threshold.
+		/// Disable autocompounding if the staked balance dropped below the threshold.
 		fn adjust_autocompound(staker: &T::AccountId) {
 			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
 				// This cannot fail if setting to `false`.
@@ -1900,7 +1906,7 @@ pub mod pallet {
 					}
 					Self::release_candidacy_bond(who, reason)?;
 
-					// Store removed candidate in SessionRemovedCandidates to properly reward
+					// Store the removed candidate in `SessionRemovedCandidates` to properly reward
 					// the candidate and its stakers at the end of the session.
 					SessionRemovedCandidates::<T>::insert(who, candidate.clone());
 
@@ -1930,7 +1936,7 @@ pub mod pallet {
 			})?;
 			// Since the process of unstaking leads to penalties, this lets users stake new funds
 			// without penalties on them, while still tracking their previously unstaked funds.
-			// If the user just unstaked and unlocked the funds we can decrease the unavailable amount
+			// If the user just unstaked and unlocked the funds, we can decrease the unavailable amount
 			// to stake. This is to allow users that decided to lock more funds during the penalty
 			// period not to have a penalty for funds that are no longer available to be staked, since
 			// they are using "new" funds.
@@ -2055,9 +2061,10 @@ pub mod pallet {
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
 				for (collator, blocks) in produced_blocks {
-					// Get the collator info of a candidate, in the case that the collator was removed from the
-					// candidate list during the session, the collator and its stakers must still be rewarded
-					// for the produced blocks in the session so the info can be obtained from SessionRemovedCandidates.
+					// Get the collator info of a candidate.
+					// In the case that the collator was removed from the candidate list during the
+					// session, the collator and its stakers must still be rewarded for the produced
+					// blocks in the session so the info can be obtained from `SessionRemovedCandidates`.
 					let maybe_collator_info = Self::get_candidate(&collator)
 						.or_else(|_| {
 							SessionRemovedCandidates::<T>::take(&collator)
@@ -2176,7 +2183,7 @@ pub mod pallet {
 
 		/// Assemble the current set of candidates and invulnerables into the next collator set.
 		///
-		/// This is done on the fly, as frequent as we are told to do so, as the session manager.
+		/// This is done on the fly, as frequently as we are told to do so, as the session manager.
 		pub fn assemble_collators() -> Vec<T::AccountId> {
 			// Casting `u32` to `usize` should be safe on all machines running this.
 			let desired_candidates = DesiredCandidates::<T>::get() as usize;
@@ -2206,7 +2213,7 @@ pub mod pallet {
 				.collect()
 		}
 
-		/// Kicks out candidates that did not produce a block in the kick threshold, and refunds
+		/// Kicks out candidates that did not produce a block in the kick threshold and refunds
 		/// the stakers. The candidate is refunded after a delay.
 		///
 		/// Return value is the number of candidates left in the list.
@@ -2262,7 +2269,7 @@ pub mod pallet {
 			Ok(candidate)
 		}
 
-		/// Ensure the correctness of the state of this pallet.
+		/// Ensure the correctness out of the state of this pallet.
 		///
 		/// This should be valid before or after each state transition of this pallet.
 		///
@@ -2276,11 +2283,13 @@ pub mod pallet {
 		///
 		/// ## [`MaxStakedCandidates`]
 		///
-		/// * The amount of staked candidates per account is limited and its maximum value must not be surpassed.
+		/// * The number of staked candidates per account is limited,
+		///   and its maximum value must not be surpassed.
 		///
 		/// ## [`Candidates`]
 		///
-		/// * The amount of stakers per Candidate is limited and its maximum value must not be surpassed.
+		/// * The number of stakers per `Candidate` is limited, and its maximum value must not be
+		///   surpassed.
 		/// * The number of candidates should not exceed the candidate list capacity
 		#[cfg(any(test, feature = "try-runtime"))]
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
@@ -2356,8 +2365,8 @@ pub mod pallet {
 		}
 	}
 
-	/// Keep track of number of authored blocks per authority. Uncles are counted as well since
-	/// they're a valid proof of being online.
+	/// Keep track of how many authored blocks each authority has.
+	/// Uncles are counted as well since they are a valid proof of being online.
 	///
 	/// If the account is a candidate, it will get rewards for producing blocks.
 	impl<T: Config + pallet_authorship::Config>

@@ -121,7 +121,7 @@ impl system::Config for Test {
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
 	type SS58Prefix = SS58Prefix;
-	type MaxConsumers = frame_support::traits::ConstU32<16>;
+	type MaxConsumers = ConstU32<16>;
 	type MultiBlockMigrator = Migrator;
 }
 
@@ -218,7 +218,7 @@ parameter_types! {
 impl pallet_session::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
-	// we don't have stash and controller, thus we don't need the convert as well.
+	// We don't have a stash nor controller, thus we do not need the convert as well.
 	type ValidatorIdOf = IdentityCollatorMock<Test>;
 	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
 	type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
@@ -337,7 +337,7 @@ pub fn new_test_ext() -> TestExtBuilder {
 	pallet_balances::GenesisConfig::<Test> { balances, dev_accounts: None }
 		.assimilate_storage(&mut t)
 		.unwrap();
-	// collator selection must be initialized before session.
+	// collator-staking must be initialized before the session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
 	session.assimilate_storage(&mut t).unwrap();
 
