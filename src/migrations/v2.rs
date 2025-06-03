@@ -166,7 +166,9 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 					),
 				);
 				let mut total_released: BalanceOf<T> = Zero::zero();
-				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &staker);
+				if let Err(e) = T::Currency::thaw(&FreezeReason::Releasing.into(), &staker) {
+					log::warn!("Failure to remove the releasing lock of {:?} when migrating the release queue: {:?}", staker, e);
+				}
 				let remaining_requests = requests
 					.into_iter()
 					.filter(|release| {
@@ -234,8 +236,12 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 			if let Some((candidate, _)) = iter.next() {
 				let bond =
 					T::Currency::balance_frozen(&FreezeReason::CandidacyBond.into(), &candidate);
-				let _ = T::Currency::thaw(&FreezeReason::CandidacyBond.into(), &candidate);
-				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &candidate);
+				if let Err(e) = T::Currency::thaw(&FreezeReason::CandidacyBond.into(), &candidate) {
+					log::warn!("Failure to remove the candidacy bond lock of {:?} when migrating the candidacy bond: {:?}", candidate, e);
+				}
+				if let Err(e) = T::Currency::thaw(&FreezeReason::Releasing.into(), &candidate) {
+					log::warn!("Failure to remove the releasing lock of {:?} when migrating the candidacy bond: {:?}", candidate, e);
+				}
 				// Here we attempt to increase the frozen balance of the candidate.
 				// If the candidate does not have enough balance to lock,
 				// we leave him with a candidacy bond equal to zero.
@@ -273,7 +279,9 @@ impl<T: Config + Debug> LazyMigrationV1ToV2<T> {
 
 		while meter.try_consume(required).is_ok() {
 			if let Some((excandidate, bond_release)) = iter.next() {
-				let _ = T::Currency::thaw(&FreezeReason::Releasing.into(), &excandidate);
+				if let Err(e) = T::Currency::thaw(&FreezeReason::Releasing.into(), &excandidate) {
+					log::warn!("Failure to remove the releasing lock of {:?} when migrating the candidacy bond release: {:?}", excandidate, e);
+				}
 				if now >= bond_release.block {
 					// Collect the bond.
 					CandidacyBondReleases::<T>::remove(excandidate.clone());
