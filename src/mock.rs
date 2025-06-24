@@ -13,32 +13,75 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate as collator_staking;
 use core::marker::PhantomData;
-
 use frame_support::migrations::MultiStepMigrator;
 use frame_support::traits::OnInitialize;
 use frame_support::{
-	derive_impl, ord_parameter_types, parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
+	assert_ok, derive_impl, ord_parameter_types, parameter_types,
+	traits::{fungible::Mutate, ConstBool, ConstU32, ConstU64, FindAuthor, ValidatorRegistration},
 	PalletId,
 };
 use frame_system as system;
+use frame_system::limits::BlockWeights;
 use frame_system::EnsureSignedBy;
-use sp_core::H256;
 use sp_runtime::traits::Get;
 use sp_runtime::{
 	testing::UintAuthorityId,
 	traits::{BlakeTwo256, IdentityLookup, OpaqueKeys},
-	BuildStorage, Percent, RuntimeAppPublic,
+	BuildStorage, Percent, RuntimeAppPublic, Weight,
 };
-
-use crate as collator_staking;
+use std::ops::RangeInclusive;
 
 use super::*;
 
 type Block = frame_system::mocking::MockBlock<Test>;
-type AccountId = <Test as frame_system::Config>::AccountId;
+pub(crate) type AccountId = <Test as frame_system::Config>::AccountId;
 type Balance = u64;
+
+pub(crate) fn fund_account(acc: AccountId) {
+	assert_ok!(Balances::mint_into(&acc, 100));
+}
+
+pub(crate) fn register_keys(acc: AccountId) {
+	let key = MockSessionKeys { aura: UintAuthorityId(acc) };
+	assert_ok!(Session::set_keys(RuntimeOrigin::signed(acc), key, Vec::new()));
+}
+
+pub(crate) fn register_candidates(range: RangeInclusive<AccountId>) {
+	for ii in range {
+		if ii > 5 {
+			// only keys were registered in mock for 1 to 5
+			fund_account(ii);
+			register_keys(ii);
+		}
+		assert_ok!(CollatorStaking::register_as_candidate(
+			RuntimeOrigin::signed(ii),
+			MinCandidacyBond::<Test>::get()
+		));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::CandidateAdded {
+			account: ii,
+			deposit: MinCandidacyBond::<Test>::get(),
+		}));
+	}
+}
+
+pub(crate) fn candidate_list() -> Vec<(AccountId, CandidateInfo<BalanceOf<Test>>)> {
+	let mut all_candidates = Candidates::<Test>::iter().collect::<Vec<_>>();
+	all_candidates.sort_by_key(|(_, info)| info.stake);
+	all_candidates
+}
+
+pub(crate) fn lock_for_staking(range: RangeInclusive<AccountId>) {
+	for ii in range {
+		let balance = CollatorStaking::get_free_balance(&ii);
+		assert_ok!(CollatorStaking::lock(RuntimeOrigin::signed(ii), balance));
+		System::assert_last_event(RuntimeEvent::CollatorStaking(Event::LockExtended {
+			account: ii,
+			amount: balance,
+		}));
+	}
+}
 
 // Configure a mock runtime to test the pallet.
 frame_support::construct_runtime!(
@@ -65,7 +108,6 @@ impl system::Config for Test {
 	type RuntimeOrigin = RuntimeOrigin;
 	type RuntimeCall = RuntimeCall;
 	type Nonce = u64;
-	type Hash = H256;
 	type Hashing = BlakeTwo256;
 	type AccountId = u64;
 	type Lookup = IdentityLookup<Self::AccountId>;
@@ -79,7 +121,7 @@ impl system::Config for Test {
 	type OnKilledAccount = ();
 	type SystemWeightInfo = ();
 	type SS58Prefix = SS58Prefix;
-	type MaxConsumers = frame_support::traits::ConstU32<16>;
+	type MaxConsumers = ConstU32<16>;
 	type MultiBlockMigrator = Migrator;
 }
 
@@ -176,7 +218,7 @@ parameter_types! {
 impl pallet_session::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
-	// we don't have stash and controller, thus we don't need the convert as well.
+	// We don't have a stash nor controller, thus we do not need the convert as well.
 	type ValidatorIdOf = IdentityCollatorMock<Test>;
 	type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
 	type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
@@ -241,18 +283,39 @@ impl Config for Test {
 	type StakeUnlockDelay = ConstU64<2>;
 	type RestakeUnlockDelay = ConstU64<10>;
 	type AutoCompoundingThreshold = ConstU64<60>;
+	type BlockNumberProvider = frame_system::Pallet<Test>;
 	type WeightInfo = ();
+}
+
+parameter_types! {
+	// Set the block maximum capacity low enough so that many migration steps are required.
+	pub MaxServiceWeight: Weight = <<pallet_migrations::config_preludes::TestDefaultConfig as frame_system::DefaultConfig>::BlockWeights as Get<BlockWeights>>::get().max_block.div(100);
 }
 
 #[derive_impl(pallet_migrations::config_preludes::TestDefaultConfig)]
 impl pallet_migrations::Config for Test {
+	type MaxServiceWeight = MaxServiceWeight;
 	#[cfg(not(feature = "runtime-benchmarks"))]
 	type Migrations = (crate::migrations::v2::LazyMigrationV1ToV2<Test>,);
 	#[cfg(feature = "runtime-benchmarks")]
 	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
 }
 
-pub fn new_test_ext() -> sp_io::TestExternalities {
+pub(crate) struct TestExtBuilder(sp_io::TestExternalities);
+impl TestExtBuilder {
+	pub fn execute_with(&mut self, execute: impl FnOnce()) {
+		let mut ext = self.0.ext();
+		sp_externalities::set_and_run_with_externalities(&mut ext, || {
+			initialize_to_block(1);
+		});
+		sp_externalities::set_and_run_with_externalities(&mut ext, execute);
+		sp_externalities::set_and_run_with_externalities(&mut ext, || {
+			assert_ok!(CollatorStaking::do_try_state());
+		});
+	}
+}
+
+pub fn new_test_ext() -> TestExtBuilder {
 	sp_tracing::try_init_simple();
 	let mut t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
 	let invulnerables = vec![2, 1]; // unsorted
@@ -274,11 +337,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	pallet_balances::GenesisConfig::<Test> { balances, dev_accounts: None }
 		.assimilate_storage(&mut t)
 		.unwrap();
-	// collator selection must be initialized before session.
+	// collator-staking must be initialized before the session.
 	collator_staking.assimilate_storage(&mut t).unwrap();
 	session.assimilate_storage(&mut t).unwrap();
 
-	t.into()
+	TestExtBuilder(t.into())
 }
 
 pub fn initialize_to_block(n: u64) {
