@@ -23,15 +23,41 @@
 //! It allows staking tokens to back collators, and receive rewards proportionately.
 //! There is no slashing implemented. If a collator does not produce blocks as expected,
 //! it is removed from the collator set.
+//!
+//! ## Reward distribution mechanism
+//!
+//! The pallet uses a checkpoint system to efficiently track and distribute rewards.
+//! This allows automatically distribute rewards for autocompounding implementation.
+//!
+//! ### Example:
+//! A collator has 3 stakers with 100 tokens each (total 300 tokens)
+//! The collator's counter starts at 0
+//! After a session with 30 tokens of rewards:
+//!  * Counter increases by 30/300 = 0.1
+//!  * Each token staked now "earned" 0.1 tokens
+//! A staker with 100 tokens claims rewards:
+//!  * Unclaimed rewards = (0.1 - 0) * 100 = 10 tokens
+//!  * Checkpoint updated from 0 to 0.1
+//! After another session with 60 tokens of rewards:
+//!  * Counter increases by 60/300 = 0.2, now totaling 0.3
+//! The same staker claims again:
+//!  * Unclaimed rewards = (0.3 - 0.1) * 100 = 20 tokens
+//!  * Checkpoint updated from 0.1 to 0.3
+//!
+//! ## Two-Layer Auto-Compound Settings
+//!
+//! The pallet uses a two-layer approach for auto-compound distribution:
+//! - Commit Layer: Active settings currently used for reward distribution.
+//! - Staging Layer: Temporary storage for changes made during active distribution.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::marker::PhantomData;
 
-use codec::Codec;
 use frame_support::traits::TypedGet;
 use sp_std::vec::Vec;
 
+pub use api::*;
 pub use pallet::*;
 
 #[cfg(test)]
@@ -40,14 +66,17 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+pub mod api;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
+pub mod migrations;
 pub mod weights;
 
 const LOG_TARGET: &str = "runtime::collator-staking";
 
 #[frame_support::pallet]
 pub mod pallet {
+	use frame_support::weights::WeightMeter;
 	use frame_support::{
 		dispatch::{DispatchClass, DispatchResultWithPostInfo},
 		pallet_prelude::*,
@@ -63,18 +92,16 @@ pub mod pallet {
 	use pallet_session::SessionManager;
 	use sp_runtime::{
 		traits::{AccountIdConversion, Convert, Saturating, Zero},
-		RuntimeDebug,
+		FixedPointNumber, FixedU128, Perbill, Percent, RuntimeDebug,
 	};
-	use sp_runtime::{Perbill, Percent};
 	use sp_staking::SessionIndex;
-	use sp_std::collections::btree_map::BTreeMap;
 
 	pub use crate::weights::WeightInfo;
 
 	use super::*;
 
 	/// The in-code storage version.
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	pub type BalanceOf<T> =
 		<<T as Config>::Currency as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
@@ -96,6 +123,7 @@ pub mod pallet {
 	>;
 	pub type CandidateStakeInfoOf<T> = CandidateStakeInfo<BalanceOf<T>>;
 	pub type CandidacyBondReleaseOf<T> = CandidacyBondRelease<BalanceOf<T>, BlockNumberFor<T>>;
+	pub type OperationFor<T> = Operation<<T as frame_system::Config>::AccountId>;
 
 	/// A convertor from collators id. Since this pallet does not have stash/controller, this is
 	/// just identity.
@@ -194,11 +222,6 @@ pub mod pallet {
 		#[pallet::constant]
 		type RestakeUnlockDelay: Get<BlockNumberFor<Self>>;
 
-		/// Maximum number of rewards to keep in storage. Non-claimed rewards will not be claimable
-		/// after they have been removed.
-		#[pallet::constant]
-		type MaxRewardSessions: Get<u32>;
-
 		/// Minimum stake needed to enable autocompounding.
 		#[pallet::constant]
 		type AutoCompoundingThreshold: Get<BalanceOf<Self>>;
@@ -266,10 +289,11 @@ pub mod pallet {
 		MaxEncodedLen,
 	)]
 	pub struct CandidateStakeInfo<Balance> {
-		/// Session when the user first staked on a given candidate.
-		pub session: SessionIndex,
 		/// The amount staked.
 		pub stake: Balance,
+		/// Checkpoint to track rewards for a given collator.
+		/// Represents the last point at which a staker was given rewards.
+		pub checkpoint: FixedU128,
 	}
 
 	/// Information about a users' stake.
@@ -329,6 +353,39 @@ pub mod pallet {
 		Replaced,
 	}
 
+	/// The storage layers.
+	#[derive(
+		PartialEq, Eq, Clone, Encode, Decode, RuntimeDebug, scale_info::TypeInfo, MaxEncodedLen,
+	)]
+	pub enum Layer {
+		/// Changes yet to be commited.
+		Staging,
+		/// Changes already being applied.
+		Commit,
+	}
+
+	/// The storage layers.
+	#[derive(
+		PartialEq,
+		Eq,
+		Clone,
+		Encode,
+		Decode,
+		RuntimeDebug,
+		scale_info::TypeInfo,
+		MaxEncodedLen,
+		Default,
+	)]
+	pub enum Operation<AccountId> {
+		/// Nothing else to do.
+		#[default]
+		Idle,
+		/// Tracks the rewards to be delivered by the system.
+		RewardStakers { maybe_last_processed_account: Option<AccountId> },
+		/// Tracks the process of migration from the Staging to the Commit layers in Autocompounding.
+		CommitAutocompound,
+	}
+
 	/// Represents a bond release for a collator candidacy.
 	///
 	/// This struct encapsulates crucial information regarding the release of a bond tied to a
@@ -357,9 +414,6 @@ pub mod pallet {
 
 	/// The (community, limited) collation candidates. `Candidates` and `Invulnerables` should be
 	/// mutually exclusive.
-	///
-	/// This list is sorted in ascending order by total stake and when the stake amounts are equal, the least
-	/// recently updated is considered greater.
 	#[pallet::storage]
 	pub type Candidates<T: Config> =
 		CountedStorageMap<_, Blake2_128Concat, T::AccountId, CandidateInfoOf<T>, OptionQuery>;
@@ -439,23 +493,28 @@ pub mod pallet {
 	pub type ProducedBlocks<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
 
-	/// Current session index.
+	/// Current session index. Obtained from `pallet-session`.
 	#[pallet::storage]
 	pub type CurrentSession<T: Config> = StorageValue<_, SessionIndex, ValueQuery>;
 
-	/// Claimable rewards.
+	/// Claimable rewards. This represents the portion of the main pallet's pot account that belong
+	/// to user rewards. The rest of the funds are those generated during the current session that
+	/// will become actual rewards when the session ends.
 	#[pallet::storage]
 	pub type ClaimableRewards<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-	/// Per-session rewards.
+	/// Keeps track of whether auto-compound rewards are enabled for an account
+	/// in a specific layer.
 	#[pallet::storage]
-	pub type PerSessionRewards<T: Config> =
-		CountedStorageMap<_, Blake2_128Concat, SessionIndex, SessionInfoOf<T>, OptionQuery>;
-
-	/// Percentage of rewards to be re-invested in collators.
-	#[pallet::storage]
-	pub type AutoCompound<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, Percent, ValueQuery>;
+	pub type AutoCompoundSettings<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		Layer,
+		Blake2_128Concat,
+		T::AccountId,
+		bool,
+		ValueQuery,
+	>;
 
 	/// Time (in blocks) to release an ex-candidate's locked candidacy bond.
 	/// If a candidate leaves the candidacy before its bond is released, the waiting period
@@ -463,6 +522,21 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type CandidacyBondReleases<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, CandidacyBondReleaseOf<T>, OptionQuery>;
+
+	/// Represents accumulated rewards per token staked on a given collator over time.
+	#[pallet::storage]
+	pub type Counters<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, FixedU128, ValueQuery>;
+
+	/// The storage value `LastRewardedKey` is used to track the last key that was rewarded
+	/// automatically by the system.
+	///
+	/// Only those accounts with autocompound enabled have their rewards automatically collected.
+	///
+	/// - `bool`: Indicates if reward distribution was completed for the current session.
+	/// - `Option<T::AccountId>`: The account ID of the last rewarded key, if any.
+	#[pallet::storage]
+	pub type NextSystemOperation<T: Config> = StorageValue<_, OperationFor<T>, ValueQuery>;
 
 	#[pallet::genesis_config]
 	#[derive(DefaultNoBound)]
@@ -536,8 +610,8 @@ pub mod pallet {
 		StakeRemoved { account: T::AccountId, candidate: T::AccountId, amount: BalanceOf<T> },
 		/// A staking reward was delivered.
 		StakingRewardReceived { account: T::AccountId, amount: BalanceOf<T> },
-		/// Autocompound percentage was set.
-		AutoCompoundPercentageSet { account: T::AccountId, percentage: Percent },
+		/// Autocompounding was enabled.
+		AutoCompoundEnabled { account: T::AccountId },
 		/// Autocompounding was disabled.
 		AutoCompoundDisabled { account: T::AccountId },
 		/// Collator reward percentage was set.
@@ -586,11 +660,11 @@ pub mod pallet {
 		TooManyDesiredCandidates,
 		/// Too many unstaking requests. Claim some of them first.
 		TooManyReleaseRequests,
-		/// Invalid value for MinStake. It must be lower than or equal to `MinStake`.
+		/// Invalid value for MinStake. It must be lower than or equal to [`MinStake`].
 		InvalidMinStake,
-		/// Invalid value for CandidacyBond. It must be higher than or equal to `MinCandidacyBond`.
+		/// Invalid value for CandidacyBond. It must be higher than or equal to [`MinCandidacyBond`].
 		InvalidCandidacyBond,
-		/// Number of staked candidates is greater than `MaxStakedCandidates`.
+		/// Number of staked candidates is greater than [`MaxStakedCandidates`].
 		TooManyStakedCandidates,
 		/// Extra reward cannot be zero.
 		InvalidExtraReward,
@@ -631,6 +705,37 @@ pub mod pallet {
 		#[cfg(feature = "try-runtime")]
 		fn try_state(_: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
 			Self::do_try_state()
+		}
+
+		/// Performs operations in a loop based on the current state of the [`NextSystemOperation`].
+		/// Specifically, it processes rewards for stakers with auto-compound enabled and commits
+		/// auto-compound operations to the appropriate storage.
+		fn on_idle(_n: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+			let mut meter = WeightMeter::with_limit(remaining_weight);
+			if meter.try_consume(T::DbWeight::get().reads_writes(1, 0)).is_err() {
+				return remaining_weight;
+			}
+			let mut next_operation = NextSystemOperation::<T>::get();
+			loop {
+				next_operation = match next_operation {
+					// Step 1: Reward stakers with autocompound enabled.
+					Operation::RewardStakers { maybe_last_processed_account } => {
+						match Self::do_reward_stakers(&mut meter, maybe_last_processed_account) {
+							Ok(op) => op,
+							Err(_) => break,
+						}
+					},
+					// Step 2: move staging operations to the commit layer.
+					Operation::CommitAutocompound => match Self::do_commit_autocompound(&mut meter)
+					{
+						Ok(op) => op,
+						Err(_) => break,
+					},
+					// Nothing to do here.
+					Operation::Idle => break,
+				}
+			}
+			meter.consumed()
 		}
 	}
 
@@ -976,29 +1081,13 @@ pub mod pallet {
 		/// This operation will also claim all pending rewards.
 		/// Rewards will be autocompounded when calling the `claim_rewards` extrinsic.
 		#[pallet::call_index(11)]
-		#[pallet::weight(T::WeightInfo::set_autocompound_percentage())]
-		pub fn set_autocompound_percentage(
-			origin: OriginFor<T>,
-			percent: Percent,
-		) -> DispatchResult {
+		#[pallet::weight(T::WeightInfo::set_autocompound())]
+		pub fn set_autocompound(origin: OriginFor<T>, enable: bool) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
 			ensure!(Self::staker_has_claimed(&who), Error::<T>::PreviousRewardsNotClaimed);
 
-			if percent.is_zero() {
-				AutoCompound::<T>::remove(&who);
-				Self::deposit_event(Event::AutoCompoundDisabled { account: who });
-			} else {
-				ensure!(
-					Self::get_staked_balance(&who) >= T::AutoCompoundingThreshold::get(),
-					Error::<T>::InsufficientStake
-				);
-				AutoCompound::<T>::insert(&who, percent);
-				Self::deposit_event(Event::AutoCompoundPercentageSet {
-					account: who,
-					percentage: percent,
-				});
-			}
+			Self::do_set_autocompound(&who, enable)?;
 
 			Ok(())
 		}
@@ -1151,7 +1240,7 @@ pub mod pallet {
 				staked_balance.saturating_sub(amount),
 			)?;
 			Self::add_to_release_queue(&who, amount, T::StakeUnlockDelay::get())?;
-			Self::adjust_autocompound_percentage(&who);
+			Self::adjust_autocompound(&who);
 
 			Ok(())
 		}
@@ -1183,42 +1272,34 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Claims all pending rewards for stakers and candidates.
+		/// Claims all pending rewards for a given staker.
 		///
-		/// Distributes rewards accumulated over previous sessions
-		/// and ensures that rewards are only claimable for sessions where the
-		/// caller has participated. Rewards for the current session cannot be claimed.
+		/// Distributes rewards accumulated over previous sessions.
+		/// Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: Caller has no rewards to claim.
 		#[pallet::call_index(20)]
-		#[pallet::weight(T::WeightInfo::claim_rewards(
-			T::MaxStakedCandidates::get(),
-			T::MaxRewardSessions::get()
-		))]
+		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get()))]
 		pub fn claim_rewards(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 
 			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&who), Error::<T>::NoPendingClaim);
 
-			let (candidates, rewards) = Self::do_claim_rewards(&who)?;
-			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
+			let candidates = Self::do_claim_rewards(&who)?;
+			Ok(Some(T::WeightInfo::claim_rewards(candidates)).into())
 		}
 
 		/// Claims all pending rewards for `target`.
 		///
-		/// Distributes rewards accumulated over previous sessions
-		/// and ensures that rewards are only claimable for sessions where the
-		/// `target` has participated. Rewards for the current session cannot be claimed.
+		/// Distributes rewards accumulated over previous sessions.
+		/// Rewards for the current session cannot be claimed.
 		///
 		/// **Errors**:
 		/// - `Error::<T>::NoPendingClaim`: `target` has no rewards to claim.
 		#[pallet::call_index(21)]
-		#[pallet::weight(T::WeightInfo::claim_rewards(
-			T::MaxStakedCandidates::get(),
-			T::MaxRewardSessions::get()
-		))]
+		#[pallet::weight(T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get()))]
 		pub fn claim_rewards_other(
 			origin: OriginFor<T>,
 			target: T::AccountId,
@@ -1229,8 +1310,8 @@ pub mod pallet {
 			// Staker can't claim in the same session as there are no rewards.
 			ensure!(!Self::staker_has_claimed(&target), Error::<T>::NoPendingClaim);
 
-			let (candidates, rewards) = Self::do_claim_rewards(&target)?;
-			Ok(Some(T::WeightInfo::claim_rewards(candidates, rewards)).into())
+			let candidates = Self::do_claim_rewards(&target)?;
+			Ok(Some(T::WeightInfo::claim_rewards(candidates)).into())
 		}
 	}
 
@@ -1255,43 +1336,6 @@ pub mod pallet {
 			Invulnerables::<T>::get().binary_search(account).is_ok()
 		}
 
-		/// Calculates the rewards for a given session.
-		///
-		/// The `candidate_rewards` map will be mutated to include the rewards for the collators.
-		///
-		/// Returns a tuple including:
-		///   - The total rewardable amount.
-		///   - The unclaimable rewards. These are the rewards that were generated for stakers
-		///     that joined during the session rewards are being distributed for. Stakers do not
-		///     receive rewards for the session they joined in.
-		fn calculate_rewards_for_session(
-			index: SessionIndex,
-			session_rewards: &SessionInfoOf<T>,
-			candidate_rewards: &mut BTreeMap<T::AccountId, (CandidateStakeInfoOf<T>, BalanceOf<T>)>,
-		) -> (BalanceOf<T>, BalanceOf<T>) {
-			let mut claimable_rewards: BalanceOf<T> = Zero::zero();
-			let mut unclaimable_rewards: BalanceOf<T> = Zero::zero();
-			for (candidate, (user_stake_info, amount)) in candidate_rewards.iter_mut() {
-				if let Some((candidate_snapshot_stake, candidate_reward)) =
-					session_rewards.candidates.get(candidate)
-				{
-					let candidate_session_reward =
-						Perbill::from_rational(user_stake_info.stake, *candidate_snapshot_stake)
-							.mul_floor(*candidate_reward);
-
-					// If the user staked in this session for the first time it does not receive
-					// rewards for the session.
-					if index > user_stake_info.session {
-						amount.saturating_accrue(candidate_session_reward);
-						claimable_rewards.saturating_accrue(candidate_session_reward);
-					} else {
-						unclaimable_rewards.saturating_accrue(candidate_session_reward);
-					}
-				}
-			}
-			(claimable_rewards, unclaimable_rewards)
-		}
-
 		/// Checks if the provided list of accounts contains duplicate entries.
 		fn has_duplicates(accounts: &[T::AccountId]) -> bool {
 			let duplicates =
@@ -1299,101 +1343,148 @@ pub mod pallet {
 			duplicates.len() != accounts.len()
 		}
 
-		/// Claims all rewards from previous sessions.
-		///
-		/// Returns the number of collators the users added stake to, and the total sessions with rewards.
-		fn do_claim_rewards(who: &T::AccountId) -> Result<(u32, u32), DispatchError> {
-			UserStake::<T>::mutate(who, |user_stake_info| -> Result<(u32, u32), DispatchError> {
-				let mut total_sessions = 0;
-				let mut total_candidates = 0;
-				if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
-					let current_session = CurrentSession::<T>::get();
-					// If the user has not collected rewards from sessions past the `MaxRewardSessions`
-					// limit we can skip rewards we already know they have been discarded.
-					let last_reward_session = last_reward_session
-						.max(current_session.saturating_sub(T::MaxRewardSessions::get()));
-					let mut candidate_rewards = user_stake_info
-						.candidates
-						.iter()
-						.map(|candidate| {
-							(
-								candidate.clone(),
-								(CandidateStake::<T>::get(candidate, who), Zero::zero()),
-							)
-						})
-						.collect::<BTreeMap<_, _>>();
-					total_sessions = current_session.saturating_sub(last_reward_session);
-					total_candidates = user_stake_info.candidates.len() as u32;
-					let mut total_rewards: BalanceOf<T> = Zero::zero();
-					let mut total_unclaimable_rewards: BalanceOf<T> = Zero::zero();
-					for session in last_reward_session..current_session {
-						PerSessionRewards::<T>::mutate(session, |maybe_session_rewards| {
-							if let Some(session_rewards) = maybe_session_rewards {
-								let (session_total_reward, session_unclaimable_rewards) =
-									Self::calculate_rewards_for_session(
-										session,
-										session_rewards,
-										&mut candidate_rewards,
-									);
-								total_rewards.saturating_accrue(session_total_reward);
-								total_unclaimable_rewards
-									.saturating_accrue(session_unclaimable_rewards);
-								session_rewards.claimed_rewards.saturating_accrue(
-									session_total_reward.saturating_add(total_unclaimable_rewards),
-								);
-							}
-						});
+		/// Processes staking rewards for stakers who have enabled auto-compounding,
+		/// while respecting weight limits. It iterates through the stakers, claims rewards,
+		/// and tracks the last processed account for continuation in subsequent executions.
+		/// If all accounts are processed, it sets the next system operation to commit auto-compounding.
+		pub(crate) fn do_reward_stakers(
+			meter: &mut WeightMeter,
+			mut maybe_last_processed_account: Option<T::AccountId>,
+		) -> Result<OperationFor<T>, ()> {
+			// This is the weight of the final operation in this function where we set
+			// `NextSystemOperation`.
+			let write = T::DbWeight::get().reads_writes(0, 1);
+			if meter.try_consume(write).is_err() {
+				return Err(());
+			}
+			let worst_case_weight = T::WeightInfo::claim_rewards(T::MaxStakedCandidates::get());
+			let mut iter = if let Some(last_key) = &maybe_last_processed_account {
+				let key = AutoCompoundSettings::<T>::hashed_key_for(Layer::Commit, last_key);
+				AutoCompoundSettings::<T>::iter_prefix_from(Layer::Commit, key)
+			} else {
+				AutoCompoundSettings::<T>::iter_prefix(Layer::Commit)
+			};
+
+			let read = T::DbWeight::get().reads_writes(1, 0);
+			while meter.can_consume(worst_case_weight.saturating_add(read)) {
+				if let Some((staker, enabled)) = iter.next() {
+					meter.consume(read);
+					if enabled {
+						match Self::do_claim_rewards(&staker) {
+							Ok(explored_candidates) => {
+								meter.consume(T::WeightInfo::claim_rewards(explored_candidates));
+							},
+							Err(e) => {
+								meter.consume(worst_case_weight);
+								log::warn!("Error while attempting to collect rewards for staker {:?}: {:?}", staker, e);
+							},
+						};
 					}
+					maybe_last_processed_account = Some(staker);
+				} else {
+					// End of the iteration.
+					meter.consume(T::DbWeight::get().reads_writes(1, 1));
+					maybe_last_processed_account = None;
+					break;
+				}
+			}
+			if let Some(last_key) = maybe_last_processed_account {
+				// In this branch we did not manage to finish traversing the whole map, so we save
+				// the progress and return an error.
+				NextSystemOperation::<T>::set(Operation::RewardStakers {
+					maybe_last_processed_account: Some(last_key),
+				});
+				Err(())
+			} else {
+				// Managed to finish iterating the map, so we save the progress and continue with
+				// the next step.
+				let op = Operation::CommitAutocompound;
+				NextSystemOperation::<T>::set(op.clone());
+				Ok(op)
+			}
+		}
+
+		/// Commits the auto-compounding options for stakers.
+		///
+		/// This function processes a batch of stakers' auto-compounding preferences
+		/// from the staging layer and commits them to the active layer while consuming
+		/// weight for each processed item. If the iteration completes, it sets the next
+		/// system operation to `Idle`.
+		pub(crate) fn do_commit_autocompound(
+			meter: &mut WeightMeter,
+		) -> Result<OperationFor<T>, ()> {
+			let mut iter = AutoCompoundSettings::<T>::drain_prefix(Layer::Staging);
+			let worst_case_weight = T::DbWeight::get().reads_writes(1, 2);
+			while meter.try_consume(worst_case_weight).is_ok() {
+				if let Some((staker, enabled)) = iter.next() {
+					if enabled {
+						AutoCompoundSettings::<T>::set(Layer::Commit, &staker, true);
+					} else {
+						AutoCompoundSettings::<T>::remove(Layer::Commit, &staker);
+					}
+				} else {
+					let op = Operation::Idle;
+					NextSystemOperation::<T>::set(op.clone());
+					return Ok(op);
+				}
+			}
+			Err(())
+		}
+
+		/// Claims staking rewards for the provided account.
+		///
+		/// - Iterates over all candidates the account has staked and calculates rewards.
+		/// - Updates reward-related states such as `checkpoint` and `maybe_last_reward_session`.
+		/// - Transfers rewards to the account. If auto-compounding is enabled, locks and stakes
+		///   the rewards with the respective candidates.
+		///
+		/// Returns:
+		/// - The number of candidates whose rewards were claimed.
+		pub(crate) fn do_claim_rewards(who: &T::AccountId) -> Result<u32, DispatchError> {
+			let mut total_rewards: BalanceOf<T> = Zero::zero();
+			let mut candidate_rewards = Vec::new();
+			let current_session = CurrentSession::<T>::get();
+			UserStake::<T>::try_mutate(who, |user_stake_info| {
+				for candidate in &user_stake_info.candidates {
+					let counter = Counters::<T>::get(&candidate);
+					CandidateStake::<T>::mutate(candidate, who, |info| {
+						let reward =
+							counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
+						candidate_rewards.push((candidate.clone(), reward));
+						total_rewards.saturating_accrue(reward);
+						info.checkpoint = counter;
+					});
+				}
+				user_stake_info.maybe_last_reward_session = Some(current_session);
+				if !total_rewards.is_zero() {
 					Self::do_reward_single(who, total_rewards)?;
 					ClaimableRewards::<T>::mutate(|claimable_rewards| {
-						claimable_rewards.saturating_reduce(
-							total_rewards.saturating_add(total_unclaimable_rewards),
-						);
+						claimable_rewards.saturating_reduce(total_rewards);
 					});
-					let autocompound_percentage = AutoCompound::<T>::get(who);
-					let autocompound_amount = autocompound_percentage.mul_floor(total_rewards);
-					if !autocompound_amount.is_zero() {
-						Self::do_lock(who, autocompound_amount)?;
-						for (candidate, (_, rewards)) in candidate_rewards.iter() {
-							let amount = autocompound_percentage.mul_floor(*rewards);
-							if !amount.is_zero() {
-								Self::do_stake(who, candidate, amount)?;
+					let autocompound = AutoCompoundSettings::<T>::get(Layer::Commit, who);
+					if autocompound {
+						Self::do_lock(who, total_rewards)?;
+						for (candidate, rewards) in &candidate_rewards {
+							if !rewards.is_zero() {
+								Self::do_stake(who, candidate, *rewards)?;
 							}
 						}
 					}
-					user_stake_info.maybe_last_reward_session = Some(current_session);
 				}
-				Ok((total_candidates, total_sessions))
+				Ok(candidate_rewards.len() as u32)
 			})
 		}
 
 		/// Computes pending rewards for a given user.
-		/// This function is intended to be used in the runtime implementation.
+		/// This function is intended to be used in the runtime API implementation.
 		pub fn calculate_unclaimed_rewards(who: &T::AccountId) -> BalanceOf<T> {
 			let mut total_rewards: BalanceOf<T> = Zero::zero();
 			let user_stake_info = UserStake::<T>::get(who);
-			if let Some(last_reward_session) = user_stake_info.maybe_last_reward_session {
-				let mut candidate_rewards = user_stake_info
-					.candidates
-					.iter()
-					.map(|candidate| {
-						(
-							candidate.clone(),
-							(CandidateStake::<T>::get(candidate, who), Zero::zero()),
-						)
-					})
-					.collect::<BTreeMap<_, _>>();
-				let current_session = CurrentSession::<T>::get();
-				for session in last_reward_session..current_session {
-					if let Some(rewards) = PerSessionRewards::<T>::get(session) {
-						let (session_total_reward, _) = Self::calculate_rewards_for_session(
-							session,
-							&rewards,
-							&mut candidate_rewards,
-						);
-						total_rewards.saturating_accrue(session_total_reward);
-					}
-				}
+			for candidate in &user_stake_info.candidates {
+				let counter = Counters::<T>::get(&candidate);
+				let info = CandidateStake::<T>::get(candidate, who);
+				let reward = counter.saturating_sub(info.checkpoint).saturating_mul_int(info.stake);
+				total_rewards.saturating_accrue(reward);
 			}
 			total_rewards
 		}
@@ -1561,9 +1652,9 @@ pub mod pallet {
 								Error::<T>::TooManyStakers
 							);
 							candidate_info.stakers.saturating_inc();
-							candidate_stake_info.session = current_session;
 						}
 						candidate_stake_info.stake = final_staker_stake;
+						candidate_stake_info.checkpoint = Counters::<T>::get(candidate);
 						candidate_info.stake.saturating_accrue(amount);
 						UserStake::<T>::try_mutate(staker, |user_stake_info| -> DispatchResult {
 							// In case the user recently unstaked we cannot allow those funds to be quickly
@@ -1650,17 +1741,54 @@ pub mod pallet {
 			Ok((stake, is_candidate))
 		}
 
+		/// Enables or disables autocompounding for the given staker.
+		///
+		/// Autocompounding automatically reinvests rewards if the staked balance
+		/// is above the required threshold.
+		///
+		/// - `who`: The account to enable or disable autocompounding for.
+		/// - `enable`: Boolean indicating whether to enable or disable autocompounding.
+		///
+		/// Emits `AutoCompoundEnabled` or `AutoCompoundDisabled` event based on the action.
+		fn do_set_autocompound(who: &T::AccountId, enable: bool) -> DispatchResult {
+			let already_enabled = AutoCompoundSettings::<T>::get(Layer::Commit, who);
+			let is_delivering_rewards = Self::is_delivering_rewards();
+
+			if !enable {
+				if is_delivering_rewards {
+					AutoCompoundSettings::<T>::insert(Layer::Staging, who, false);
+				} else {
+					AutoCompoundSettings::<T>::remove(Layer::Staging, who);
+					AutoCompoundSettings::<T>::remove(Layer::Commit, who);
+				}
+				if already_enabled {
+					Self::deposit_event(Event::AutoCompoundDisabled { account: who.clone() });
+				}
+			} else {
+				let layer = if is_delivering_rewards { Layer::Staging } else { Layer::Commit };
+				ensure!(
+					Self::get_staked_balance(who) >= T::AutoCompoundingThreshold::get(),
+					Error::<T>::InsufficientStake
+				);
+				AutoCompoundSettings::<T>::insert(layer, who, true);
+				if !already_enabled {
+					Self::deposit_event(Event::AutoCompoundEnabled { account: who.clone() });
+				}
+			}
+
+			// If we could write directly into the commit layer then we can safely remove the staging one.
+			if !is_delivering_rewards {
+				AutoCompoundSettings::<T>::remove(Layer::Staging, who);
+			}
+
+			Ok(())
+		}
+
 		/// Disable autocompounding if staked balance dropped below the threshold.
-		fn adjust_autocompound_percentage(staker: &T::AccountId) {
+		fn adjust_autocompound(staker: &T::AccountId) {
 			if Self::get_staked_balance(staker) < T::AutoCompoundingThreshold::get() {
-				AutoCompound::<T>::mutate(staker, |percentage| {
-					if !percentage.is_zero() {
-						*percentage = Percent::from_parts(0);
-						Self::deposit_event(Event::AutoCompoundDisabled {
-							account: staker.clone(),
-						});
-					}
-				});
+				// This cannot fail if setting to `false`.
+				let _ = Self::do_set_autocompound(staker, false);
 			}
 		}
 
@@ -1853,28 +1981,9 @@ pub mod pallet {
 			})
 		}
 
-		/// Removes old rewards when a new session starts.
-		fn remove_old_rewards_if_needed(session: SessionIndex) {
-			let rewards_to_remove = PerSessionRewards::<T>::count()
-				.saturating_sub(T::MaxRewardSessions::get().saturating_sub(1));
-			let mut remaining_unclaimed_rewards: BalanceOf<T> = Zero::zero();
-			for i in 0..rewards_to_remove {
-				let reward_to_remove =
-					session.saturating_sub(T::MaxRewardSessions::get().saturating_add(i));
-				PerSessionRewards::<T>::mutate_exists(reward_to_remove, |maybe_reward| {
-					if let Some(reward) = maybe_reward {
-						remaining_unclaimed_rewards.saturating_accrue(
-							reward.rewards.saturating_sub(reward.claimed_rewards),
-						);
-					}
-					*maybe_reward = None;
-				});
-			}
-			if !remaining_unclaimed_rewards.is_zero() {
-				ClaimableRewards::<T>::mutate(|claimable_rewards| {
-					claimable_rewards.saturating_reduce(remaining_unclaimed_rewards)
-				});
-			}
+		/// Checks whether rewards are currently being delivered by the system or not.
+		pub(crate) fn is_delivering_rewards() -> bool {
+			matches!(NextSystemOperation::<T>::get(), Operation::RewardStakers { .. })
 		}
 
 		/// Rewards all collators for a given session.
@@ -1887,23 +1996,24 @@ pub mod pallet {
 				T::Currency::reducible_balance(&Self::account_id(), Preserve, Polite)
 					.saturating_sub(claimable_rewards);
 
-			let mut stakers_rewards: BalanceOf<T> = Zero::zero();
-			let mut reward_map = BoundedBTreeMap::new();
+			let mut stakers_total_rewards: BalanceOf<T> = Zero::zero();
+			let mut rewardable_collators: u32 = Zero::zero();
 			let (_, rewardable_blocks) = TotalBlocks::<T>::get();
+			let produced_blocks: Vec<_> = ProducedBlocks::<T>::drain().collect();
 			if !rewardable_blocks.is_zero() && !total_rewards.is_zero() {
 				let collator_percentage = CollatorRewardPercentage::<T>::get();
-				for (collator, blocks) in ProducedBlocks::<T>::drain() {
+				for (collator, blocks) in produced_blocks {
 					// Get the collator info of a candidate, in the case that the collator was removed from the
 					// candidate list during the session, the collator and its stakers must still be rewarded
 					// for the produced blocks in the session so the info can be obtained from SessionRemovedCandidates.
-					let info = Self::get_candidate(&collator)
+					let maybe_collator_info = Self::get_candidate(&collator)
 						.or_else(|_| {
 							SessionRemovedCandidates::<T>::take(&collator)
 								.ok_or(Error::<T>::NotRemovedCandidate)
 						})
 						.ok();
 
-					if let Some(collator_info) = info {
+					if let Some(collator_info) = maybe_collator_info {
 						if blocks > rewardable_blocks {
 							// The only case this could happen is if the candidate was an invulnerable during the session.
 							// Since blocks produced by invulnerables are not currently stored in ProducedBlocks this error
@@ -1915,7 +2025,7 @@ pub mod pallet {
 						let rewards_all = ratio * total_rewards;
 						let collator_only_reward = collator_percentage.mul_floor(rewards_all);
 						let stakers_only_rewards = rewards_all.saturating_sub(collator_only_reward);
-						// Reward collator. Note these rewards are not autocompounded.
+						// Reward the collator. Note these rewards are not autocompounded.
 						if let Err(error) = Self::do_reward_single(&collator, collator_only_reward)
 						{
 							log::warn!(target: LOG_TARGET, "Failure rewarding collator {:?}: {:?}", collator, error);
@@ -1932,33 +2042,29 @@ pub mod pallet {
 						{
 							break;
 						}
+						rewardable_collators.saturating_inc();
+						stakers_total_rewards.saturating_accrue(stakers_only_rewards);
 
-						// We should be able to insert it, but in case we cannot, simply ignore this reward.
-						if reward_map
-							.try_insert(
-								collator.clone(),
-								(collator_info.stake, stakers_only_rewards),
-							)
-							.is_ok()
-						{
-							stakers_rewards.saturating_accrue(stakers_only_rewards);
-						}
+						// Increase the reward counter for this collator.
+						let session_ratio = FixedU128::saturating_from_rational(
+							stakers_only_rewards,
+							collator_info.stake,
+						);
+						Counters::<T>::mutate(&collator, |counter| {
+							counter.saturating_accrue(session_ratio.into())
+						});
 					} else {
 						log::warn!("Collator {:?} is no longer a candidate", collator);
 					}
 				}
+
+				// Start the process to automatically collect the rewards in on_idle.
+				NextSystemOperation::<T>::set(Operation::RewardStakers {
+					maybe_last_processed_account: None,
+				});
+				ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_total_rewards));
 			}
 
-			let rewardable_collators: u32 = reward_map.len() as u32;
-			PerSessionRewards::<T>::insert(
-				session,
-				SessionInfo {
-					rewards: stakers_rewards,
-					candidates: reward_map,
-					claimed_rewards: Zero::zero(),
-				},
-			);
-			ClaimableRewards::<T>::set(claimable_rewards.saturating_add(stakers_rewards));
 			(rewardable_collators, total_rewards)
 		}
 
@@ -2126,11 +2232,6 @@ pub mod pallet {
 		///
 		/// * The amount of stakers per Candidate is limited and its maximum value must not be surpassed.
 		/// * The number of candidates should not exceed the candidate list capacity
-		///
-		/// ## [`PerSessionRewards`]
-		///
-		/// * The amount of stored sessions must not exceed the capacity established by the maximum
-		///   amount of sessions kept in storage.
 		#[cfg(any(test, feature = "try-runtime"))]
 		pub fn do_try_state() -> Result<(), sp_runtime::TryRuntimeError> {
 			let desired_candidates = DesiredCandidates::<T>::get();
@@ -2162,11 +2263,6 @@ pub mod pallet {
 			ensure!(
 				Candidates::<T>::count() <= T::MaxCandidates::get(),
 				"Candidate count must not exceed MaxCandidates"
-			);
-
-			ensure!(
-				PerSessionRewards::<T>::count() <= T::MaxRewardSessions::get(),
-				"Per-session reward count must not exceed MaxRewardSessions"
 			);
 
 			Ok(())
@@ -2252,8 +2348,6 @@ pub mod pallet {
 				}
 			}
 
-			// Firstly remove old rewards. Users that did not claim them will lose the right to do so.
-			Self::remove_old_rewards_if_needed(index);
 			let (total_collators, total_rewards) = Self::reward_collators(index);
 			Self::deposit_event(Event::<T>::SessionEnded { index, rewards: total_rewards });
 
@@ -2274,54 +2368,5 @@ where
 	type Type = <R as frame_system::Config>::AccountId;
 	fn get() -> Self::Type {
 		Pallet::<R>::account_id()
-	}
-}
-
-sp_api::decl_runtime_apis! {
-	/// This runtime api allows to query:
-	/// - The main pallet's pot account.
-	/// - The extra rewards pot account.
-	/// - Accumulated rewards for an account.
-	/// - Whether a given account has rewards pending to be claimed or not.
-	///
-	/// Sample implementation:
-	/// ```ignore
-	/// impl pallet_collator_staking::CollatorStakingApi<Block, AccountId, Balance> for Runtime {
-	///    fn main_pot_account() -> AccountId {
-	///        CollatorStaking::account_id()
-	///    }
-	///    fn extra_reward_pot_account() -> AccountId {
-	///        CollatorStaking::extra_reward_account_id()
-	///    }
-	///    fn total_rewards(account: AccountId) -> Balance {
-	///        CollatorStaking::calculate_unclaimed_rewards(&account)
-	///    }
-	///    fn should_claim(account: AccountId) -> bool {
-	///        !CollatorStaking::staker_has_claimed(&account)
-	///    }
-	///	   fn candidates() -> Vec<(AccountId, Balance)> {
-	///        CollatorStaking::candidates()
-	///    }
-	/// }
-	/// ```
-	pub trait CollatorStakingApi<AccountId, Balance>
-	where
-		AccountId: Codec,
-		Balance: Codec,
-	{
-		/// Queries the main pot account.
-		fn main_pot_account() -> AccountId;
-
-		/// Queries the extra reward pot account.
-		fn extra_reward_pot_account() -> AccountId;
-
-		/// Gets the total accumulated rewards.
-		fn total_rewards(account: AccountId) -> Balance;
-
-		/// Returns true if user should claim rewards.
-		fn should_claim(account: AccountId) -> bool;
-
-		/// Returns a list with all candidates and their stake.
-		fn candidates() -> Vec<(AccountId, Balance)>;
 	}
 }

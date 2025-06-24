@@ -37,6 +37,7 @@ pallet-timestamp = { git = "https://github.com/paritytech/polkadot-sdk", tag = "
 sp-consensus-aura = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503-5" }
 pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503-5" }
 pallet-aura = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503-5" }
+pallet-migrations = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2503-5" }
 
 [features]
 default = ["std"]
@@ -48,6 +49,7 @@ std = [
 	"log/std",
 	"pallet-authorship/std",
 	"pallet-session/std",
+	"pallet-migrations/std",
 	"rand/std",
 	"scale-info/std",
 	"sp-runtime/std",
@@ -62,6 +64,7 @@ runtime-benchmarks = [
 	"frame-system/runtime-benchmarks",
 	"pallet-balances/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
+	"pallet-migrations/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 	"sp-staking/runtime-benchmarks",
 ]
@@ -74,5 +77,6 @@ try-runtime = [
 	"pallet-balances/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-timestamp/try-runtime",
+	"pallet-migrations/try-runtime",
 	"sp-runtime/try-runtime",
 ]
